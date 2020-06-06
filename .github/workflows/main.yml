@@ -32,16 +32,13 @@ jobs:
       with:
         go-version: ^1.13
     - uses: actions/checkout@v2
-    - name: Prepare
-      run: |
-        go get github.com/rakyll/statik
-        NP=$(go env GOPATH)/bin
-        ls -lah $NP
-        export PATH=$PATH:$NP
+    - name: Prepare      
+      run: |        
         go build -o builder.bin build.go  
         chmod 777 builder.bin    
     - name: Build Server
-      run: ./builder.bin build server
+      run: |        
+        PATH=${PATH}:`go env GOPATH`/bin sudo ./builder.bin build server
     - name: Build Workers
       run: sudo ./builder.bin build worker   
     - name: Publish Artifact

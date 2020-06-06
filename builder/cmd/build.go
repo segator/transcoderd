@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"transcoder/helper"
 )
 var allPlatforms = []string{"windows-amd64","linux-amd64","darwin-amd64"}
 var buildCmd = &cobra.Command{
@@ -59,7 +58,7 @@ func buildServer(platforms []string) {
 	log.Infof("Copy Resources...")
 	copyServerResources(buildPath)
 	log.Infof("Embeding resources...")
-	statikEmbed(buildPath,filepath.Join(helper.GetWD(),"server"))
+	statikEmbed(buildPath,"server")
 	for _,platform := range platforms {
 		log.Infof("Building for %s",platform)
 		pltSplit := strings.Split(platform,"-")
@@ -73,12 +72,12 @@ func buildServer(platforms []string) {
 		if GOOS == "windows" {
 			extension=".exe"
 		}
-		executeWithEnv(filepath.Join(helper.GetWD(),"server"),envs,"go","build","-o",fmt.Sprintf("%s/build/transcoderd-%s%s",helper.GetWD(),platform,extension))
+		executeWithEnv("server",envs,"go","build","-o",fmt.Sprintf("build/transcoderd-%s%s",platform,extension))
 	}
 }
 
 func copyServerResources(buildPath string) {
-	serverResourcesPath := filepath.Join(helper.GetWD(),"server","resources")
+	serverResourcesPath := filepath.Join("server","resources")
 	copyResources(buildPath, serverResourcesPath)
 }
 
@@ -92,7 +91,7 @@ func buildWorker(platforms []string, buildMode string) {
 	log.Infof("Copy Resources...")
 	copyWorkerResources(buildPath,buildMode)
 	log.Infof("Embeding resources...")
-	statikEmbed(buildPath,filepath.Join(helper.GetWD(),"worker"))
+	statikEmbed(buildPath,"worker")
 	for _,platform := range platforms {
 		log.Infof("Building for %s",platform)
 		pltSplit := strings.Split(platform,"-")
@@ -111,12 +110,12 @@ func buildWorker(platforms []string, buildMode string) {
 			}
 		}
 
-		executeWithEnv(helper.GetWD(),envs,"go","build",extra,"-o",fmt.Sprintf("build/transcoderw-%s-%s%s",buildMode,platform,extension))
+		executeWithEnv("",envs,"go","build",extra,"-o",fmt.Sprintf("build/transcoderw-%s-%s%s",buildMode,platform,extension))
 	}
 }
 
 func copyWorkerResources(buildPath string,buildMode string) {
-	workerResourcesPath := filepath.Join(helper.GetWD(),"worker","resources")
+	workerResourcesPath := filepath.Join("worker","resources")
 	copyResources(buildPath, workerResourcesPath)
 	if buildMode == "gui" {
 		sysF, err := os.OpenFile(filepath.Join(buildPath,"systray.enabled"),os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)

@@ -41,7 +41,7 @@ func execute(workingDir string,command string, arg ...string){
 
 func getDependency() {
 	execute(helper.GetWD(),"go","mod","download")
-	execute(helper.GetWD(),"go","get","github.com/rakyll/statik")
+	execute(helper.GetWD(),"go","get","-u","github.com/rakyll/statik")
 }
 
 func getCapturingGroupsRegex(r *regexp.Regexp,parse string) map[string]string {

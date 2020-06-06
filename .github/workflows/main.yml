@@ -36,11 +36,12 @@ jobs:
       run: |
         mkdir -p /home/runner/work/transcoderd/transcoderd/build/server
         ls -lah
+        pwd
         export GOPATH=`go env GOPATH`
         export GOBIN=$GOPATH/bin
         export PATH=${PATH}:`go env GOPATH`/bin        
         echo $PATH        
-        go run build.go build server
+        sudo go run build.go build server
     - name: Build Workers
       run: sudo ./builder.bin build worker   
     - name: Publish Artifact

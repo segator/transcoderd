@@ -38,12 +38,11 @@ jobs:
         chmod 777 builder.bin    
     - name: Build Server
       run: |
-        sudo su
-        export GOBIN=$(`go env GOPATH`/bin)
+        mkdir /home/runner/work/transcoderd/transcoderd/build/server
+        export GOPATH=`go env GOPATH`
+        export GOBIN=$GOPATH/bin
         export PATH=${PATH}:`go env GOPATH`/bin        
-        echo $PATH
-        go  get -u github.com/rakyll/statik
-        ls -lah 
+        echo $PATH        
         ./builder.bin build server
     - name: Build Workers
       run: sudo ./builder.bin build worker   

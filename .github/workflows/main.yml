@@ -3,7 +3,7 @@ on:
   push:
   pull_request:
 jobs:
-  "build binary":
+  build:
     runs-on: ubuntu-latest
     steps:
     - name: Set up Go 1.x

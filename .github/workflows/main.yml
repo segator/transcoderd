@@ -5,7 +5,7 @@ on:
 jobs:
   docker:
     runs-on: ubuntu-latest
-    if: contains(github.ref, "master")
+    if: github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v2
       - name: build server docker

@@ -12,7 +12,7 @@ import (
 
 
 func prepareBuildEnv(path string) string {
-	buildPath := filepath.Join("build",path)
+	buildPath := filepath.Join(helper.GetWD(),"build",path)
 	if err:=os.MkdirAll(buildPath,os.ModeDir);err!=nil && !os.IsExist(err) {
 		panic(err)
 	}
@@ -40,8 +40,8 @@ func execute(workingDir string,command string, arg ...string){
 }
 
 func getDependency() {
-	execute("","go","mod","download")
-	execute("","go","get","-u","github.com/rakyll/statik")
+	execute(helper.GetWD(),"go","mod","download")
+	execute(helper.GetWD(),"go","get","-u","github.com/rakyll/statik")
 }
 
 func getCapturingGroupsRegex(r *regexp.Regexp,parse string) map[string]string {
@@ -84,5 +84,5 @@ func copyResources(buildPath string, sourcePath string)  error {
 }
 
 func statikEmbed(resources string, target string) {
-	execute("","statik",fmt.Sprintf("-src=%s",resources),fmt.Sprintf("-dest=%s",target),"-f")
+	execute(helper.GetWD(),"statik",fmt.Sprintf("-src=%s",resources),fmt.Sprintf("-dest=%s",target),"-f")
 }

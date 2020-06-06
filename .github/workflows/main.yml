@@ -38,9 +38,10 @@ jobs:
         NP=$(go env GOPATH)/bin
         ls -lah $NP
         export PATH=$PATH:$NP
-        go build -o builder.bin build.go      
+        go build -o builder.bin build.go  
+        chmod 777 builder.bin    
     - name: Build Server
-      run: sudo ./builder.bin build server
+      run: ./builder.bin build server
     - name: Build Workers
       run: sudo ./builder.bin build worker   
     - name: Publish Artifact

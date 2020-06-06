@@ -38,13 +38,14 @@ jobs:
         chmod 777 builder.bin    
     - name: Build Server
       run: |
+        sudo su
         echo $GOSRC
         echo $GOPATH
         echo $GOBIN
-        sudo export PATH=${PATH}:`go env GOPATH`/bin        
-        sudo echo $PATH
-        sudo go -u get github.com/rakyll/statik
-        sudo ./builder.bin build server
+        export PATH=${PATH}:`go env GOPATH`/bin        
+        echo $PATH
+        go -u get github.com/rakyll/statik
+        ./builder.bin build server
     - name: Build Workers
       run: sudo ./builder.bin build worker   
     - name: Publish Artifact

@@ -14,10 +14,10 @@ jobs:
     - name: Prepare
       run: go build -o builder.bin build.go
     - name: Build Server
-      run: ./builder.bin build server
+      run: sudo ./builder.bin build server
     - name: Build Workers
-      run: ./builder.bin build worker   
-    - name: Release
+      run: sudo ./builder.bin build worker   
+    - name: Publish Artifact
       uses: actions/upload-artifact@v1.0.0
       with:
         name: binaries

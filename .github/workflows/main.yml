@@ -26,13 +26,15 @@ jobs:
           tags: latest        
   build:
     runs-on: ubuntu-latest
-    steps:
+    steps:    
     - name: Install Go
       uses: actions/setup-go@v2
       with:
         go-version: ^1.13
     - name: Checkout
-      uses: actions/checkout@v1    
+      uses: actions/checkout@v1
+    - name: Prepare
+      run: chmod 777 -R "${GITHUB_WORKSPACE}"
     - name: Build Server
       run: |        
         ls -lah

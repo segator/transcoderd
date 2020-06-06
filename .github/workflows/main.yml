@@ -38,7 +38,7 @@ jobs:
         chmod 777 builder.bin    
     - name: Build Server
       run: |
-        mkdir /home/runner/work/transcoderd/transcoderd/build/server
+        mkdir -p /home/runner/work/transcoderd/transcoderd/build/server
         export GOPATH=`go env GOPATH`
         export GOBIN=$GOPATH/bin
         export PATH=${PATH}:`go env GOPATH`/bin        

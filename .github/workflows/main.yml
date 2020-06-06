@@ -37,7 +37,7 @@ jobs:
         go get github.com/rakyll/statik
         NP=$(go env GOPATH)/bin
         ls -lah $NP
-        export PATH=$PATH:$(go env GOBIN)
+        export PATH=$PATH:$NP
         go build -o builder.bin build.go      
     - name: Build Server
       run: sudo ./builder.bin build server

@@ -3,6 +3,27 @@ on:
   push:
   pull_request:
 jobs:
+  docker:
+    runs-on: ubuntu-latest
+    if: contains(github.ref, "master")
+    steps:
+      - uses: actions/checkout@v2
+      - name: build server docker
+        uses: docker/build-push-action@v1
+        with:
+          dockerfile: server/dockerfile
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          repository: segator/transcoderd
+          tags: latest
+      - name: build worekr docker
+        uses: docker/build-push-action@v1
+        with:
+          dockerfile: worker/dockerfile
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          repository: segator/transcoderw
+          tags: latest        
   build:
     runs-on: ubuntu-latest
     steps:
@@ -13,7 +34,8 @@ jobs:
     - uses: actions/checkout@v2
     - name: Prepare
       run: |
-        export PATH=$PATH:$(go env GOPATH)/bin
+        echo "$(go env GOBIN)  and $(go env GOPATH)"
+        export PATH=$PATH:$(go env GOBIN)
         go build -o builder.bin build.go      
     - name: Build Server
       run: sudo ./builder.bin build server

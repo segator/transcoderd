@@ -107,6 +107,7 @@ func buildWorker(platforms []string, buildMode string) {
 		if GOOS == "windows" {
 			extension=".exe"
 			if buildMode == "gui" {
+				envs = append(envs,"GO111MODULE=on")
 				extra="-ldflags=-H windowsgui"
 			}
 		}

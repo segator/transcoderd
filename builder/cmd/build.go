@@ -54,13 +54,14 @@ var buildWorkerCmd = &cobra.Command{
 
 func cleanPlatforms(platforms []string) []string{
 	for i,platform := range platforms {
-		if platform == "macos" {
+		if strings.Contains(platform,"macos") {
 			platforms[i]="darwin"
 		}
-		if platform == "ubuntu" {
+		if strings.Contains(platform,"ubuntu") {
 			platforms[i]="linux"
 		}
 	}
+	return platforms
 }
 
 func buildServer(platforms []string) {

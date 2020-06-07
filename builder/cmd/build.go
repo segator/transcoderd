@@ -117,7 +117,7 @@ func buildWorker(platforms []string, buildMode string) {
 				extra="-ldflags=-H windowsgui"
 			}
 		} else if GOOS == "linux" {
-			//envs = append(envs, "CGO_ENABLED=1")
+			envs = append(envs, "CGO_ENABLED=1")
 		} else if GOOS == "darwin" {
 			envs = append(envs, "CGO_ENABLED=1")
 			envs = append(envs,"GO111MODULE=on")

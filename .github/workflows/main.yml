@@ -1,5 +1,5 @@
 name: CI
-on:  
+on:
   push:
   pull_request:
 jobs:
@@ -17,6 +17,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: segator/transcoderd
           tags: ${{ steps.branch.outputs.branch }}
+          push: true
       - name: build worker docker
         uses: docker/build-push-action@v1
         with:
@@ -25,34 +26,35 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: segator/transcoderw
           tags: ${{ steps.branch.outputs.branch }}
+          push: true
   build:
     runs-on: ubuntu-latest
-    steps:    
-    - name: Install Go
-      uses: actions/setup-go@v2
-      with:
-        go-version: 1.14.3
-    - name: Checkout
-      uses: actions/checkout@v2
-    - run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
-      id: branch
-    - name: Build Server
-      run: go run build.go build server
-    - name: Build Workers
-      run: go run build.go build worker
-    - name: Publish Artifact
-      uses: actions/upload-artifact@v2
-      with:
-        name: binary
-        path: build/transcoder*   
-    - name: Upload Release Asset
-      if: github.event_name == 'push'
-      id: upload-release-asset 
-      uses: softprops/action-gh-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:        
-        prerelease: true
-        name: ${{ steps.branch.outputs.branch }}        
-        tag_name: ${{ github.ref }}
-        files: build/transcoder*
+    steps:
+      - name: Install Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.14.3
+      - name: Checkout
+        uses: actions/checkout@v2
+      - run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        id: branch
+      - name: Build Server
+        run: go run build.go build server
+      - name: Build Workers
+        run: go run build.go build worker
+      - name: Publish Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: binary
+          path: build/transcoder*
+      - name: Upload Release Asset
+        if: github.event_name == 'push'
+        id: upload-release-asset
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          prerelease: true
+          name: ${{ steps.branch.outputs.branch }}
+          tag_name: ${{ github.ref }}
+          files: build/transcoder*

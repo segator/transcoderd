@@ -111,7 +111,7 @@ func buildWorker(platforms []string, buildMode string) {
 			}
 		}
 
-		executeWithEnv(helper.GetWD(),envs,"go","build",extra,"-o",fmt.Sprintf("build/transcoderw-%s-%s%s",buildMode,platform,extension))
+		executeWithEnv(filepath.Join(helper.GetWD(),"worker"),envs,"go","build",extra,"-o",fmt.Sprintf("%s/build/transcoderw-%s-%s%s",helper.GetWD(),buildMode,platform,extension))
 	}
 }
 

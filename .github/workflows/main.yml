@@ -38,7 +38,7 @@ jobs:
         uses: actions/checkout@v2
       - name: Prepare
         run: |
-          apt-get install gcc libgtk-3-dev libappindicator3-dev -y
+          sudo apt-get install gcc libgtk-3-dev libappindicator3-dev -y
           echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
         id: prepare
       - name: Build Server

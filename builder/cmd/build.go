@@ -31,7 +31,7 @@ var buildServerCmd = &cobra.Command{
 			buildServer(allPlatforms)
 			return
 		}else{
-			buildServer(slice)
+			buildServer(cleanPlatforms(slice))
 		}
 	},
 }
@@ -47,9 +47,20 @@ var buildWorkerCmd = &cobra.Command{
 			buildWorker(allPlatforms,mode)
 			return
 		}else{
-			buildWorker(slice,mode)
+			buildWorker(cleanPlatforms(slice),mode)
 		}
 	},
+}
+
+func cleanPlatforms(platforms []string) []string{
+	for i,platform := range platforms {
+		if platform == "macos" {
+			platforms[i]="darwin"
+		}
+		if platform == "ubuntu" {
+			platforms[i]="linux"
+		}
+	}
 }
 
 func buildServer(platforms []string) {

@@ -2,28 +2,7 @@ name: CI
 on:
   push:
   pull_request:
-jobs:
-  docker:
-    runs-on: self-hosted
-    if: github.ref == 'refs/heads/master'
-    steps:
-      - uses: actions/checkout@v2
-      - name: build server docker
-        uses: docker/build-push-action@v1
-        with:
-          dockerfile: server/dockerfile
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-          repository: segator/transcoderd
-          tags: latest
-      - name: build worekr docker
-        uses: docker/build-push-action@v1
-        with:
-          dockerfile: worker/dockerfile
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-          repository: segator/transcoderw
-          tags: latest        
+jobs: 
   build:
     runs-on: ubuntu-latest
     steps:    
@@ -34,17 +13,5 @@ jobs:
       id: go
     - name: Checkout
       uses: actions/checkout@v2
-    - name: Prepare
-      run: |
-        sudo chown -R runner /home
-        echo "${GITHUB_WORKSPACE}"
-        sudo chmod 777 -R /home
     - name: Build Server
-      run: go run build.go build server      
-    - name: Build Workers
-      run: sudo ./builder.bin build worker   
-    - name: Publish Artifact
-      uses: actions/upload-artifact@v1.0.0
-      with:
-        name: binaries
-        path: ./build/transcoder*
+      run: go run build.go build server

@@ -30,13 +30,13 @@ jobs:
     - name: Install Go
       uses: actions/setup-go@v2
       with:
-        go-version: ^1.13
+        go-version: 1.14.3
     - name: Checkout
-      uses: actions/checkout@v1
+      uses: actions/checkout@v2
     - name: Build Server
       run: go run build.go build server
     - name: Build Workers
-      run: sudo ./builder.bin build worker   
+      run: go run build.go build worker
     - name: Publish Artifact
       uses: actions/upload-artifact@v1.0.0
       with:

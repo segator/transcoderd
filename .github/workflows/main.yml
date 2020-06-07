@@ -49,9 +49,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        draft: true
+      with:        
         prerelease: true
-        name: ${{ steps.branch.outputs.branch }}
-        tag_name: ${{ github.ref }}
+        name: ${{ steps.branch.outputs.branch }}        
         files: build/transcoder*

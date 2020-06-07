@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"transcoder/builder/mac"
 	"transcoder/helper"
 )
 var allPlatforms = []string{"windows-amd64","linux-amd64","darwin-amd64"}
@@ -122,7 +123,14 @@ func buildWorker(platforms []string, buildMode string) {
 			envs = append(envs,"GO111MODULE=on")
 		}
 		log.Infof("[%s] Building executable...",platform)
-		executeWithEnv(filepath.Join(helper.GetWD(),"worker"),envs,"go","build",extra,"-o",fmt.Sprintf("%s/build/transcoderw-%s-%s%s",helper.GetWD(),buildMode,platform,extension))
+		fileName := fmt.Sprintf("transcoderw-%s-%s%s",buildMode,platform,extension)
+		outputBinpath := fmt.Sprintf("%s/build/%s",helper.GetWD(),fileName)
+		executeWithEnv(filepath.Join(helper.GetWD(),"worker"),envs,"go","build",extra,"-o",outputBinpath)
+		if GOOS == "darwin" && buildMode=="gui" {
+			//TODO Builder Version??
+			sysTrayIco:=filepath.Join(helper.GetWD(),"worker","resources","systray.png")
+			mac.Package(fileName,"","1.0","",sysTrayIco,outputBinpath)
+		}
 	}
 }
 

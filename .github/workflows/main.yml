@@ -35,6 +35,8 @@ jobs:
       uses: actions/checkout@v1
     - name: Prepare
       run: |
+        echo "${GITHUB_WORKSPACE}"
+        ls -lah "${GITHUB_WORKSPACE}"
         chmod 777 -R "${GITHUB_WORKSPACE}"
         chmod 777 -R /home/runner
     - name: Build Server

@@ -52,19 +52,21 @@ var buildWorkerCmd = &cobra.Command{
 }
 
 func buildServer(platforms []string) {
-	log.Infof("Preparing Build Environment...")
-	buildPath := prepareBuildEnv("server")
 	log.Infof("Get Dependencies...")
 	getDependency()
-	log.Infof("Copy Resources...")
-	copyServerResources(buildPath)
-	log.Infof("Embeding resources...")
-	statikEmbed(buildPath,filepath.Join(helper.GetWD(),"server"))
+
 	for _,platform := range platforms {
-		log.Infof("Building for %s",platform)
+		log.Infof("====== %s ======",strings.ToUpper(platform))
 		pltSplit := strings.Split(platform,"-")
 		GOOS:= pltSplit[0]
 		GOARCH:= pltSplit[1]
+		log.Infof("[%s] Preparing Build Environment...",platform)
+		buildPath := prepareBuildEnv("server")
+		log.Infof("[%s] Copy Resources...",platform)
+		copyServerResources(buildPath,GOOS,GOARCH)
+		log.Infof("[%s] Embedding resources...",platform)
+		statikEmbed(buildPath,filepath.Join(helper.GetWD(),"server"))
+
 		envs := os.Environ()
 		envs = append(envs, fmt.Sprintf("GOARCH=%s",GOARCH))
 		envs = append(envs, fmt.Sprintf("GOOS=%s",GOOS))
@@ -73,31 +75,35 @@ func buildServer(platforms []string) {
 		if GOOS == "windows" {
 			extension=".exe"
 		}
+		log.Infof("[%s] Building executable...",platform)
 		executeWithEnv(filepath.Join(helper.GetWD(),"server"),envs,"go","build","-o",fmt.Sprintf("%s/build/transcoderd-%s%s",helper.GetWD(),platform,extension))
 	}
 }
 
-func copyServerResources(buildPath string) {
+func copyServerResources(buildPath string,GOOS,GOARCH string) {
 	serverResourcesPath := filepath.Join(helper.GetWD(),"server","resources")
-	copyResources(buildPath, serverResourcesPath)
+	copyResources(buildPath, serverResourcesPath,GOOS,GOARCH)
 }
 
 
 
 func buildWorker(platforms []string, buildMode string) {
-	log.Infof("Preparing Build Environment...")
-	buildPath := prepareBuildEnv("worker")
 	log.Infof("Get Dependencies...")
 	getDependency()
-	log.Infof("Copy Resources...")
-	copyWorkerResources(buildPath,buildMode)
-	log.Infof("Embeding resources...")
-	statikEmbed(buildPath,filepath.Join(helper.GetWD(),"worker"))
+
 	for _,platform := range platforms {
-		log.Infof("Building for %s",platform)
+		log.Infof("====== %s ======",strings.ToUpper(platform))
 		pltSplit := strings.Split(platform,"-")
 		GOOS:= pltSplit[0]
 		GOARCH:= pltSplit[1]
+
+		log.Infof("[%s] Preparing Build Environment...",platform)
+		buildPath := prepareBuildEnv("worker")
+
+		log.Infof("[%s] Copy Resources...",platform)
+		copyWorkerResources(buildPath,buildMode,GOOS,GOARCH)
+		log.Infof("[%s] Embedding resources...",platform)
+		statikEmbed(buildPath,filepath.Join(helper.GetWD(),"worker"))
 		envs := os.Environ()
 		envs = append(envs, fmt.Sprintf("GOARCH=%s",GOARCH))
 		envs = append(envs, fmt.Sprintf("GOOS=%s",GOOS))
@@ -107,18 +113,22 @@ func buildWorker(platforms []string, buildMode string) {
 			envs = append(envs, "CGO_ENABLED=0")
 			extension=".exe"
 			if buildMode == "gui" {
-				envs = append(envs,"GO111MODULE=on")
 				extra="-ldflags=-H windowsgui"
 			}
+		} else if GOOS == "linux" {
+			//envs = append(envs, "CGO_ENABLED=1")
+		} else if GOOS == "darwin" {
+			envs = append(envs, "CGO_ENABLED=1")
+			envs = append(envs,"GO111MODULE=on")
 		}
-
+		log.Infof("[%s] Building executable...",platform)
 		executeWithEnv(filepath.Join(helper.GetWD(),"worker"),envs,"go","build",extra,"-o",fmt.Sprintf("%s/build/transcoderw-%s-%s%s",helper.GetWD(),buildMode,platform,extension))
 	}
 }
 
-func copyWorkerResources(buildPath string,buildMode string) {
+func copyWorkerResources(buildPath string,buildMode string,GOOS,GOARCH string) {
 	workerResourcesPath := filepath.Join(helper.GetWD(),"worker","resources")
-	copyResources(buildPath, workerResourcesPath)
+	copyResources(buildPath, workerResourcesPath,GOOS,GOARCH)
 	if buildMode == "gui" {
 		sysF, err := os.OpenFile(filepath.Join(buildPath,"systray.enabled"),os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)
 		if err!=nil {

@@ -101,10 +101,10 @@ func buildWorker(platforms []string, buildMode string) {
 		envs := os.Environ()
 		envs = append(envs, fmt.Sprintf("GOARCH=%s",GOARCH))
 		envs = append(envs, fmt.Sprintf("GOOS=%s",GOOS))
-		envs = append(envs, "CGO_ENABLED=0")
 		extension :=""
 		extra:="-ldflags="
 		if GOOS == "windows" {
+			envs = append(envs, "CGO_ENABLED=0")
 			extension=".exe"
 			if buildMode == "gui" {
 				envs = append(envs,"GO111MODULE=on")

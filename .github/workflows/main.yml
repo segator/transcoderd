@@ -1,5 +1,5 @@
 name: CI
-on:
+on:  
   push:
   pull_request:
 jobs:
@@ -45,6 +45,7 @@ jobs:
         name: binary
         path: build/transcoder*   
     - name: Upload Release Asset
+      if: github.event_name == 'push'
       id: upload-release-asset 
       uses: softprops/action-gh-release@v1
       env:
@@ -52,4 +53,5 @@ jobs:
       with:        
         prerelease: true
         name: ${{ steps.branch.outputs.branch }}        
+        tag_name: ${{ github.ref }}
         files: build/transcoder*

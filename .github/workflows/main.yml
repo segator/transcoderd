@@ -19,6 +19,11 @@ jobs:
           repository: segator/transcoderd
           tags: ${{ steps.branch.outputs.branch }}
           push: true
+      - run: |
+          sudo swapoff -a
+          sudo rm -f /swapfile
+          sudo apt clean
+          docker rmi $(docker image ls -aq)
       - name: build worker docker
         uses: docker/build-push-action@v1
         with:

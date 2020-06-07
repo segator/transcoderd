@@ -86,5 +86,5 @@ func copyResources(buildPath string, sourcePath string, GOOS,GOARCH string)  err
 }
 
 func statikEmbed(resources string, target string) {
-	execute(helper.GetWD(),"statik",fmt.Sprintf("-src=%s",resources),fmt.Sprintf("-dest=%s",target),"-f")
+	execute(helper.GetWD(),"statik",fmt.Sprintf("-src=%s",resources),fmt.Sprintf("-dest=%s",target),"-f","-include","*")
 }

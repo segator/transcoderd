@@ -36,24 +36,11 @@ jobs:
       uses: actions/checkout@v2
     - name: Prepare
       run: |
-        sudo chown -R runner /home/runner
+        sudo chown -R runner /home
         echo "${GITHUB_WORKSPACE}"
-        ls -lah /home/runner
-        echo aaaaaaaaaa
-        ls -lah /home/runner/work        
-        chmod 777 -R "${GITHUB_WORKSPACE}"
-        chmod 777 -R /home/runner/work
+        sudo chmod 777 -R /home
     - name: Build Server
-      run: |    
-        chmod 777 -R "${GITHUB_WORKSPACE}"
-        chmod 777 -R /home/runner/work    
-        ls -lah
-        pwd
-        export GOPATH=`go env GOPATH`
-        export GOBIN=$GOPATH/bin        
-        echo $PATH
-        mkdir -p build/server 
-        go run build.go build server      
+      run: go run build.go build server      
     - name: Build Workers
       run: sudo ./builder.bin build worker   
     - name: Publish Artifact

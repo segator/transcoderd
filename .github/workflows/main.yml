@@ -9,6 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/} | tr '/' '-')"
+        id: branch
       - name: build server docker
         uses: docker/build-push-action@v1
         with:
@@ -40,7 +41,7 @@ jobs:
           go-version: 1.14.3
       - name: Checkout
         uses: actions/checkout@v2
-      - run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+      - run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/} | tr '/' '-')"
         id: branch
       - name: Prepare
         if: matrix.os == 'ubuntu'
@@ -64,6 +65,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           prerelease: true
+          draft: false
           name: ${{ steps.branch.outputs.branch }}
           tag_name: ${{ steps.branch.outputs.branch }}
           files: build/transcoder*

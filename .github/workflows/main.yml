@@ -42,12 +42,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/} | tr '/' '-')"
+        shell: bash
         id: branch
       - name: Prepare
         if: matrix.os == 'ubuntu'
-        run: |
-          sudo apt-get install gcc libgtk-3-dev libappindicator3-dev -y
-          echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"        
+        run: sudo apt-get install gcc libgtk-3-dev libappindicator3-dev -y
       - name: Build Server
         run: go run build.go build server -p ${{matrix.os}}-amd64
       - name: Build Workers

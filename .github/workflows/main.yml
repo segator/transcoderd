@@ -38,7 +38,7 @@ jobs:
     - name: Build Workers
       run: go run build.go build worker
     - name: Publish Artifact
-      uses: actions/upload-artifact@v1.0.0
+      uses: actions/upload-artifact@v2
       with:
-        name: binaries
-        path: ./build/transcoder*
+        name: binary
+        path: build/transcoder*

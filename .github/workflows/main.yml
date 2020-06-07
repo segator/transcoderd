@@ -34,7 +34,9 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v1
     - name: Prepare
-      run: chmod 777 -R "${GITHUB_WORKSPACE}"
+      run: |
+        chmod 777 -R "${GITHUB_WORKSPACE}"
+        chmod 777 -R /home/runner
     - name: Build Server
       run: |        
         ls -lah
@@ -42,7 +44,7 @@ jobs:
         export GOPATH=`go env GOPATH`
         export GOBIN=$GOPATH/bin        
         echo $PATH        
-        go run build.go build server
+        go run build.go build server      
     - name: Build Workers
       run: sudo ./builder.bin build worker   
     - name: Publish Artifact

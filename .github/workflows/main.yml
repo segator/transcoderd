@@ -36,9 +36,11 @@ jobs:
     - name: Prepare
       run: |
         echo "${GITHUB_WORKSPACE}"
-        ls -lah "${GITHUB_WORKSPACE}"
+        ls -lah /home/runner
+        echo aaaaaaaaaa
+        ls -lah /home/runner/work
         chmod 777 -R "${GITHUB_WORKSPACE}"
-        chmod 777 -R /home/runner
+        chmod 777 -R /home/runner/work
     - name: Build Server
       run: |        
         ls -lah

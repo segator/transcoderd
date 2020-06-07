@@ -39,7 +39,7 @@ jobs:
         echo "${GITHUB_WORKSPACE}"
         ls -lah /home/runner
         echo aaaaaaaaaa
-        ls -lah /home/runner/work
+        ls -lah /home/runner/work        
         chmod 777 -R "${GITHUB_WORKSPACE}"
         chmod 777 -R /home/runner/work
     - name: Build Server
@@ -50,7 +50,8 @@ jobs:
         pwd
         export GOPATH=`go env GOPATH`
         export GOBIN=$GOPATH/bin        
-        echo $PATH        
+        echo $PATH
+        mkdir -p build/server 
         go run build.go build server      
     - name: Build Workers
       run: sudo ./builder.bin build worker   

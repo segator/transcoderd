@@ -4,10 +4,11 @@ on:
   pull_request:
 jobs:
   docker:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v2
+      - run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
       - name: build server docker
         uses: docker/build-push-action@v1
         with:
@@ -15,7 +16,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: segator/transcoderd
-          tags: latest
+          tags: ${{ steps.branch.outputs.branch }}
       - name: build worker docker
         uses: docker/build-push-action@v1
         with:
@@ -23,7 +24,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: segator/transcoderw
-          tags: latest        
+          tags: ${{ steps.branch.outputs.branch }}
   build:
     runs-on: ubuntu-latest
     steps:    

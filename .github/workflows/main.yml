@@ -56,5 +56,5 @@ jobs:
         with:
           prerelease: true
           name: ${{ steps.branch.outputs.branch }}
-          tag_name: ${{ github.ref }}
+          tag_name: ${{ steps.branch.outputs.branch }}
           files: build/transcoder*

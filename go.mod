@@ -3,6 +3,7 @@ module transcoder
 go 1.14
 
 require (
+	github.com/JackMordaunt/icns v1.0.0
 	github.com/avast/retry-go v2.6.0+incompatible
 	github.com/getlantern/systray v1.0.2
 	github.com/google/uuid v1.1.1
@@ -11,6 +12,8 @@ require (
 	github.com/inhies/go-bytesize v0.0.0-20151001220322-5990f52c6ad6
 	github.com/isayme/go-amqp-reconnect v0.0.0-20180930040740-e71660afb5ca
 	github.com/lib/pq v1.5.2
+	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
+	github.com/pkg/errors v0.8.1
 	github.com/rakyll/statik v0.1.7
 	github.com/sirupsen/logrus v1.6.0
 	github.com/spf13/cobra v1.0.0

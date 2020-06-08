@@ -131,7 +131,7 @@ func InitializeSysTray(statikFS http.FileSystem,signal chan os.Signal) {
 		panic(err)
 	}
 
-	go systray.Run(func () {
+	systray.Run(func () {
 		systray.SetIcon(icoBytes)
 		systray.SetTitle("Transcoder")
 		systray.SetTooltip("Look at me, I'm a tooltip!")
@@ -146,8 +146,7 @@ func InitializeSysTray(statikFS http.FileSystem,signal chan os.Signal) {
 			}
 		}()
 	},
-
-		func() {
+	func() {
 		signal<-nil
 	})
 }

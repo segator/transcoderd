@@ -189,7 +189,7 @@ func ExtractStatikFSFile(statikFS http.FileSystem,statikPath string,targetFile s
 	defer ffprobeFi.Close()
 
 	tempPath := GetWorkingDir()
-	err = os.MkdirAll(tempPath, os.ModeDir)
+	err = os.MkdirAll(tempPath, os.ModePerm)
 	if err != nil {
 		return "",err
 	}

@@ -2,18 +2,20 @@ package cmd
 
 import (
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
+	"strings"
 	"transcoder/helper"
 )
 
 
 func prepareBuildEnv(path string) string {
 	buildPath := filepath.Join(helper.GetWD(),"build",path)
-	if err:=os.MkdirAll(buildPath,os.ModeDir);err!=nil && !os.IsExist(err) {
+	os.RemoveAll(buildPath)
+	if err:=os.MkdirAll(buildPath,os.ModePerm);err!=nil && !os.IsExist(err) {
 		panic(err)
 	}
 	return buildPath
@@ -21,7 +23,7 @@ func prepareBuildEnv(path string) string {
 
 
 func executeWithEnv(workingDir string, env []string,command string, arg ...string){
-	fmt.Printf("Exec: %s %s\n",command,arg)
+	log.Debugf("++ %s %s\n",command,strings.Join(arg," "))
 	cmd := exec.Command(command, arg...)
 	cmd.Dir = workingDir
 	cmd.Env = env
@@ -41,7 +43,7 @@ func execute(workingDir string,command string, arg ...string){
 
 func getDependency() {
 	execute(helper.GetWD(),"go","mod","download")
-	execute(helper.GetWD(),"go","get","github.com/rakyll/statik")
+	execute(helper.GetWD(),"go","get","-u","github.com/rakyll/statik")
 }
 
 func getCapturingGroupsRegex(r *regexp.Regexp,parse string) map[string]string {
@@ -59,19 +61,19 @@ func getCapturingGroupsRegex(r *regexp.Regexp,parse string) map[string]string {
 
 
 
-func copyResources(buildPath string, sourcePath string)  error {
+func copyResources(buildPath string, sourcePath string, GOOS,GOARCH string)  error {
 	archOSRegex := regexp.MustCompile(`(?P<GOOS>(darwin|linux|windows))-(?P<GOARCH>amd64)`)
 	err := filepath.Walk(sourcePath, func(path string, info os.FileInfo, err error) error {
 		if archOSRegex.MatchString(path) {
 			capturedGroups := getCapturingGroupsRegex(archOSRegex, path)
-			if capturedGroups["GOOS"] != runtime.GOOS || capturedGroups["GOARCH"] != runtime.GOARCH {
+			if capturedGroups["GOOS"] != GOOS || capturedGroups["GOARCH"] != GOARCH {
 				return nil
 			}
 		}
 		relative, _ := filepath.Rel(sourcePath, path)
 		buildPathRel := filepath.Join(buildPath, relative)
 		if info.IsDir() {
-			os.Mkdir(buildPathRel, os.ModeDir)
+			os.Mkdir(buildPathRel, os.ModePerm)
 		} else {
 			if _, err := helper.CopyFilePath(path, buildPathRel); err != nil {
 				panic(err)
@@ -84,5 +86,5 @@ func copyResources(buildPath string, sourcePath string)  error {
 }
 
 func statikEmbed(resources string, target string) {
-	execute(helper.GetWD(),"statik",fmt.Sprintf("-src=%s",resources),fmt.Sprintf("-dest=%s",target),"-f")
+	execute(helper.GetWD(),"statik",fmt.Sprintf("-src=%s",resources),fmt.Sprintf("-dest=%s",target),"-f","-include","*")
 }

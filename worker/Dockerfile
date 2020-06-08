@@ -1,10 +1,9 @@
-FROM golang:1.14.3-alpine3.11 as builder
-RUN apk update && apk add --no-cache git
+FROM golang:1.14.3 as builder
 WORKDIR $GOPATH/src/transcoder/
 COPY . .
-RUN go build -o builder.bin build.go && chmod 777 builder.bin
-RUN ./builder.bin build worker -p linux-amd64
-RUN cp ./build/transcoderw-linux-amd64 /bin/transcoderw && chmod +x /bin/transcoderw
+RUN apt-get update && apt-get install -y gcc git libgtk-3-dev libappindicator3-dev
+RUN go run  build.go build worker -p linux-amd64 -m console
+RUN cp ./build/transcoderw-console-linux-amd64 /bin/transcoderw && chmod +x /bin/transcoderw
 
 FROM tentacule/pgstosrt
 COPY --from=builder /bin/transcoderw /app/transcoderw

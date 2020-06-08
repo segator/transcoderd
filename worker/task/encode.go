@@ -229,6 +229,117 @@ func (J *EncodeWorker) ffprobeGetData(inputfile string) (data *ffprobe.ProbeData
 	}
 	return data, nil
 }
+func (j *EncodeWorker) clearData(data *ffprobe.ProbeData) (container *ContainerData, err error) {
+	container = &ContainerData{}
+
+	videoStream := data.StreamType(ffprobe.StreamVideo)[0]
+	container.Video = &Video{
+		Id:       uint8(videoStream.Index),
+		Duration: data.Format.Duration(),
+	}
+
+	betterAudioStreamPerLanguage := make(map[string]*Audio)
+	for _, stream := range data.StreamType(ffprobe.StreamAudio) {
+		if stream.BitRate == "" {
+			stream.BitRate = "0"
+		}
+		bitRateInt, err := strconv.ParseUint(stream.BitRate, 10, 32) //TODO Aqui revem diferents tipos de numeros
+		if err != nil {
+			panic(err)
+		}
+		newAudio := &Audio{
+			Id:             uint8(stream.Index),
+			Language:       stream.Tags.Language,
+			Channels:       stream.ChannelLayout,
+			ChannelsNumber: uint8(stream.Channels),
+			ChannelLayour:  stream.ChannelLayout,
+			Default:        stream.Disposition.Default == 1,
+			Bitrate:        uint(bitRateInt),
+			Title:          stream.Tags.Title,
+		}
+		betterAudio := betterAudioStreamPerLanguage[newAudio.Language]
+
+		//If more channels or same channels and better bitrate
+		if betterAudio != nil {
+			if newAudio.ChannelsNumber > betterAudio.ChannelsNumber {
+				betterAudioStreamPerLanguage[newAudio.Language] = newAudio
+			} else if newAudio.ChannelsNumber == betterAudio.ChannelsNumber && newAudio.Bitrate > betterAudio.Bitrate {
+				betterAudioStreamPerLanguage[newAudio.Language] = newAudio
+			}
+		} else {
+			betterAudioStreamPerLanguage[stream.Tags.Language] = newAudio
+		}
+
+	}
+	for _, audioStream := range betterAudioStreamPerLanguage {
+		container.Audios = append(container.Audios, audioStream)
+	}
+
+	betterSubtitleStreamPerLanguage := make(map[string]*Subtitle)
+	for _, stream := range data.StreamType(ffprobe.StreamSubtitle) {
+		newSubtitle := &Subtitle{
+			Id:       uint8(stream.Index),
+			Language: stream.Tags.Language,
+			Forced:   stream.Disposition.Forced == 1,
+			Comment:  stream.Disposition.Comment == 1,
+			Format:   stream.CodecName,
+			Title:    stream.Tags.Title,
+		}
+		if strings.Index(strings.ToLower(newSubtitle.Format), "pgs") != -1 {
+			log.Error("pgs Detected", j.GetID())
+			return nil, fmt.Errorf("pgs Detected")
+		}
+		if newSubtitle.Forced || newSubtitle.Comment {
+			container.Subtitle = append(container.Subtitle, newSubtitle)
+			continue
+		}
+
+		betterSubtitle := betterSubtitleStreamPerLanguage[newSubtitle.Language]
+		if betterSubtitle == nil { //TODO Potser perdem subtituls!!
+			betterSubtitleStreamPerLanguage[stream.Tags.Language] = betterSubtitle
+		}
+	}
+	return container, nil
+}
+func (J *EncodeWorker) FFMPEG(sourceFile string, videoContainer *ContainerData, ffmpegProgressChan chan<- float64) (string, error) {
+	ffmpeg := &FFMPEGGenerator{}
+	ffmpeg.inputPaths = append(ffmpeg.inputPaths, sourceFile)
+	if videoContainer.HaveImageTypeSubtitle() {
+		//TODO MKV Extract
+
+		//TODO PGS TO SRT (1 PGS TO SRT per core?)
+	}
+	ffmpeg.setVideoFilters(videoContainer)
+	ffmpeg.setAudioFilters(videoContainer)
+	ffmpeg.setSubtFilters(videoContainer)
+	ffmpeg.setMetadata(videoContainer)
+	ffmpegErrLog := ""
+	ffmpegOutLog := ""
+	checkPercentageFFMPEG := func(buffer []byte, exit bool) {
+		ffmpegErrLog += string(buffer)
+		value := getRatio(string(buffer), videoContainer.Video.Duration.Seconds())
+		if value != -1 {
+			ffmpegProgressChan <- value
+		}
+	}
+	stdoutFFMPEG := func(buffer []byte, exit bool) {
+		ffmpegOutLog += string(buffer)
+	}
+	sourceFileName := filepath.Base(sourceFile)
+	encodedFilePath := fmt.Sprintf("%s-encoded.%s", strings.TrimSuffix(sourceFileName, filepath.Ext(sourceFileName)), "mkv")
+	outputFullPath := filepath.Join(J.tempPath, encodedFilePath)
+	ffmpegArguments := ffmpeg.buildArguments(uint8(J.workerConfig.WorkerThreads), outputFullPath)
+	ffmpegArgumentsSlice := helper.CommandStringToSlice(ffmpegArguments)
+	exitCode, err := helper.ExecuteCommandWithFunc(J.ctx, "ffmpeg", stdoutFFMPEG, checkPercentageFFMPEG, ffmpegArgumentsSlice...)
+	if err != nil {
+		return "", fmt.Errorf("%w: stder:%s stdout:%s", err, ffmpegErrLog, ffmpegOutLog)
+	}
+	if exitCode != 0 {
+		return "", fmt.Errorf("exit code %d: stder:%s stdout:%s", exitCode, ffmpegErrLog, ffmpegOutLog)
+	}
+	close(ffmpegProgressChan)
+	return outputFullPath, nil
+}
 func (J *EncodeWorker) UploadJob(err error, encodedFilePath string, sourceFile string) error {
 	err = retry.Do(func() error {
 		encodedFile, err := os.Open(encodedFilePath)
@@ -321,6 +432,7 @@ func (J *EncodeWorker) Execute() (err error) {
 
 	videoContainer, err := J.clearData(data)
 	if err != nil {
+		log.Error("Error in clearData", J.GetID())
 		return err
 	}
 	J.sendEvent(model.FFMPEGSNotification, model.StartedNotificationStatus, "")
@@ -383,78 +495,6 @@ func (J *EncodeWorker) Execute() (err error) {
 	J.sendEvent(model.UploadNotification, model.CompletedNotificationStatus, "")
 	return nil
 }
-func (j *EncodeWorker) clearData(data *ffprobe.ProbeData) (container *ContainerData, err error) {
-	container = &ContainerData{}
-
-	videoStream := data.StreamType(ffprobe.StreamVideo)[0]
-	container.Video = &Video{
-		Id:       uint8(videoStream.Index),
-		Duration: data.Format.Duration(),
-	}
-
-	betterAudioStreamPerLanguage := make(map[string]*Audio)
-	for _, stream := range data.StreamType(ffprobe.StreamAudio) {
-		if stream.BitRate == "" {
-			stream.BitRate = "0"
-		}
-		bitRateInt, err := strconv.ParseUint(stream.BitRate, 10, 32) //TODO Aqui revem diferents tipos de numeros
-		if err != nil {
-			panic(err)
-		}
-		newAudio := &Audio{
-			Id:             uint8(stream.Index),
-			Language:       stream.Tags.Language,
-			Channels:       stream.ChannelLayout,
-			ChannelsNumber: uint8(stream.Channels),
-			ChannelLayour:  stream.ChannelLayout,
-			Default:        stream.Disposition.Default == 1,
-			Bitrate:        uint(bitRateInt),
-			Title:          stream.Tags.Title,
-		}
-		betterAudio := betterAudioStreamPerLanguage[newAudio.Language]
-
-		//If more channels or same channels and better bitrate
-		if betterAudio != nil {
-			if newAudio.ChannelsNumber > betterAudio.ChannelsNumber {
-				betterAudioStreamPerLanguage[newAudio.Language] = newAudio
-			} else if newAudio.ChannelsNumber == betterAudio.ChannelsNumber && newAudio.Bitrate > betterAudio.Bitrate {
-				betterAudioStreamPerLanguage[newAudio.Language] = newAudio
-			}
-		} else {
-			betterAudioStreamPerLanguage[stream.Tags.Language] = newAudio
-		}
-
-	}
-	for _, audioStream := range betterAudioStreamPerLanguage {
-		container.Audios = append(container.Audios, audioStream)
-	}
-
-	betterSubtitleStreamPerLanguage := make(map[string]*Subtitle)
-	for _, stream := range data.StreamType(ffprobe.StreamSubtitle) {
-		newSubtitle := &Subtitle{
-			Id:       uint8(stream.Index),
-			Language: stream.Tags.Language,
-			Forced:   stream.Disposition.Forced == 1,
-			Comment:  stream.Disposition.Comment == 1,
-			Format:   stream.CodecName,
-			Title:    stream.Tags.Title,
-		}
-		if strings.Index(strings.ToLower(newSubtitle.Format), "pgs") != -1 {
-			log.Error("pgs Detected", j.GetID())
-			return nil, fmt.Errorf("pgs Detected")
-		}
-		if newSubtitle.Forced || newSubtitle.Comment {
-			container.Subtitle = append(container.Subtitle, newSubtitle)
-			continue
-		}
-
-		betterSubtitle := betterSubtitleStreamPerLanguage[newSubtitle.Language]
-		if betterSubtitle == nil { //TODO Potser perdem subtituls!!
-			betterSubtitleStreamPerLanguage[stream.Tags.Language] = betterSubtitle
-		}
-	}
-	return container, nil
-}
 func (J *EncodeWorker) GetTaskID() uuid.UUID {
 	return J.task.Id
 }
@@ -480,45 +520,6 @@ func (J *EncodeWorker) sendEvent(notificationType model.NotificationType, status
 		Message:          message,
 	}
 	J.Manager.EventNotification(event)
-}
-func (J *EncodeWorker) FFMPEG(sourceFile string, videoContainer *ContainerData, ffmpegProgressChan chan<- float64) (string, error) {
-	ffmpeg := &FFMPEGGenerator{}
-	ffmpeg.inputPaths = append(ffmpeg.inputPaths, sourceFile)
-	if videoContainer.HaveImageTypeSubtitle() {
-		//TODO MKV Extract
-
-		//TODO PGS TO SRT (1 PGS TO SRT per core?)
-	}
-	ffmpeg.setVideoFilters(videoContainer)
-	ffmpeg.setAudioFilters(videoContainer)
-	ffmpeg.setSubtFilters(videoContainer)
-	ffmpeg.setMetadata(videoContainer)
-	ffmpegErrLog := ""
-	ffmpegOutLog := ""
-	checkPercentageFFMPEG := func(buffer []byte, exit bool) {
-		ffmpegErrLog += string(buffer)
-		value := getRatio(string(buffer), videoContainer.Video.Duration.Seconds())
-		if value != -1 {
-			ffmpegProgressChan <- value
-		}
-	}
-	stdoutFFMPEG := func(buffer []byte, exit bool) {
-		ffmpegOutLog += string(buffer)
-	}
-	sourceFileName := filepath.Base(sourceFile)
-	encodedFilePath := fmt.Sprintf("%s-encoded.%s", strings.TrimSuffix(sourceFileName, filepath.Ext(sourceFileName)), "mkv")
-	outputFullPath := filepath.Join(J.tempPath, encodedFilePath)
-	ffmpegArguments := ffmpeg.buildArguments(uint8(J.workerConfig.WorkerThreads), outputFullPath)
-	ffmpegArgumentsSlice := helper.CommandStringToSlice(ffmpegArguments)
-	exitCode, err := helper.ExecuteCommandWithFunc(J.ctx, "ffmpeg", stdoutFFMPEG, checkPercentageFFMPEG, ffmpegArgumentsSlice...)
-	if err != nil {
-		return "", fmt.Errorf("%w: stder:%s stdout:%s", err, ffmpegErrLog, ffmpegOutLog)
-	}
-	if exitCode != 0 {
-		return "", fmt.Errorf("exit code %d: stder:%s stdout:%s", exitCode, ffmpegErrLog, ffmpegOutLog)
-	}
-	close(ffmpegProgressChan)
-	return outputFullPath, nil
 }
 
 type FFMPEGGenerator struct {

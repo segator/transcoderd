@@ -119,11 +119,6 @@ func (J *EncodeWorker) Prepare(workData []byte, queueManager model.Manager) erro
 }
 func (j *EncodeWorker) dowloadFile() (inputfile string, err error) {
 	sha := sha256.New()
-	if _, err := os.Stat(j.tempPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(j.tempPath, os.ModePerm); err != nil {
-			return "", err
-		}
-	}
 	err = retry.Do(func() error {
 
 		resp, err := http.Get(j.task.DownloadURL)
@@ -330,7 +325,8 @@ func (J *EncodeWorker) FFMPEG(sourceFile string, videoContainer *ContainerData, 
 	outputFullPath := filepath.Join(J.tempPath, encodedFilePath)
 	ffmpegArguments := ffmpeg.buildArguments(uint8(J.workerConfig.WorkerThreads), outputFullPath)
 	ffmpegArgumentsSlice := helper.CommandStringToSlice(ffmpegArguments)
-	exitCode, err := helper.ExecuteCommandWithFunc(J.ctx, "ffmpeg", stdoutFFMPEG, checkPercentageFFMPEG, ffmpegArgumentsSlice...)
+
+	exitCode, err := helper.ExecuteCommandWithFunc(J.ctx, helper.GetFFmpegPath(), stdoutFFMPEG, checkPercentageFFMPEG, ffmpegArgumentsSlice...)
 	if err != nil {
 		return "", fmt.Errorf("%w: stder:%s stdout:%s", err, ffmpegErrLog, ffmpegOutLog)
 	}

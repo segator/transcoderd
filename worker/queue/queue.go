@@ -117,7 +117,7 @@ func (Q *RabbitMQClient) EventNotification(event model.TaskEvent) {
 		log.Panic(err)
 	}
 
-	log.Infof("[Job %s] %s has %s", event.Id.String(), event.NotificationType, event.Status)
+	log.Infof("[Job %s] %s have been %s", event.Id.String(), event.NotificationType, event.Status)
 }
 func (Q *RabbitMQClient) RequestPGSJob(pgsJob model.TaskPGS) <-chan model.TaskPGSResponse {
 	jobWorker := Q.FindWorkerByJob(pgsJob.Id)
@@ -295,9 +295,20 @@ func (Q *RabbitMQClient) eventQueueProcessor(ctx context.Context, taskQueueName 
 	}
 }
 func (Q *RabbitMQClient) controlJobExecution(jobWorker *JobWorker) {
-	defer jobWorker.worker.Clean()
+	defer func(){
+		err :=retry.Do(func() error {
+			return jobWorker.worker.Clean()
+		},retry.Delay(time.Second*1), retry.Attempts(3600), retry.LastErrorOnly(true), retry.OnRetry(func(n uint, err error) {
+			log.Errorf("Error %s for %d time on cleaning working path for worker %s",err.Error(),n,jobWorker.worker.GetID())
+		}))
+		if err!=nil {
+			panic(err)
+		}
+
+		jobWorker.active = false
+	}()
 	jobWorker.worker.Execute()
-	jobWorker.active = false
+
 }
 func (Q *RabbitMQClient) publishMessage(queueName string, obj interface{}) error {
 	return Q.publishMessageTtl(queueName, obj, 0)

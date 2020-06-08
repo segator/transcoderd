@@ -11,10 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/hako/durafmt"
 	"github.com/inhies/go-bytesize"
-	"gopkg.in/vansante/go-ffprobe.v2"
-	"transcoder/helper/progress"
-
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/vansante/go-ffprobe.v2"
 	"io"
 	"io/ioutil"
 	"mime"
@@ -26,6 +24,7 @@ import (
 	"sync"
 	"time"
 	"transcoder/helper"
+	"transcoder/helper/progress"
 	"transcoder/model"
 )
 
@@ -120,6 +119,11 @@ func (J *EncodeWorker) Prepare(workData []byte, queueManager model.Manager) erro
 }
 func (j *EncodeWorker) dowloadFile() (inputfile string, err error) {
 	sha := sha256.New()
+	if _, err := os.Stat(j.tempPath); os.IsNotExist(err) {
+		if err := os.MkdirAll(j.tempPath, os.ModePerm); err != nil {
+			return "", err
+		}
+	}
 	err = retry.Do(func() error {
 
 		resp, err := http.Get(j.task.DownloadURL)
@@ -212,14 +216,14 @@ func (j *EncodeWorker) dowloadFile() (inputfile string, err error) {
 	}
 	return inputfile, nil
 }
-func (j *EncodeWorker) ffprobeGetData(inputfile string) (data *ffprobe.ProbeData, err error) {
+func (J *EncodeWorker) ffprobeGetData(inputfile string) (data *ffprobe.ProbeData, err error) {
 
 	fileReader, err := os.Open(inputfile)
 	if err != nil {
 		return nil, fmt.Errorf("error opening test file: %v", err)
 	}
 	defer fileReader.Close()
-	data, err = ffprobe.ProbeReader(j.ctx, fileReader)
+	data, err = ffprobe.ProbeReader(J.ctx, fileReader)
 	if err != nil {
 		return nil, fmt.Errorf("error getting data: %v", err)
 	}
@@ -270,6 +274,15 @@ func (J *EncodeWorker) UploadJob(err error, encodedFilePath string, sourceFile s
 		log.Errorf("Error on uploading job %s", err.Error())
 	}))
 	return err
+}
+func (J *EncodeWorker) Clean() error {
+	log.Warnf("[%s] Cleaning up worker workspace...", J.GetID())
+	err := os.RemoveAll(J.tempPath)
+	if err != nil {
+		log.Error("error in clean folder", J.GetID())
+		return err
+	}
+	return nil
 }
 
 func (J *EncodeWorker) Execute() (err error) {
@@ -427,6 +440,7 @@ func (j *EncodeWorker) clearData(data *ffprobe.ProbeData) (container *ContainerD
 			Title:    stream.Tags.Title,
 		}
 		if strings.Index(strings.ToLower(newSubtitle.Format), "pgs") != -1 {
+			log.Error("pgs Detected", j.GetID())
 			return nil, fmt.Errorf("pgs Detected")
 		}
 		if newSubtitle.Forced || newSubtitle.Comment {
@@ -443,10 +457,6 @@ func (j *EncodeWorker) clearData(data *ffprobe.ProbeData) (container *ContainerD
 }
 func (J *EncodeWorker) GetTaskID() uuid.UUID {
 	return J.task.Id
-}
-func (J *EncodeWorker) Clean() error {
-	log.Warnf("[%s] Cleaning up worker workspace...", J.GetID())
-	return os.RemoveAll(J.tempPath)
 }
 func (J *EncodeWorker) Cancel() {
 	log.Warnf("[%s] Canceling job %s...", J.GetID(), J.task.Id.String())

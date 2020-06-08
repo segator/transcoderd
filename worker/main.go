@@ -1,15 +1,12 @@
-//go:generate go run github.com/rakyll/statik -src=resources/statics
 package main
 
 import (
 	"context"
 	"fmt"
-	"github.com/getlantern/systray"
 	"github.com/rakyll/statik/fs"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
@@ -103,53 +100,9 @@ func main() {
 	worker := task.NewWorkerClient(opts.Worker, broker)
 	worker.Run(wg, ctx)
 
-	InitializeSysTray(statikFS,sigs)
 	wg.Wait()
 }
 
-func InitializeSysTray(statikFS http.FileSystem,signal chan os.Signal) {
-	f, err :=statikFS.Open("/systray.enabled")
-	if err!=nil{
-		return
-	}
-	b, err := ioutil.ReadAll(f)
-	if err!=nil {
-		panic(err)
-	}
-	systrayN:= string(b)
-
-	if systrayN != "1" {
-		return
-	}
-
-	ico, err :=statikFS.Open("/systray.ico")
-	if err!=nil{
-		return
-	}
-	icoBytes, err := ioutil.ReadAll(ico)
-	if err!=nil {
-		panic(err)
-	}
-
-	systray.Run(func () {
-		systray.SetIcon(icoBytes)
-		systray.SetTitle("Transcoder")
-		systray.SetTooltip("Look at me, I'm a tooltip!")
-		quitButton := systray.AddMenuItem("Close", "Close Application")
-		go func() {
-			for {
-				select {
-				case <-quitButton.ClickedCh:
-					systray.Quit()
-
-				}
-			}
-		}()
-	},
-	func() {
-		signal<-nil
-	})
-}
 
 func shutdownHandler(ctx context.Context, sigs chan os.Signal, cancel context.CancelFunc) {
 	select {

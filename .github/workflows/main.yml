@@ -56,7 +56,6 @@ jobs:
         run: go run build.go build server -p ${{matrix.os}}-amd64
       - name: Build Workers
         run: |
-          go run build.go build worker -p ${{matrix.os}}-amd64 -m gui
           go run build.go build worker -p ${{matrix.os}}-amd64 -m console
       - name: Publish Artifact
         uses: actions/upload-artifact@v2

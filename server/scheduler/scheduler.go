@@ -213,7 +213,6 @@ func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context,jobRequest *mo
 				}
 			}
 		}
-		// TODO calcular la duracio de la peli i utiltizar la duracio com a prioritat, i aixo nomes si no ens ve prioritat forzada de la request,  si ens ve mantenim la prioritat
 		if priority ==0 {
 			f,err:= os.Open(filepath.Join(R.config.DownloadPath,jobRequest.SourcePath))
 			if err!=nil {
@@ -268,6 +267,7 @@ func (R *RuntimeScheduler) ScheduleJobRequests(ctx context.Context, jobRequest *
 		var video *model.Video
 		if jobRequestResponse.errors==nil {
 			video,err =R.scheduleJobRequest(ctx,jobRequestResponse.jobRequest)
+			video.Events=nil
 		}else{
 			b,_:=json.Marshal(jobRequestResponse.errors)
 			err = errors.New(string(b))

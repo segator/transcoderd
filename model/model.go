@@ -76,17 +76,19 @@ type TaskEncode struct {
 }
 
 type TaskPGS struct {
-	Id   uuid.UUID `json:"id"`
-	PGSID  int   `json:"pgsid"`
-	PGSdata  []byte    `json:"pgsdata"`
-	ReplyTo string `json:"replyto"`
+	Id          uuid.UUID `json:"id"`
+	PGSID       int       `json:"pgsid"`
+	PGSdata     []byte    `json:"pgsdata"`
+	PGSLanguage string	  `json:"pgslanguage"`
+	ReplyTo     string    `json:"replyto"`
 }
 
 type TaskPGSResponse struct {
-	Id   uuid.UUID `json:"id"`
-	PGSID  int   `json:"pgsid"`
-	Srt []byte `json:"srt"`
-	Err string `json:"error"`
+	Id    uuid.UUID `json:"id"`
+	PGSID int       `json:"pgsid"`
+	Srt   []byte    `json:"srt"`
+	Err   string    `json:"error"`
+	Queue string	`json:"queue"`
 }
 
 
@@ -190,9 +192,10 @@ type QueueWorker interface{
 	Cancel()
 	GetID() string
 	GetTaskID() uuid.UUID
+	AcceptJobs() bool
 }
 type Manager interface{
 	EventNotification(event TaskEvent)
 	ResponsePGSJob(response TaskPGSResponse) error
-	RequestPGSJob(pgsJob TaskPGS) <-chan TaskPGSResponse
+	RequestPGSJob(pgsJob TaskPGS) <-chan *TaskPGSResponse
 }

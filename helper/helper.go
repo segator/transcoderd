@@ -62,12 +62,13 @@ func GetPublicIP() (publicIP string) {
 }
 
 type ReaderFunc func(buffer []byte,exit bool)
-func ExecuteCommand(ctx context.Context,command string, params ...string) (exitCode int, err error){
-	return ExecuteCommandWithFunc(ctx,command,nil,nil,params...)
+func ExecuteCommand(ctx context.Context,workingDirectory string,command string, params ...string) (exitCode int, err error){
+	return ExecuteCommandWithFunc(ctx,workingDirectory,command,nil,nil,params...)
 }
 
-func ExecuteCommandWithFunc(ctx context.Context,command string, stdoutFunc ReaderFunc,stderrFunc ReaderFunc,params ...string) (exitCode int, err error){
+func ExecuteCommandWithFunc(ctx context.Context,workingDirectory string,command string, stdoutFunc ReaderFunc,stderrFunc ReaderFunc,params ...string) (exitCode int, err error){
 	cmd := exec.CommandContext(ctx,command,params...)
+	cmd.Dir=workingDirectory
 	stdout, err := cmd.StdoutPipe()
 	if err!=nil {
 		return

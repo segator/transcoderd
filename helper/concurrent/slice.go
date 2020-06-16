@@ -1,6 +1,8 @@
 package concurrent
 
-import "sync"
+import (
+	"sync"
+)
 
 type Slice struct {
 	sync.RWMutex
@@ -19,7 +21,7 @@ func (cs *Slice) Append(item interface{}) {
 	cs.items = append(cs.items, item)
 }
 func (cs *Slice) Iter() <-chan SliceItem {
-	c := make(chan SliceItem)
+	c := make(chan SliceItem,10)
 
 	f := func() {
 		cs.Lock()
@@ -32,4 +34,21 @@ func (cs *Slice) Iter() <-chan SliceItem {
 	go f()
 
 	return c
+}
+
+func (cs *Slice) Delete(item interface{}) {
+	cs.Lock()
+	defer cs.Unlock()
+	foundIndex:=-1
+	for index,value := range cs.items{
+		if value == item {
+			foundIndex=index
+			break
+		}
+	}
+	if foundIndex!=-1{
+		cs.items[foundIndex] = cs.items[len(cs.items)-1]
+		cs.items[len(cs.items)-1] = ""
+		cs.items = cs.items[:len(cs.items)-1]
+	}
 }

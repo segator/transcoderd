@@ -119,17 +119,18 @@ func (Q *RabbitMQClient) EventNotification(event model.TaskEvent) {
 
 	log.Infof("[Job %s] %s have been %s", event.Id.String(), event.NotificationType, event.Status)
 }
-func (Q *RabbitMQClient) RequestPGSJob(pgsJob model.TaskPGS) <-chan model.TaskPGSResponse {
+func (Q *RabbitMQClient) RequestPGSJob(pgsJob model.TaskPGS) <-chan *model.TaskPGSResponse {
 	jobWorker := Q.FindWorkerByJob(pgsJob.Id)
 	pgsJobControl := NewPGSJobControl(pgsJob)
-	if err := Q.publishMessage(Q.brokerConfig.TaskEncodeQueueName, pgsJob); err != nil {
+	pgsJob.ReplyTo=Q.workerUniqueQueue
+	if err := Q.publishMessage(Q.brokerConfig.TaskPGSToSrtQueueName, pgsJob); err != nil {
 		log.Panic(err)
 	}
 	jobWorker.pgs.Append(pgsJobControl)
 	return pgsJobControl.response
 }
-func (Q *RabbitMQClient) ResponsePGSJob(response model.TaskPGSResponse) error {
-	bytes, err := json.Marshal(response)
+func (Q *RabbitMQClient) ResponsePGSJob(pgsResponse model.TaskPGSResponse) error {
+	bytes, err := json.Marshal(pgsResponse)
 	if err != nil {
 		return err
 	}
@@ -140,10 +141,9 @@ func (Q *RabbitMQClient) ResponsePGSJob(response model.TaskPGSResponse) error {
 		Priority:    5,
 		Timestamp:   time.Now(),
 	}
-	return Q.publishAMQPMessage(Q.workerUniqueQueue, message)
+	return Q.publishAMQPMessage(pgsResponse.Queue, message)
 }
 func (Q *RabbitMQClient) initWorkerQueue(channel *rabbitmq.Channel) error {
-	Q.workerUniqueQueue = fmt.Sprintf("%s-%s", Q.consumerName, "control")
 	_, err := channel.QueueDeclare(Q.workerUniqueQueue, false, true, true, false, nil)
 	return err
 }
@@ -224,8 +224,9 @@ func (Q *RabbitMQClient) eventProcessor(ctx context.Context) {
 				jobWorker := Q.FindWorkerByJob(PGSResponse.Id)
 				taskPGS := jobWorker.GetPGSByID(PGSResponse.PGSID)
 				if taskPGS != nil {
-					taskPGS.response <- *PGSResponse
+					taskPGS.response <- PGSResponse
 					close(taskPGS.response)
+					jobWorker.pgs.Delete(taskPGS)
 				}
 			}
 			rabbitEvent.Ack(false)
@@ -249,9 +250,11 @@ func (Q *RabbitMQClient) eventQueueProcessor(ctx context.Context, taskQueueName 
 	args["x-max-priority"] = 10
 	var taskQueue amqp.Queue
 	err = retry.Do(func() error {
-		taskQueue, err = channel.QueueDeclarePassive(taskQueueName, true, false, false, false, args)
+		taskQueue, err = channel.QueueDeclare(taskQueueName, true, false, false, false, args)
 		return err
-	}, retry.Delay(time.Second*1), retry.Attempts(10), retry.LastErrorOnly(true))
+	}, retry.Delay(time.Second*1), retry.Attempts(10), retry.LastErrorOnly(true),retry.OnRetry(func(n uint, err error){
+		log.Errorf("Error on Declare Queue %s:%v",taskQueueName,err)
+	}))
 
 	if err != nil {
 		log.Panic(err)
@@ -264,30 +267,29 @@ func (Q *RabbitMQClient) eventQueueProcessor(ctx context.Context, taskQueueName 
 		case <-time.After(time.Second):
 			for item := range Q.jobWorkers.Iter() {
 				jobWorker := item.Value.(*JobWorker)
-				if !jobWorker.active {
+				if !jobWorker.active && jobWorker.worker.AcceptJobs() {
 					if jobWorker.worker.IsTypeAccepted(string(jobType)) {
 						delivery, ok, err := channel.Get(taskQueue.Name, false)
 						if err != nil || !ok {
-							break
+							continue
 						}
 						if int(delivery.Priority) > Q.workerConfig.WorkerPriority {
 							log.Warnf("[%s] New Job discarded because priority %d is higher than accepted %d", jobType, delivery.Priority, Q.workerConfig.WorkerPriority)
 							delivery.Nack(false, true)
-							break
+							continue
 						}
 
-						log.Warnf("[%s] Job Assigned to %s", jobType, jobWorker.worker.GetID())
+						log.Infof("[%s] Job Assigned to %s", jobType, jobWorker.worker.GetID())
 						if err := jobWorker.worker.Prepare(delivery.Body, Q); err != nil {
 							jobWorker.worker.Clean()
 							delivery.Nack(false, true)
 							log.Errorf("[%s] Error Preparing Job Execution on %s", jobType, jobWorker.worker.GetID())
-							break
+							continue
 						}
 						jobWorker.jobID = jobWorker.worker.GetTaskID()
 						jobWorker.active = true
 						go Q.controlJobExecution(jobWorker)
 						delivery.Ack(false)
-
 					}
 				}
 			}
@@ -357,12 +359,12 @@ func (Q *RabbitMQClient) FindWorkerByJob(id uuid.UUID) *JobWorker {
 
 type TaskPGSJobControl struct {
 	task     model.TaskPGS
-	response chan model.TaskPGSResponse
+	response chan *model.TaskPGSResponse
 }
 
 func NewPGSJobControl(task model.TaskPGS) *TaskPGSJobControl {
 	return &TaskPGSJobControl{
 		task:     task,
-		response: make(chan model.TaskPGSResponse),
+		response: make(chan *model.TaskPGSResponse,1),
 	}
 }

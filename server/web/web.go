@@ -64,7 +64,6 @@ func (W *WebServer) addJobs(writer http.ResponseWriter, request *http.Request) {
 	if webError(writer,err,500){
 		return
 	}
-
 	b,err:=json.MarshalIndent(scheduleJobResults,"","\t")
 	if err!=nil {
 		if webError(writer,err,500) {

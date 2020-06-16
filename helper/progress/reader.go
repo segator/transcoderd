@@ -1,7 +1,8 @@
 package progress
 
 import (
-"io"
+	"errors"
+	"io"
 "sync"
 )
 
@@ -22,6 +23,7 @@ func NewReader(r io.Reader) *Reader {
 	}
 }
 func (r *Reader) Close() error{
+	r.err=errors.New("closed")
 	return nil
 }
 

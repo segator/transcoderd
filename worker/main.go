@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"github.com/rakyll/statik/fs"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
+	pflag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"net/http"
 	"os"
 	"os/signal"
+	"reflect"
 	"runtime"
 	"sync"
 	"syscall"
@@ -41,10 +42,15 @@ func init() {
 	pflag.String("worker.temporalPath", os.TempDir(), "Path used for temporal data")
 	pflag.String("worker.workerName", hostname, "Worker Name used for statistics")
 	pflag.Int("worker.workerThreads", runtime.NumCPU(), "Worker Threads")
-	pflag.StringSlice("worker.acceptedJobs", []string{"encode"}, "type of jobs this Worker will accept, encode. pgsTosrt")
+	pflag.StringSlice("worker.acceptedJobs", []string{"encode"}, "type of jobs this Worker will accept: encode,pgsTosrt")
 	pflag.Int("worker.workerEncodeJobs", 1, "Worker Encode Jobs in parallel")
 	pflag.Int("worker.workerPGSJobs", 0, "Worker PGS Jobs in parallel")
 	pflag.Int("worker.workerPriority", 3, "Only Accept Jobs of priority X( Priority 1= <30 Min, 2=<60 Min,3=<2 Hour,4=<3 Hour,5=>3 Hour,6-9 Manual High Priority tasks")
+	pflag.String("worker.DotnetPath", "dotnet", "dotnet path")
+	pflag.String("worker.PGSTOSrtDLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")
+	pflag.String("worker.TesseractDataPath", "./tessdata", "tesseract data path")
+	pflag.Var(&opts.Worker.StartAfter,"worker.startAfter",  "Accept jobs only After HH:mm")
+	pflag.Var(&opts.Worker.StopAfter,"worker.stopAfter",  "Stop Accepting new Jobs after HH:mm")
 	pflag.Usage = usage
 
 	viper.SetConfigType("yaml")
@@ -62,7 +68,18 @@ func init() {
 	pflag.Parse()
 
 	viper.BindPFlags(pflag.CommandLine)
-	err = viper.Unmarshal(&opts)
+	viperDecoder := viper.DecodeHook(func(source reflect.Type,target  reflect.Type, data interface{}) (interface{}, error){
+		if source.Kind() != reflect.String {
+			return data, nil
+		}
+		timeHourMinute := task.TimeHourMinute{}
+		if target == reflect.TypeOf(timeHourMinute) {
+			timeHourMinute.Set(data.(string))
+			return timeHourMinute, nil
+		}
+		return data,nil
+	})
+	err = viper.Unmarshal(&opts,viperDecoder)
 	if err != nil {
 		log.Panic(err)
 	}

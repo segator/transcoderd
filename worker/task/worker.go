@@ -44,10 +44,14 @@ func (W *WorkerRuntime) start(ctx context.Context) {
 	}
 	if W.config.AcceptedJobs.IsAccepted(model.PGSToSrtJobType) {
 		for i := 0; i < W.config.WorkerPGSJobs; i++ {
-
+			pgsWorker := NewPGSWorker(ctx, W.config, fmt.Sprintf("%s-%d", model.PGSToSrtJobType, i))
+			W.workers = append(W.workers, pgsWorker)
+			W.queue.RegisterWorker(pgsWorker)
+			log.Infof("Initializing new %s worker name:%s", model.PGSToSrtJobType, pgsWorker.GetID())
 		}
 	}
 }
+
 func (W *WorkerRuntime) stop() {
 	log.Warnf("Stopping all Workers")
 	for _, worker := range W.workers {

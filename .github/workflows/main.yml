@@ -1,7 +1,6 @@
 name: CI
 on:    
-  push:
-    branches: .*
+  push:    
     tags: 
     - v*.*    
   pull_request:

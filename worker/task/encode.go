@@ -473,7 +473,9 @@ func (J *EncodeWorker) Execute() (err error) {
 		log.Error("Error in clearData", J.GetID())
 		return err
 	}
-	J.PGSMkvExtractDetectAndConvert(videoContainer,sourceFile)
+	if err=J.PGSMkvExtractDetectAndConvert(videoContainer,sourceFile);err!=nil {
+		return err
+	}
 	J.sendEvent(model.FFMPEGSNotification, model.StartedNotificationStatus, "")
 	FFMPEGProgressChan := make(chan float64)
 	go func() {
@@ -561,7 +563,7 @@ func (J *EncodeWorker) sendEvent(notificationType model.NotificationType, status
 	J.Manager.EventNotification(event)
 }
 
-func (J *EncodeWorker) PGSMkvExtractDetectAndConvert(container *ContainerData,sourceFile string) {
+func (J *EncodeWorker) PGSMkvExtractDetectAndConvert(container *ContainerData,sourceFile string) error {
 	var PGSTOSrt []*Subtitle
 	for _,subt := range container.Subtitle {
 		if subt.isImageTypeSubtitle() {
@@ -570,17 +572,23 @@ func (J *EncodeWorker) PGSMkvExtractDetectAndConvert(container *ContainerData,so
 	}
 	if len(PGSTOSrt) > 0 {
 		J.sendEvent(model.MKVExtractNotification,model.StartedNotificationStatus,"")
-		J.MKVExtract(PGSTOSrt,sourceFile)
-		J.sendEvent(model.MKVExtractNotification,model.CompletedNotificationStatus,"")
+		err := J.MKVExtract(PGSTOSrt,sourceFile)
+		if err!=nil{
+			J.sendEvent(model.MKVExtractNotification,model.FailedNotificationStatus,err.Error())
+		}else{
+			J.sendEvent(model.MKVExtractNotification,model.CompletedNotificationStatus,"")
+		}
 
 		J.sendEvent(model.PGSNotification,model.StartedNotificationStatus,"")
-		err := J.convertPGSToSrt(container,PGSTOSrt)
+		err = J.convertPGSToSrt(container,PGSTOSrt)
 		if err!=nil {
 			J.sendEvent(model.PGSNotification,model.FailedNotificationStatus,err.Error())
+			return err
 		}else{
 			J.sendEvent(model.PGSNotification,model.CompletedNotificationStatus,"")
 		}
 	}
+	return nil
 }
 
 func (J *EncodeWorker) convertPGSToSrt(container *ContainerData,subtitles []*Subtitle) error {
@@ -712,8 +720,9 @@ func (F *FFMPEGGenerator) buildArguments(threads uint8, outputFilePath string) s
 	coreParameters := fmt.Sprintf("-hide_banner  -threads %d", threads)
 	inputsParameters := ""
 	for _, input := range F.inputPaths {
-		inputsParameters = fmt.Sprintf("%s -ss 900 -t 10 -i \"%s\"", inputsParameters, input)
+		inputsParameters = fmt.Sprintf("%s  -i \"%s\"", inputsParameters, input)
 	}
+	//-ss 900 -t 10
 	audioParameters := ""
 	for _, audio := range F.AudioFilter {
 		audioParameters = fmt.Sprintf("%s %s", audioParameters, audio)

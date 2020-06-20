@@ -55,6 +55,7 @@ func init() {
 
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
+	viper.AddConfigPath("/etc/transcoderw/")
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix("TR")
 	err = viper.ReadInConfig()

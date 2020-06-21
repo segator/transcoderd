@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"transcoder/helper"
 	"transcoder/model"
 )
@@ -97,7 +98,10 @@ func (P *PGSWorker) Execute() (err error) {
 	}
 
 	language := calculateTesseractLanguage(P.task.PGSLanguage)
-	ecode,err := helper.ExecuteCommand(P.ctx,P.tempPath,P.workerConfig.DotnetPath,fmt.Sprintf("%s",P.workerConfig.PGSTOSrtDLLPath),"--input",inputFilePath,"--output",outputFilePath,"--tesseractlanguage",language,"--tesseractdata",P.workerConfig.TesseractDataPath)
+	pgsSrtArgs := []string{fmt.Sprintf("%s",P.workerConfig.PGSTOSrtDLLPath),"--input",inputFilePath,"--output",outputFilePath,"--tesseractlanguage",language,"--tesseractdata",P.workerConfig.TesseractDataPath}
+	log.Debugf("PGSTOSrt Command:%s %s",P.workerConfig.DotnetPath,strings.Join(pgsSrtArgs," "))
+	//<-time.After(time.Minute*30)
+	ecode,err := helper.ExecuteCommand(P.ctx,P.tempPath,P.workerConfig.DotnetPath,pgsSrtArgs...)
 	if err!=nil {
 		return err
 	}

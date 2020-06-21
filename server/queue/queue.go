@@ -33,6 +33,7 @@ type RabbitMQServer struct {
 
 func (Q *RabbitMQServer) conn() (*rabbitmq.Connection,error) {
 	conn,err := rabbitmq.Dial(fmt.Sprintf("amqp://%s:%s@%s:%d/",Q.User,Q.Password,Q.Host,Q.Port))
+
 	return conn,err
 
 }
@@ -188,8 +189,10 @@ func (Q *RabbitMQServer) taskEventQueue(ctx context.Context) {
 				taskEventQueue.Nack(false,false)
 				log.Errorf("TaskEncode Event Error, requeued, with error: %s",err.Error())
 			}
-			b,_:= json.MarshalIndent(taskEvent,"","\t")
-			fmt.Println(string(b))
+			if taskEvent.EventType!=model.PingEvent {
+				b,_:= json.MarshalIndent(taskEvent,"","\t")
+				fmt.Println(string(b))
+			}
 		}
 	}
 }

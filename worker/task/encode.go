@@ -523,6 +523,8 @@ func (J *EncodeWorker) Execute() (err error) {
 	}()
 	encodedFilePath, err := J.FFMPEG(sourceFile, videoContainer, FFMPEGProgressChan)
 	if err != nil {
+		log.Error(err)
+		//<-time.After(time.Minute*30)
 		J.sendEvent(model.FFMPEGSNotification, model.FailedNotificationStatus, err.Error())
 		return err
 	}
@@ -732,7 +734,7 @@ func (F *FFMPEGGenerator) buildArguments(threads uint8, outputFilePath string) s
 		subtParameters = fmt.Sprintf("%s %s", subtParameters, subt)
 	}
 
-	return fmt.Sprintf("%s %s %s %s %s %s %s -y", coreParameters, inputsParameters, F.VideoFilter, audioParameters, subtParameters, F.Metadata, outputFilePath)
+	return fmt.Sprintf("%s %s -max_muxing_queue_size 9999 %s %s %s %s %s -y", coreParameters, inputsParameters, F.VideoFilter, audioParameters, subtParameters, F.Metadata, outputFilePath)
 }
 
 func (F *FFMPEGGenerator) setInputFilters(container *ContainerData,sourceFilePath string,tempPath string) {

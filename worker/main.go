@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/rakyll/statik/fs"
 	log "github.com/sirupsen/logrus"
 	pflag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -19,7 +18,6 @@ import (
 	"transcoder/helper"
 	"transcoder/model"
 	"transcoder/worker/queue"
-	_ "transcoder/worker/statik"
 	"transcoder/worker/task"
 )
 
@@ -104,12 +102,10 @@ func main() {
 		shutdownHandler(ctx, sigs, cancel)
 		wg.Done()
 	}()
-	statikFS, err := fs.New()
-	if err!=nil {
-		panic(err)
-	}
+
+
 	//Prepare work environment
-	prepareWorkerEnvironment(ctx,statikFS,&opts.Worker.AcceptedJobs)
+	prepareWorkerEnvironment(ctx,assets,&opts.Worker.AcceptedJobs)
 
 	//BrokerClient System
 	broker := queue.NewBrokerClientRabbit(opts.Broker, opts.Worker)
@@ -132,18 +128,18 @@ func shutdownHandler(ctx context.Context, sigs chan os.Signal, cancel context.Ca
 	signal.Stop(sigs)
 }
 
-func prepareWorkerEnvironment(ctx context.Context,statikFS http.FileSystem,acceptedJobs *task.AcceptedJobs) {
+func prepareWorkerEnvironment(ctx context.Context,assets http.FileSystem,acceptedJobs *task.AcceptedJobs) {
 	log.Infof("Initializing Environment...")
 	if acceptedJobs.IsAccepted(model.EncodeJobType) {
-		if err:=helper.StatikFSFFProbe(statikFS);err!=nil {
+		if err:=helper.DesembedFSFFProbe(assets);err!=nil {
 			panic(err)
 		}
 
-		if err:=helper.StatikFSFFmpeg(statikFS);err!=nil {
+		if err:=helper.DesembedFFmpeg(assets);err!=nil {
 			panic(err)
 		}
 
-		if err:=helper.StatikFSMKVExtract(statikFS);err!=nil {
+		if err:=helper.DesembedMKVExtract(assets);err!=nil {
 			panic(err)
 		}
 	}

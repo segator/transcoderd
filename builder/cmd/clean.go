@@ -4,7 +4,7 @@ import (
 	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
-	"transcoder/helper"
+	"transcoder/helper/command"
 )
 
 var cleanCmd = &cobra.Command{
@@ -12,7 +12,7 @@ var cleanCmd = &cobra.Command{
 	Short: "c",
 	Long:  `Clean Environment`,
 	Run: func(cmd *cobra.Command, args []string) {
-		buildDir := filepath.Join(helper.GetWD(),"build")
+		buildDir := filepath.Join(command.GetWD(),"build")
 		if err:=os.RemoveAll(buildDir);err!=nil {
 			panic(err)
 		}

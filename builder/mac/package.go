@@ -51,10 +51,10 @@ func Package(name,author,version,identifier,icon,bin string) error {
 	if _, err := io.Copy(fdst, fsrc); err != nil {
 		return errors.Wrap(err, "copy bin")
 	}
-/*	if err := exec.Command("chmod", "+x", appPath).Run(); err != nil {
+/*	if err := exec.Command("chmod", "+x", appPath).RunWithContext(); err != nil {
 		return errors.Wrap(err, "chmod: "+appPath)
 	}
-	if err := exec.Command("chmod", "+x", binPath).Run(); err != nil {
+	if err := exec.Command("chmod", "+x", binPath).RunWithContext(); err != nil {
 		return errors.Wrap(err, "chmod: "+binPath)
 	}*/
 	id := identifier

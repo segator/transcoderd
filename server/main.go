@@ -2,23 +2,22 @@ package main
 
 import (
 	"context"
-	"github.com/rakyll/statik/fs"
-	"net/url"
-	"path/filepath"
-	"reflect"
-	"transcoder/helper"
-
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"reflect"
 	"sync"
 	"syscall"
 	"time"
 	"transcoder/broker"
 	"transcoder/cmd"
+	"transcoder/helper"
 	"transcoder/server/queue"
 	"transcoder/server/repository"
 	"transcoder/server/scheduler"
@@ -140,11 +139,11 @@ func main() {
 		wg.Done()
 	}()
 	//Prepare resources
-	log.Infof("Preparing to Run...")
-	prepareResources(ctx)
+	log.Infof("Preparing to RunWithContext...")
+	prepareResources(ctx,assets)
 	//Repository persist
 	var repo repository.Repository
-	repo, err := repository.NewSQLRepository(opts.Database)
+	repo, err := repository.NewSQLRepository(opts.Database,assets)
 	if err != nil{
 		log.Panic(err)
 	}
@@ -176,12 +175,8 @@ func main() {
 	wg.Wait()
 }
 
-func prepareResources(ctx context.Context) {
-	statikFS, err := fs.New()
-	if err!=nil {
-		panic(err)
-	}
-	if err:=helper.StatikFSFFProbe(statikFS);err!=nil {
+func prepareResources(ctx context.Context, assets http.FileSystem) {
+	if err:=helper.DesembedFSFFProbe(assets);err!=nil {
 		panic(err)
 	}
 }

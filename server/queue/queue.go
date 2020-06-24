@@ -182,7 +182,6 @@ func (Q *RabbitMQServer) taskEventQueue(ctx context.Context) {
 				if err!=nil {
 					return err
 				}
-				log.Infof("TaskEncode Event processed succesfully")
 				return nil
 			})
 			if err!=nil {
@@ -190,8 +189,10 @@ func (Q *RabbitMQServer) taskEventQueue(ctx context.Context) {
 				log.Errorf("TaskEncode Event Error, requeued, with error: %s",err.Error())
 			}
 			if taskEvent.EventType!=model.PingEvent {
+				log.Infof("TaskEncode Event processed succesfully")
 				b,_:= json.MarshalIndent(taskEvent,"","\t")
 				fmt.Println(string(b))
+
 			}
 		}
 	}

@@ -1,9 +1,9 @@
 package helper
 
 import (
-	"context"
 	"fmt"
 	"github.com/avast/retry-go"
+	"github.com/rakyll/statik/fs"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/vansante/go-ffprobe.v2"
 	"io"
@@ -11,11 +11,8 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
-	"syscall"
 	"time"
 )
 
@@ -43,7 +40,6 @@ func CheckPath(path string) {
 }
 
 func GetPublicIP() (publicIP string) {
-
 	retry.Do(func() error{
 		randomIndex := rand.Intn(len(STUNServers))
 		resp, err := http.Get(STUNServers[randomIndex])
@@ -61,99 +57,7 @@ func GetPublicIP() (publicIP string) {
 	return publicIP
 }
 
-type ReaderFunc func(buffer []byte,exit bool)
-func ExecuteCommand(ctx context.Context,workingDirectory string,command string, params ...string) (exitCode int, err error){
-	return ExecuteCommandWithFunc(ctx,workingDirectory,command,nil,nil,params...)
-}
 
-func ExecuteCommandWithFunc(ctx context.Context,workingDirectory string,command string, stdoutFunc ReaderFunc,stderrFunc ReaderFunc,params ...string) (exitCode int, err error){
-	cmd := exec.CommandContext(ctx,command,params...)
-	cmd.Dir=workingDirectory
-	stdout, err := cmd.StdoutPipe()
-	if err!=nil {
-		return
-	}
-	stderr, err := cmd.StderrPipe()
-	if err!=nil {
-		return
-	}
-	if err= cmd.Start();err!=nil {
-		return -1,err
-	}
-
-	go readerStreamProcessor(ctx,stdout,stdoutFunc)
-	go readerStreamProcessor(ctx,stderr,stderrFunc)
-
-	err = cmd.Wait()
-	if err!=nil{
-		if msg, ok := err.(*exec.ExitError); ok{ // there is error code
-			exitCode :=  msg.Sys().(syscall.WaitStatus).ExitStatus()
-			return exitCode,err
-		}else{
-			return -1,err
-		}
-	}
-	return 0,nil
-}
-
-func readerStreamProcessor(ctx context.Context,reader io.ReadCloser,callbackFunc ReaderFunc){
-	buffer := make([]byte, 40)
-	loop:
-	for {
-		select{
-			case <-ctx.Done():
-				return
-			default:
-				readed, err := reader.Read(buffer)
-				if err != nil {
-					if err == io.EOF {
-						if callbackFunc!=nil {
-							callbackFunc(nil, true)
-						}
-					}
-					break loop
-				}
-				if callbackFunc!=nil {
-					callbackFunc(buffer[0:readed], false)
-				}
-		}
-	}
-}
-
-func CommandStringToSlice(command string) (output []string) {
-	cutDoubleQuote:=true
-	cutQuote:=true
-	inLineWord:=""
-	for _,c := range command {
-		if c == ' ' && cutDoubleQuote && cutQuote {
-			if len(inLineWord)>0 {
-				if inLineWord[0] == '\''{
-					inLineWord = strings.Trim(inLineWord,"'")
-				}else if inLineWord[0] == '"'{
-					inLineWord = strings.Trim(inLineWord,"\"")
-				}
-				output = append(output,inLineWord)
-				inLineWord=""
-			}
-			continue
-		}else if c == '"' {
-			cutDoubleQuote=!cutDoubleQuote
-		}else if c == '\'' {
-			cutQuote=!cutQuote
-		}
-		inLineWord=inLineWord+string(c)
-	}
-	output = append(output,inLineWord)
-	return output
-}
-
-func GetWD() string {
-	path, err := os.Getwd()
-	if err != nil {
-		panic(err)
-	}
-	return path
-}
 func GetWorkingDir() string{
 	return workingDirectory
 }
@@ -182,36 +86,47 @@ func CopyFilePath(src, dst string) (int64, error) {
 	nBytes, err := io.Copy(destination, source)
 	return nBytes, err
 }
-func ExtractStatikFSFile(statikFS http.FileSystem,statikPath string,targetFile string) (string,error){
-	ffprobeFi, err := statikFS.Open(statikPath)
+func DisembedFile(embedFS http.FileSystem,statikPath string, targetFilePath string) (string,error){
+	embededFile, err := embedFS.Open(statikPath)
 	if err != nil {
 		panic(err)
 	}
-	defer ffprobeFi.Close()
+	defer embededFile.Close()
+	if st,_:= embededFile.Stat(); st.IsDir() {
+		err:= fs.Walk(embedFS, statikPath,func(path string, info os.FileInfo, err error) error{
+			//I Dont have time for recurisve
+			if info.IsDir() {
+				return nil
+			}
+			_,err= DisembedFile(embedFS ,fmt.Sprintf("%s/%s",statikPath,info.Name()),info.Name())
+			return err
+		});
+		return GetWorkingDir(),err
+	}
 
 	tempPath := GetWorkingDir()
 	err = os.MkdirAll(tempPath, os.ModePerm)
 	if err != nil {
 		return "",err
 	}
-	ffprobePath := filepath.Join(tempPath, targetFile)
-	ffProbeFile, err := os.OpenFile(ffprobePath, os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)
+	targetCopyFile := filepath.Join(tempPath, targetFilePath)
+	ffProbeFile, err := os.OpenFile(targetCopyFile, os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)
 	if err != nil {
 		return "",err
 	}
 	defer ffProbeFile.Close()
-	if _, err := io.Copy(ffProbeFile, ffprobeFi); err != nil {
+	if _, err := io.Copy(ffProbeFile, embededFile); err != nil {
 		return "",err
 	}
-	return ffprobePath,nil
+	return targetCopyFile,nil
 }
 
-func StatikFSFFProbe(statikFS http.FileSystem) error {
+func DesembedFSFFProbe(embedFS http.FileSystem) error {
 	ffprobeFile := "ffprobe"
 	if runtime.GOOS == "windows" {
 		ffprobeFile = ffprobeFile + ".exe"
 	}
-	ffprobePath,err := ExtractStatikFSFile(statikFS,fmt.Sprintf("/ffprobe/%s-%s/%s", runtime.GOOS, runtime.GOARCH, ffprobeFile),ffprobeFile)
+	ffprobePath,err := DisembedFile(embedFS,fmt.Sprintf("/ffprobe/%s-%s/%s", runtime.GOOS, runtime.GOARCH, ffprobeFile),ffprobeFile)
 	if err!=nil {
 		return err
 	}
@@ -220,12 +135,12 @@ func StatikFSFFProbe(statikFS http.FileSystem) error {
 	return nil
 }
 
-func StatikFSFFmpeg(statikFS http.FileSystem) error {
+func DesembedFFmpeg(embedFS http.FileSystem) error {
 	ffprobeFile := "ffmpeg"
 	if runtime.GOOS == "windows" {
 		ffprobeFile = ffprobeFile + ".exe"
 	}
-	ffmpegPath,err := ExtractStatikFSFile(statikFS,fmt.Sprintf("/ffmpeg/%s-%s/%s", runtime.GOOS, runtime.GOARCH, ffprobeFile),ffprobeFile)
+	ffmpegPath,err := DisembedFile(embedFS,fmt.Sprintf("/ffmpeg/%s-%s/%s", runtime.GOOS, runtime.GOARCH, ffprobeFile),ffprobeFile)
 	if err!=nil {
 		return err
 	}
@@ -233,16 +148,16 @@ func StatikFSFFmpeg(statikFS http.FileSystem) error {
 	return nil
 }
 
-func StatikFSMKVExtract(statikFS http.FileSystem) error {
-	ffprobeFile := "mkvextract"
+func DesembedMKVExtract(embedFS http.FileSystem) error {
+	mkvExtractFileName := "mkvextract"
 	if runtime.GOOS == "windows" {
-		ffprobeFile = ffprobeFile + ".exe"
+		mkvExtractFileName = mkvExtractFileName + ".exe"
 	}
-	ffmpegPath,err := ExtractStatikFSFile(statikFS,fmt.Sprintf("/mkvextract/%s-%s/%s", runtime.GOOS, runtime.GOARCH, ffprobeFile),ffprobeFile)
+	DisembedPath,err := DisembedFile(embedFS,fmt.Sprintf("/mkvextract/%s-%s", runtime.GOOS, runtime.GOARCH), mkvExtractFileName)
 	if err!=nil {
 		return err
 	}
-	setMKVExtractPath(ffmpegPath)
+	setMKVExtractPath(filepath.Join(DisembedPath, mkvExtractFileName))
 	return nil
 }
 

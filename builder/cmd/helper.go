@@ -1,19 +1,18 @@
 package cmd
 
 import (
-	"fmt"
-	log "github.com/sirupsen/logrus"
+	"github.com/shurcooL/vfsgen"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"transcoder/helper"
+	"transcoder/helper/command"
 )
 
 
 func prepareBuildEnv(path string) string {
-	buildPath := filepath.Join(helper.GetWD(),"build",path)
+	buildPath := filepath.Join(command.GetWD(),"build",path)
 	os.RemoveAll(buildPath)
 	if err:=os.MkdirAll(buildPath,os.ModePerm);err!=nil && !os.IsExist(err) {
 		panic(err)
@@ -22,28 +21,12 @@ func prepareBuildEnv(path string) string {
 }
 
 
-func executeWithEnv(workingDir string, env []string,command string, arg ...string){
-	log.Debugf("++ %s %s\n",command,strings.Join(arg," "))
-	cmd := exec.Command(command, arg...)
-	cmd.Dir = workingDir
-	cmd.Env = env
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// Execute the command
-	if err := cmd.Run(); err != nil {
-		panic(err)
-	}
-}
 
 
-func execute(workingDir string,command string, arg ...string){
-	executeWithEnv(workingDir,os.Environ(),command,arg...)
-}
 
 func getDependency() {
-	execute(helper.GetWD(),"go","mod","download")
-	execute(helper.GetWD(),"go","get","-u","github.com/rakyll/statik")
+	command.NewCommand("go","mod","download").Run(command.NewPanicOption())
+	command.NewCommand("go","get","-u","github.com/rakyll/statik").Run(command.NewPanicOption())
 }
 
 func getCapturingGroupsRegex(r *regexp.Regexp,parse string) map[string]string {
@@ -85,6 +68,14 @@ func copyResources(buildPath string, sourcePath string, GOOS,GOARCH string)  err
 	return err
 }
 
-func statikEmbed(resources string, target string) {
-	execute(helper.GetWD(),"go","run","github.com/rakyll/statik",fmt.Sprintf("-src=%s",resources),fmt.Sprintf("-dest=%s",target),"-f","-include","*")
+func Embed(resources string, target string) {
+	var fs http.FileSystem = http.Dir(resources)
+	err := vfsgen.Generate(fs, vfsgen.Options{})
+	if err != nil {
+		panic(err)
+	}
+
+	os.Rename("assets_vfsdata.go",filepath.Join(target,"assets_vfsdata.go"))
+	//TODO create dir generate and copy assets_vfsdata.go
+	//execute(helper.GetWD(),"go","run","github.com/rakyll/statik",fmt.Sprintf("-src=%s",resources),fmt.Sprintf("-dest=%s",target),"-f","-include","*")
 }

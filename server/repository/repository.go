@@ -5,11 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	_ "github.com/lib/pq"
-	"github.com/rakyll/statik/fs"
 	"io/ioutil"
+	"net/http"
 	"time"
 	"transcoder/model"
-	_ "transcoder/server/statik"
 )
 var(
 	ElementNotFound = fmt.Errorf("element not found")
@@ -71,8 +70,9 @@ func (S *SQLTransaction) ExecContext(ctx context.Context, query string, args ...
 }
 
 type SQLRepository struct {
-	db *sql.DB
-	con Transaction
+	db     *sql.DB
+	con    Transaction
+	assets http.FileSystem
 }
 
 type SQLServerConfig struct {
@@ -84,7 +84,7 @@ type SQLServerConfig struct {
 	Driver   string `mapstructure:"driver", envconfig:"DB_DRIVER"`
 }
 
-func NewSQLRepository(config SQLServerConfig) (*SQLRepository,error) {
+func NewSQLRepository(config SQLServerConfig,assets http.FileSystem) (*SQLRepository,error) {
 	connectionString := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",config.Host, config.Port, config.User, config.Password, config.Scheme)
 	db,err := sql.Open(config.Driver,connectionString)
 	if err!=nil {
@@ -101,6 +101,7 @@ func NewSQLRepository(config SQLServerConfig) (*SQLRepository,error) {
 	}()*/
 	return &SQLRepository{
 		db: db,
+		assets:assets,
 	},nil
 
 }
@@ -124,11 +125,7 @@ func (S *SQLRepository) ProcessEvent(ctx context.Context,taskEvent *model.TaskEv
 }
 
 func (S *SQLRepository) prepareDatabase(ctx context.Context) (returnError error) {
-	statikFS, err := fs.New()
-	if err!=nil {
-		return err
-	}
-	schemeName, err := statikFS.Open("/database/database.sql")
+	schemeName, err := S.assets.Open("/database/database.sql")
 	if err!=nil {
 		return err
 	}

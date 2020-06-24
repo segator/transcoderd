@@ -19,11 +19,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"transcoder/helper"
+	"transcoder/helper/command"
 	"transcoder/helper/progress"
 	"transcoder/model"
 )
@@ -348,9 +350,12 @@ func (J *EncodeWorker) FFMPEG(sourceFile string, videoContainer *ContainerData, 
 	encodedFilePath := fmt.Sprintf("%s-encoded.%s", strings.TrimSuffix(sourceFileName, filepath.Ext(sourceFileName)), "mkv")
 	outputFullPath := filepath.Join(J.tempPath, encodedFilePath)
 	ffmpegArguments := ffmpeg.buildArguments(uint8(J.workerConfig.WorkerThreads), outputFullPath)
-	ffmpegArgumentsSlice := helper.CommandStringToSlice(ffmpegArguments)
-	log.Debugf("FFMPEG Command:%s %s",helper.GetFFmpegPath(),strings.Join(ffmpegArgumentsSlice," "))
-	exitCode, err := helper.ExecuteCommandWithFunc(J.ctx, J.tempPath,helper.GetFFmpegPath(), stdoutFFMPEG, checkPercentageFFMPEG, ffmpegArgumentsSlice...)
+	log.Debugf("FFMPEG Command:%s %s",helper.GetFFmpegPath(),ffmpegArguments)
+	ffmpegCommand:=command.NewCommandByString(helper.GetFFmpegPath(),ffmpegArguments).
+		SetWorkDir(J.tempPath).
+		SetStdoutFunc(stdoutFFMPEG).
+		SetStderrFunc(checkPercentageFFMPEG)
+	exitCode, err := ffmpegCommand.RunWithContext(J.ctx)
 	if err != nil {
 		return "", fmt.Errorf("%w: stder:%s stdout:%s", err, ffmpegErrLog, ffmpegOutLog)
 	}
@@ -577,6 +582,7 @@ func (J *EncodeWorker) PGSMkvExtractDetectAndConvert(container *ContainerData,so
 		err := J.MKVExtract(PGSTOSrt,sourceFile)
 		if err!=nil{
 			J.sendEvent(model.MKVExtractNotification,model.FailedNotificationStatus,err.Error())
+			return err
 		}else{
 			J.sendEvent(model.MKVExtractNotification,model.CompletedNotificationStatus,"")
 		}
@@ -647,13 +653,16 @@ func (J *EncodeWorker) convertPGSToSrt(container *ContainerData,subtitles []*Sub
 }
 
 func (J *EncodeWorker) MKVExtract(subtitles []*Subtitle,sourceFile string) error {
-	var params []string
-	params=append(params,"tracks")
-	params=append(params,sourceFile)
+	mkvExtractCommand:=command.NewCommand(helper.GetMKVExtractPath(),"tracks",sourceFile).
+		SetWorkDir(J.tempPath)
+		if runtime.GOOS =="linux" {
+			mkvExtractCommand.AddEnv(fmt.Sprintf("LD_LIBRARY_PATH=%s",filepath.Dir(helper.GetMKVExtractPath())))
+		}
 	for _,subtitle := range subtitles {
-		params=append(params,fmt.Sprintf("%d:%d.sup",subtitle.Id,subtitle.Id))
+		mkvExtractCommand.AddParam(fmt.Sprintf("%d:%d.sup",subtitle.Id,subtitle.Id))
 	}
-	ecode,err := helper.ExecuteCommand(J.ctx,J.tempPath,helper.GetMKVExtractPath(),params...)
+
+	ecode,err := mkvExtractCommand.RunWithContext(J.ctx)
 	if err!=nil{
 		return err
 	}

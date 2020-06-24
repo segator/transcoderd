@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"transcoder/builder/mac"
-	"transcoder/helper"
+	"transcoder/helper/command"
 )
 var allPlatforms = []string{"windows-amd64","linux-amd64","darwin-amd64"}
 var buildCmd = &cobra.Command{
@@ -78,7 +78,8 @@ func buildServer(platforms []string) {
 		log.Infof("[%s] Copy Resources...",platform)
 		copyServerResources(buildPath,GOOS,GOARCH)
 		log.Infof("[%s] Embedding resources...",platform)
-		statikEmbed(buildPath,filepath.Join(helper.GetWD(),"server"))
+
+		Embed(buildPath,filepath.Join(command.GetWD(),"server"))
 
 		envs := os.Environ()
 		envs = append(envs, fmt.Sprintf("GOARCH=%s",GOARCH))
@@ -89,12 +90,16 @@ func buildServer(platforms []string) {
 			extension=".exe"
 		}
 		log.Infof("[%s] Building executable...",platform)
-		executeWithEnv(filepath.Join(helper.GetWD(),"server"),envs,"go","build","-o",fmt.Sprintf("%s/build/transcoderd-%s%s",helper.GetWD(),platform,extension))
+		command.NewCommand("go","build","-o",fmt.Sprintf("%s/build/transcoderd-%s%s",command.GetWD(),platform,extension)).
+			SetWorkDir(filepath.Join(command.GetWD(),"server")).
+			SetEnv(envs).Run(command.NewPanicOption())
+
+
 	}
 }
 
 func copyServerResources(buildPath string,GOOS,GOARCH string) {
-	serverResourcesPath := filepath.Join(helper.GetWD(),"server","resources")
+	serverResourcesPath := filepath.Join(command.GetWD(),"server","resources")
 	copyResources(buildPath, serverResourcesPath,GOOS,GOARCH)
 }
 
@@ -116,7 +121,7 @@ func buildWorker(platforms []string, buildMode string) {
 		log.Infof("[%s] Copy Resources...",platform)
 		copyWorkerResources(buildPath,buildMode,GOOS,GOARCH)
 		log.Infof("[%s] Embedding resources...",platform)
-		statikEmbed(buildPath,filepath.Join(helper.GetWD(),"worker"))
+		Embed(buildPath,filepath.Join(command.GetWD(),"worker"))
 		envs := os.Environ()
 		envs = append(envs, fmt.Sprintf("GOARCH=%s",GOARCH))
 		envs = append(envs, fmt.Sprintf("GOOS=%s",GOOS))
@@ -136,18 +141,20 @@ func buildWorker(platforms []string, buildMode string) {
 		}
 		log.Infof("[%s] Building executable...",platform)
 		fileName := fmt.Sprintf("transcoderw-%s-%s%s",buildMode,platform,extension)
-		outputBinpath := fmt.Sprintf("%s/build/%s",helper.GetWD(),fileName)
-		executeWithEnv(filepath.Join(helper.GetWD(),"worker"),envs,"go","build",extra,"-o",outputBinpath)
+		outputBinpath := fmt.Sprintf("%s/build/%s",command.GetWD(),fileName)
+		command.NewCommand("go","build",extra,"-o",outputBinpath).
+			SetWorkDir(filepath.Join(command.GetWD(),"worker")).
+			SetEnv(envs).Run(command.NewPanicOption())
 		if GOOS == "darwin" && buildMode=="gui" {
 			//TODO Builder Version??
-			sysTrayIco:=filepath.Join(helper.GetWD(),"worker","resources","systray.png")
+			sysTrayIco:=filepath.Join(command.GetWD(),"worker","resources","systray.png")
 			mac.Package(fileName,"","1.0","",sysTrayIco,outputBinpath)
 		}
 	}
 }
 
 func copyWorkerResources(buildPath string,buildMode string,GOOS,GOARCH string) {
-	workerResourcesPath := filepath.Join(helper.GetWD(),"worker","resources")
+	workerResourcesPath := filepath.Join(command.GetWD(),"worker","resources")
 	copyResources(buildPath, workerResourcesPath,GOOS,GOARCH)
 	if buildMode == "gui" {
 		sysF, err := os.OpenFile(filepath.Join(buildPath,"systray.enabled"),os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)

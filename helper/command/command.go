@@ -11,8 +11,9 @@ import (
 )
 
 type ReaderFunc func(buffer []byte,exit bool)
-type Option struct{
+type Option struct {
 	PanicOnError bool
+	AllowedCodes []int
 }
 type Command struct {
 	Command string
@@ -28,6 +29,11 @@ func NewPanicOption() Option {
 		PanicOnError: true,
 	}
 }
+func NewAllowedCodesOption(codes ...int) Option {
+	return Option{
+		AllowedCodes:codes,
+	}
+}
 func NewCommandByString(command string,params string) *Command {
 	return NewCommand(command,StringToSlice(params)...)
 }
@@ -40,6 +46,7 @@ func NewCommand(command string, params ...string) *Command {
 	}
 	return cmd
 }
+
 func (C *Command) AddParam(param string) *Command{
 	C.Params=append(C.Params,param)
 	return C
@@ -93,13 +100,19 @@ func (C *Command) RunWithContext(ctx context.Context,opt ...Option) (exitCode in
 
 	err = cmd.Wait()
 	if err!=nil{
-		if isPanicOpt(opt){
-			panic(err)
-		}
 		if msg, ok := err.(*exec.ExitError); ok{ // there is error code
 			exitCode :=  msg.Sys().(syscall.WaitStatus).ExitStatus()
+			if allowedCodes(opt,exitCode){
+				return exitCode,nil
+			}
+			if isPanicOpt(opt){
+				panic(err)
+			}
 			return exitCode,err
 		}else{
+			if isPanicOpt(opt){
+				panic(err)
+			}
 			return -1,err
 		}
 	}
@@ -113,6 +126,18 @@ func isPanicOpt(opts []Option) bool {
 		}
 	}
 	return false
+}
+func allowedCodes(opts []Option,exitCode int) bool {
+	for _,opt:=range opts {
+		if len(opt.AllowedCodes)>0 {
+			for _,code:= range opt.AllowedCodes {
+				if code == exitCode {
+					return true
+				}
+			}
+		}
+	}
+	return exitCode==0
 }
 
 func (C *Command) readerStreamProcessor(ctx context.Context,reader io.ReadCloser,callbackFunc ReaderFunc){

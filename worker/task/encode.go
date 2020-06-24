@@ -514,12 +514,12 @@ func (J *EncodeWorker) Execute() (err error) {
 					estimatedTime := now.Add(eta)
 
 					speed := totalDuration.Seconds() / estimatedTime.Sub(startTime).Seconds()
-					fmt.Printf("\rEncode %s Speed: %.1fx Remaining: %s EstimatedAt: %02d:%02d           ", line, speed, durafmt.Parse(eta).String(), estimatedTime.Hour(), estimatedTime.Minute())
+					fmt.Printf("\rEncode %s Speed: %.1fx Remaining: %s EstimatedAt: %02d:%02d", line, speed, durafmt.Parse(eta).LimitFirstN(2).String(), estimatedTime.Hour(), estimatedTime.Minute())
 				}
 
 				if FFMPEGProgress-lastProgressEvent > 5 {
 					eta := time.Duration(float64(100*(now.Unix()-startTime.Unix()))/FFMPEGProgress) * time.Second
-					J.sendEvent(model.FFMPEGSNotification, model.StartedNotificationStatus, fmt.Sprintf("{\"progress\":%.2f,\"remaining\":\"%s\"}", FFMPEGProgress, durafmt.Parse(eta).String()))
+					J.sendEvent(model.FFMPEGSNotification, model.StartedNotificationStatus, fmt.Sprintf("{\"progress\":%.2f,\"remaining\":\"%s\"}", FFMPEGProgress, durafmt.Parse(eta).LimitFirstN(2).String()))
 					lastProgressEvent = FFMPEGProgress
 				}
 			}
@@ -662,13 +662,13 @@ func (J *EncodeWorker) MKVExtract(subtitles []*Subtitle,sourceFile string) error
 		mkvExtractCommand.AddParam(fmt.Sprintf("%d:%d.sup",subtitle.Id,subtitle.Id))
 	}
 
-	ecode,err := mkvExtractCommand.RunWithContext(J.ctx)
+	_,err := mkvExtractCommand.RunWithContext(J.ctx,command.NewAllowedCodesOption(0,1))
 	if err!=nil{
+		log.Debugf("MKVExtract Command:%s",mkvExtractCommand.GetFullCommand())
+		return fmt.Errorf("MKVExtract unexpected error:%v",err.Error())
 		return err
 	}
-	if ecode!=0{
-		return fmt.Errorf("MKVExtract unexpected exit code:%d",ecode)
-	}
+
 	return nil
 }
 

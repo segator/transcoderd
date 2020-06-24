@@ -267,7 +267,9 @@ func (R *RuntimeScheduler) ScheduleJobRequests(ctx context.Context, jobRequest *
 		var video *model.Video
 		if jobRequestResponse.errors==nil {
 			video,err =R.scheduleJobRequest(ctx,jobRequestResponse.jobRequest)
-			video.Events=nil
+			if err==nil {
+				video.Events=nil
+			}
 		}else{
 			b,_:=json.Marshal(jobRequestResponse.errors)
 			err = errors.New(string(b))

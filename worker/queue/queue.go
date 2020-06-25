@@ -144,7 +144,7 @@ func (Q *RabbitMQClient) ResponsePGSJob(pgsResponse model.TaskPGSResponse) error
 	return Q.publishAMQPMessage(pgsResponse.Queue, message)
 }
 func (Q *RabbitMQClient) initWorkerQueue(channel *rabbitmq.Channel) error {
-	_, err := channel.QueueDeclare(Q.workerUniqueQueue, false, true, true, false, nil)
+	_, err := channel.QueueDeclare(Q.workerUniqueQueue, true, false, true, false, nil)
 	return err
 }
 

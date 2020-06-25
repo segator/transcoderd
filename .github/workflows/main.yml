@@ -55,12 +55,9 @@ jobs:
       - name: Build Server
         run: |
           go run build.go build server -p ${{matrix.os}}-amd64
-          mkdir -p build/release          
-          mv build/transcoder* release/
       - name: Build Workers
         run: |
-          go run build.go build worker -p ${{matrix.os}}-amd64 -m console          
-          mv build/transcoder* release/
+          go run build.go build worker -p ${{matrix.os}}-amd64 -m console
       - name: Upload Release Asset
         if: github.event_name == 'push'
         id: upload-release-asset
@@ -71,5 +68,5 @@ jobs:
           draft: false
           name: ${{ steps.branch.outputs.branch }}
           tag_name: wip-${{ steps.branch.outputs.branch }}
-          files: build/release/*
+          files: dist/*
           allow_override: true

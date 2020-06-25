@@ -74,7 +74,7 @@ func buildServer(platforms []string) {
 		GOOS:= pltSplit[0]
 		GOARCH:= pltSplit[1]
 		log.Infof("[%s] Preparing Build Environment...",platform)
-		buildPath := prepareBuildEnv("server")
+		buildPath,distPath := prepareBuildEnv("server")
 		log.Infof("[%s] Copy Resources...",platform)
 		copyServerResources(buildPath,GOOS,GOARCH)
 		log.Infof("[%s] Embedding resources...",platform)
@@ -90,7 +90,7 @@ func buildServer(platforms []string) {
 			extension=".exe"
 		}
 		log.Infof("[%s] Building executable...",platform)
-		command.NewCommand("go","build","-o",fmt.Sprintf("%s/build/transcoderd-%s%s",command.GetWD(),platform,extension)).
+		command.NewCommand("go","build","-o",fmt.Sprintf("%s/transcoderd-%s%s",distPath,platform,extension)).
 			SetWorkDir(filepath.Join(command.GetWD(),"server")).
 			SetEnv(envs).Run(command.NewPanicOption())
 
@@ -116,7 +116,7 @@ func buildWorker(platforms []string, buildMode string) {
 		GOARCH:= pltSplit[1]
 
 		log.Infof("[%s] Preparing Build Environment...",platform)
-		buildPath := prepareBuildEnv("worker")
+		buildPath,distPath := prepareBuildEnv("worker")
 
 		log.Infof("[%s] Copy Resources...",platform)
 		copyWorkerResources(buildPath,buildMode,GOOS,GOARCH)
@@ -141,7 +141,7 @@ func buildWorker(platforms []string, buildMode string) {
 		}
 		log.Infof("[%s] Building executable...",platform)
 		fileName := fmt.Sprintf("transcoderw-%s-%s%s",buildMode,platform,extension)
-		outputBinpath := fmt.Sprintf("%s/build/%s",command.GetWD(),fileName)
+		outputBinpath := fmt.Sprintf("%s/%s",distPath,fileName)
 		command.NewCommand("go","build",extra,"-o",outputBinpath).
 			SetWorkDir(filepath.Join(command.GetWD(),"worker")).
 			SetEnv(envs).Run(command.NewPanicOption())

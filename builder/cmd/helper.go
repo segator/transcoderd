@@ -11,13 +11,17 @@ import (
 )
 
 
-func prepareBuildEnv(path string) string {
-	buildPath := filepath.Join(command.GetWD(),"build",path)
+func prepareBuildEnv(path string) (buildPath string,distPath string) {
+	buildPath = filepath.Join(command.GetWD(),"build",path)
 	os.RemoveAll(buildPath)
 	if err:=os.MkdirAll(buildPath,os.ModePerm);err!=nil && !os.IsExist(err) {
 		panic(err)
 	}
-	return buildPath
+	distPath = filepath.Join(command.GetWD(),"dist")
+	if err:=os.MkdirAll(distPath,os.ModePerm);err!=nil && !os.IsExist(err) {
+		panic(err)
+	}
+	return buildPath,distPath
 }
 
 

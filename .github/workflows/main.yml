@@ -61,12 +61,10 @@ jobs:
       - name: Upload Release Asset
         if: github.event_name == 'push'
         id: upload-release-asset
-        uses: meeDamian/github-release@2.0
+        uses: svenstaro/upload-release-action@v1-release
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          prerelease: true
-          draft: false
-          name: ${{ steps.branch.outputs.branch }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
           tag: wip-${{ steps.branch.outputs.branch }}
-          files: dist/*
-          allow_override: true
+          file: dist/*
+          overwrite: true
+          file_glob: true

@@ -97,7 +97,7 @@ func printProgress(ctx context.Context, reader *progress.Reader, size int64, wg 
 		line = line + ">|"
 		downloadTime := time.Now().Sub(startTime)
 		speed := float64(p.N()) / downloadTime.Seconds()
-		fmt.Printf("%s%s %s Speed:%s/s Remaining:%s EstimatedAt: %02d:%02d", RESET_LINE, label, line, bytesize.New(speed), durafmt.Parse(p.Remaining()).String(), p.Estimated().Hour(), p.Estimated().Minute())
+		fmt.Printf("%s%s %s Speed:%s/s Remaining:%s EstimatedAt: %02d:%02d", RESET_LINE, label, line, bytesize.New(speed), durafmt.Parse(p.Remaining()).LimitFirstN(2).String(), p.Estimated().Hour(), p.Estimated().Minute())
 	}
 	fmt.Printf("\n")
 	wg.Done()

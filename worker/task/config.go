@@ -51,7 +51,7 @@ type Config struct {
 	TemporalPath      string
 	WorkerName        string
 	WorkerThreads     int
-	AcceptedJobs      AcceptedJobs
+	AcceptedJobs      AcceptedJobs `mapstructure:"acceptedJobs", envconfig:"WORKER_ACCEPTED_JOBS"`
 	WorkerEncodeJobs  int
 	WorkerPGSJobs     int
 	WorkerPriority    int

@@ -67,6 +67,6 @@ jobs:
           prerelease: true
           draft: false
           name: ${{ steps.branch.outputs.branch }}
-          tag_name: wip-${{ steps.branch.outputs.branch }}
+          tag: wip-${{ steps.branch.outputs.branch }}
           files: dist/*
           allow_override: true

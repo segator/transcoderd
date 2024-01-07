@@ -5,7 +5,7 @@ GOOPTS ?=
 GOOS ?= $(shell $(GO) env GOHOSTOS)
 GOARCH ?= $(shell $(GO) env GOHOSTARCH)
 
-IMAGE_NAME ?= pando85/transcoder
+IMAGE_NAME ?= segator/transcoder
 IMAGE_VERSION ?= latest
 
 .DEFAULT: help

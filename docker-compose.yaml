@@ -2,7 +2,7 @@ version: '3'
 
 services:
   server:
-    image: pando85/transcoder:latest-server
+    image: segator/transcoder:latest-server
     environment:
       LOGLEVEL: DEBUG
       BROKER_HOST: rabbitmq
@@ -40,7 +40,7 @@ services:
       - "5672:5672"
 
   worker:
-    image: pando85/transcoder:latest-worker
+    image: segator/transcoder:latest-worker
     command:
       - --broker.host
       - rabbitmq

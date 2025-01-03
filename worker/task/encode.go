@@ -586,13 +586,12 @@ func (J *EncodeWorker) updateTaskStatus(encode *model.WorkTaskEncode, notificati
 		Status:           status,
 		Message:          message,
 	}
-	J.client.PublishEvent(event)
-	J.terminal.Log("[%s] %s have been %s: %s", event.Id.String(), event.NotificationType, event.Status, event.Message)
-
-	J.saveTaskStatusDisk(&model.TaskStatus{
+	defer J.saveTaskStatusDisk(&model.TaskStatus{
 		LastState: &event,
 		Task:      encode,
 	})
+	J.client.PublishEvent(event)
+	J.terminal.Log("[%s] %s have been %s: %s", event.Id.String(), event.NotificationType, event.Status, event.Message)
 
 }
 
@@ -661,20 +660,44 @@ func (J *EncodeWorker) PGSMkvExtractDetectAndConvert(ctx context.Context, taskEn
 }
 
 func (J *EncodeWorker) convertPGSToSrt(ctx context.Context, taskEncode *model.WorkTaskEncode, subtitles []*Subtitle) error {
-	for _, subtitle := range subtitles {
-		supPath := filepath.Join(taskEncode.WorkDir, fmt.Sprintf("%d.sup", subtitle.Id))
-
-		err := J.pgsWorker.ConvertPGS(ctx, model.TaskPGS{
-			PGSID:         int(subtitle.Id),
-			PGSSourcePath: supPath,
-			PGSTargetPath: filepath.Join(taskEncode.WorkDir, fmt.Sprintf("%d.srt", subtitle.Id)),
-			PGSLanguage:   subtitle.Language,
-		})
-		if err != nil {
-			return err
-		}
+	var wg sync.WaitGroup
+	tasks := make(chan Subtitle, len(subtitles))
+	errs := make(chan error, len(subtitles))
+	for i := 0; i < J.workerConfig.PGSConfig.ParallelJobs; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for subtitle := range tasks {
+				pgsTerminalTask := J.terminal.AddTask(fmt.Sprintf("%s %d", taskEncode.TaskEncode.Id.String(), subtitle.Id), PGSJobStepType)
+				pgsTerminalTask.SetTotal(0)
+				supPath := filepath.Join(taskEncode.WorkDir, fmt.Sprintf("%d.sup", subtitle.Id))
+				err := J.pgsWorker.ConvertPGS(ctx, model.TaskPGS{
+					PGSID:         int(subtitle.Id),
+					PGSSourcePath: supPath,
+					PGSTargetPath: filepath.Join(taskEncode.WorkDir, fmt.Sprintf("%d.srt", subtitle.Id)),
+					PGSLanguage:   subtitle.Language,
+				})
+				if err != nil {
+					pgsTerminalTask.Error()
+					errs <- err
+				}
+				pgsTerminalTask.Done()
+			}
+		}()
 	}
-	return nil
+
+	for _, subtitle := range subtitles {
+		tasks <- *subtitle
+	}
+	close(tasks)
+	wg.Wait()
+	close(errs)
+
+	var errorList []error
+	for err := range errs {
+		errorList = append(errorList, err)
+	}
+	return errors.Join(errorList...)
 }
 
 func (J *EncodeWorker) MKVExtract(ctx context.Context, subtitles []*Subtitle, taskEncode *model.WorkTaskEncode) error {
@@ -854,6 +877,7 @@ func (J *EncodeWorker) encodeVideo(ctx context.Context, job *model.WorkTaskEncod
 		J.updateTaskStatus(job, model.FFMPEGSNotification, model.FailedNotificationStatus, err.Error())
 		return err
 	}
+
 	diffDuration := encodedVideoParams.Format.DurationSeconds - sourceVideoParams.Format.DurationSeconds
 	if diffDuration > 60 || diffDuration < -60 {
 		err = fmt.Errorf("source File duration %f is diferent than encoded %f", sourceVideoParams.Format.DurationSeconds, encodedVideoParams.Format.DurationSeconds)
@@ -897,7 +921,7 @@ func (F *FFMPEGGenerator) setVideoFilters(container *ContainerData) {
 	videoEncoderQuality := fmt.Sprintf("-pix_fmt yuv420p10le -c:v %s -crf %d -profile:v %s -preset %s", F.Config.VideoCodec, F.Config.VideoCRF, F.Config.VideoProfile, F.Config.VideoPreset)
 	//TODO HDR??
 	videoHDR := ""
-	F.VideoFilter = fmt.Sprintf("-map 0:%d -map_chapters -1 -flags +global_header -filter:v %s %s %s", container.Video.Id, videoFilterParameters, videoHDR, videoEncoderQuality)
+	F.VideoFilter = fmt.Sprintf("-map 0:%d -avoid_negative_ts make_zero -copyts -map_chapters -1 -flags +global_header -filter:v %s %s %s", container.Video.Id, videoFilterParameters, videoHDR, videoEncoderQuality)
 
 }
 func (F *FFMPEGGenerator) setSubtFilters(container *ContainerData, workDir string) {
@@ -932,7 +956,7 @@ func (F *FFMPEGGenerator) setMetadata(container *ContainerData) {
 	F.Metadata = fmt.Sprintf("-metadata encodeParameters='%s'", container.ToJson())
 }
 func (F *FFMPEGGenerator) buildArguments(threads uint8, outputFilePath string) string {
-	coreParameters := fmt.Sprintf("-hide_banner  -threads %d", threads)
+	coreParameters := fmt.Sprintf("-fflags +genpts -hide_banner  -threads %d", threads)
 	inputsParameters := ""
 	for _, input := range F.inputPaths {
 		inputsParameters = fmt.Sprintf("%s -i \"%s\"", inputsParameters, input)

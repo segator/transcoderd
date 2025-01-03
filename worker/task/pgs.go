@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/asticode/go-astisub"
 	log "github.com/sirupsen/logrus"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 	"transcoder/helper/command"
 	"transcoder/model"
 )
@@ -41,7 +43,7 @@ func NewPGSWorker(workerConfig Config, workerName string) *PGSWorker {
 }
 
 func (P *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS) (err error) {
-	log.Infof("Converting PGS To Srt for Job stream %d", taskPGS.PGSID)
+	log.Debugf("Converting PGS To Srt for Job stream %d", taskPGS.PGSID)
 	//TODO events??
 	inputFilePath := taskPGS.PGSSourcePath
 	outputFilePath := taskPGS.PGSTargetPath
@@ -84,12 +86,29 @@ func (P *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS) (err 
 		return nil
 	}
 
-	f, err := os.Open(outputFilePath)
+	subtitles, err := astisub.OpenFile(outputFilePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("could not parse subtitles: %v", err)
 	}
-	defer f.Close()
-	log.Infof("Converted PGS To Srt for Job stream %d", taskPGS.PGSID)
+
+	for _, item := range subtitles.Items {
+		// This is an special case, pgstosrt some times set end time to 00:00 or lower than start time
+		if item.StartAt > item.EndAt {
+			item.EndAt = item.StartAt + (2 * time.Second)
+		}
+	}
+	subtitles.Optimize()
+	subtitles.Unfragment()
+	outFile, err := os.OpenFile(outputFilePath, os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("could not open file for writing: %v", err)
+	}
+	defer outFile.Close()
+	if err = subtitles.WriteToSRT(outFile); err != nil {
+		return fmt.Errorf("could not write to file: %v", err)
+	}
+
+	log.Debugf("Converted PGS To Srt for Job stream %d", taskPGS.PGSID)
 	return err
 }
 

@@ -77,6 +77,9 @@ func (R *RuntimeScheduler) RequestJob(ctx context.Context) (*model.TaskEncode, e
 
 func (R *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, jobEvent *model.TaskEvent) error {
 	// Store any event
+	var mut sync.Mutex
+	mut.Lock()
+	defer mut.Unlock()
 	if err := R.repo.ProcessEvent(ctx, jobEvent); err != nil {
 		return err
 	}

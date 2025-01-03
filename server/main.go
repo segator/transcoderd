@@ -34,6 +34,8 @@ var (
 
 func init() {
 	//Scheduler
+	var verbose bool
+	pflag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 	pflag.Duration("scheduler.scheduleTime", time.Minute*5, "Execute the scheduling loop every X seconds")
 	pflag.Duration("scheduler.jobTimeout", time.Hour*24, "Requeue jobs that are running for more than X minutes")
 	pflag.String("scheduler.sourcePath", "/data/current", "Download path")
@@ -70,6 +72,11 @@ func init() {
 		}
 	}
 	pflag.Parse()
+	if verbose {
+		log.SetLevel(log.DebugLevel)
+	} else {
+		log.SetLevel(log.InfoLevel)
+	}
 	viper.BindPFlags(pflag.CommandLine)
 
 	urlAndDurationDecoder := viper.DecodeHook(func(source reflect.Type, target reflect.Type, data interface{}) (interface{}, error) {
@@ -114,7 +121,6 @@ func usage() {
 }
 
 func main() {
-	log.SetLevel(log.DebugLevel)
 	wg := &sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)

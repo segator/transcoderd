@@ -13,6 +13,7 @@ type JobStepType string
 const DownloadJobStepType = "Download"
 const UploadJobStepType = "Upload"
 const EncodeJobStepType = "Encode"
+const PGSJobStepType = "PGS"
 
 var (
 	unitScales = []int64{
@@ -84,6 +85,9 @@ func (C *ConsoleWorkerPrinter) AddTask(id string, stepType JobStepType) *TaskTra
 		unit = progress.UnitsBytes
 		printer = text.FgGreen
 		break
+	case PGSJobStepType:
+		unit = progress.UnitsBytes
+		printer = text.FgWhite
 	case EncodeJobStepType:
 		unit = progress.Units{
 			Notation:         "",

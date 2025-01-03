@@ -6,6 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	pflag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"math"
 	"os"
 	"os/signal"
 	"reflect"
@@ -36,12 +37,13 @@ func init() {
 	}
 
 	cmd.WebFlags()
+	var verbose bool
+	pflag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 	pflag.Bool("worker.noUpdateMode", false, "Run as Updater")
 	pflag.String("worker.temporalPath", os.TempDir(), "Path used for temporal data")
 	pflag.String("worker.name", hostname, "Worker Name used for statistics")
 	pflag.Int("worker.threads", runtime.NumCPU(), "Worker Threads")
-	pflag.StringSlice("worker.acceptedJobs", []string{"encode"}, "type of jobs this Worker will accept: encode,pgsTosrt")
-	pflag.Int("worker.pgsJobs", 4, "Worker PGS Jobs in parallel")
+	pflag.Int("worker.pgsConfig.parallelJobs", int(math.Ceil(float64(runtime.NumCPU())/4)), "Worker PGS Jobs in parallel")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
 	pflag.String("worker.pgsConfig.DLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")
 	pflag.String("worker.pgsConfig.tessdataPath", "./tessdata", "tesseract data path")
@@ -74,6 +76,11 @@ func init() {
 		}
 	}
 	pflag.Parse()
+	if verbose {
+		log.SetLevel(log.DebugLevel)
+	} else {
+		log.SetLevel(log.InfoLevel)
+	}
 
 	viper.BindPFlags(pflag.CommandLine)
 	viperDecoder := viper.DecodeHook(func(source reflect.Type, target reflect.Type, data interface{}) (interface{}, error) {
@@ -100,7 +107,6 @@ func usage() {
 }
 
 func main() {
-	log.SetLevel(log.DebugLevel)
 	wg := &sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)

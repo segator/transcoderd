@@ -25,26 +25,30 @@ const (
 	PGSNotification        NotificationType = "PGS"
 	FFMPEGSNotification    NotificationType = "FFMPEG"
 
-	AddedNotificationStatus     NotificationStatus = "added"
-	ReAddedNotificationStatus   NotificationStatus = "readded"
+	QueuedNotificationStatus    NotificationStatus = "queued"
+	AssignedNotificationStatus  NotificationStatus = "assigned"
 	StartedNotificationStatus   NotificationStatus = "started"
 	CompletedNotificationStatus NotificationStatus = "completed"
 	CanceledNotificationStatus  NotificationStatus = "canceled"
 	FailedNotificationStatus    NotificationStatus = "failed"
 
-	CancelJob       JobAction = "cancel"
-	EncodeJobType   JobType   = "encode"
-	PGSToSrtJobType JobType   = "pgstosrt"
+	CancelJob JobAction = "cancel"
 )
 
 type Identity interface {
 	getUUID() uuid.UUID
 }
-type Video struct {
-	SourcePath      string     `json:"sourcePath"`
-	DestinationPath string     `json:"destinationPath"`
-	Id              uuid.UUID  `json:"id"`
-	Events          TaskEvents `json:"events"`
+type Job struct {
+	SourcePath    string           `json:"source_path,omitempty"`
+	TargetPath    string           `json:"destination_path,omitempty"`
+	Id            uuid.UUID        `json:"id"`
+	Events        TaskEvents       `json:"events,omitempty"`
+	Status        string           `json:"status,omitempty"`
+	StatusPhase   NotificationType `json:"status_phase,omitempty"`
+	StatusMessage string           `json:"status_message,omitempty"`
+	LastUpdate    *time.Time       `json:"last_update,omitempty"`
+	SourceSize    int64            `json:"source_size,omitempty"`
+	TargetSize    int64            `json:"target_size,omitempty"`
 }
 
 type JobEventQueue struct {
@@ -71,12 +75,8 @@ type JobEvent struct {
 type JobType string
 
 type TaskEncode struct {
-	Id          uuid.UUID `json:"id"`
-	DownloadURL string    `json:"downloadURL"`
-	UploadURL   string    `json:"uploadURL"`
-	ChecksumURL string    `json:"checksumURL"`
-	EventID     int       `json:"eventID"`
-	Priority    int       `json:"priority"`
+	Id      uuid.UUID `json:"id"`
+	EventID int       `json:"eventID"`
 }
 
 type WorkTaskEncode struct {
@@ -87,11 +87,10 @@ type WorkTaskEncode struct {
 }
 
 type TaskPGS struct {
-	Id          uuid.UUID `json:"id"`
-	PGSID       int       `json:"pgsid"`
-	PGSdata     []byte    `json:"pgsdata"`
-	PGSLanguage string    `json:"pgslanguage"`
-	ReplyTo     string    `json:"replyto"`
+	PGSID         int
+	PGSSourcePath string
+	PGSLanguage   string
+	PGSTargetPath string
 }
 
 type TaskPGSResponse struct {
@@ -105,16 +104,12 @@ type TaskPGSResponse struct {
 func (V TaskEncode) getUUID() uuid.UUID {
 	return V.Id
 }
-func (V TaskPGS) getUUID() uuid.UUID {
-	return V.Id
-}
 
 type TaskEvent struct {
 	Id               uuid.UUID          `json:"id"`
 	EventID          int                `json:"eventID"`
 	EventType        EventType          `json:"eventType"`
 	WorkerName       string             `json:"workerName"`
-	WorkerQueue      string             `json:"workerQueue"`
 	EventTime        time.Time          `json:"eventTime"`
 	IP               string             `json:"ip"`
 	NotificationType NotificationType   `json:"notificationType"`
@@ -125,6 +120,16 @@ type TaskEvent struct {
 type TaskStatus struct {
 	LastState *TaskEvent
 	Task      *WorkTaskEncode
+}
+
+func (e TaskEvent) IsAssigned() bool {
+	if e.EventType != NotificationEvent {
+		return false
+	}
+	if e.NotificationType == JobNotification && (e.Status == AssignedNotificationStatus || e.Status == StartedNotificationStatus) {
+		return true
+	}
+	return false
 }
 
 func (e TaskEvent) IsDownloading() bool {
@@ -214,13 +219,12 @@ type JobRequestError struct {
 	Error string `json:"error"`
 }
 type JobRequest struct {
-	SourcePath      string `json:"sourcePath"`
-	DestinationPath string `json:"destinationPath"`
-	ForceCompleted  bool   `json:"forceCompleted"`
-	ForceFailed     bool   `json:"forceFailed"`
-	ForceExecuting  bool   `json:"forceExecuting"`
-	ForceAdded      bool   `json:"forceAdded"`
-	Priority        int    `json:"priority"`
+	SourcePath     string `json:"sourcePath"`
+	ForceCompleted bool   `json:"forceCompleted"`
+	ForceFailed    bool   `json:"forceFailed"`
+	ForceAssigned  bool   `json:"forceAssigned"`
+	SourceSize     int64
+	TargetPath     string
 }
 
 func (a TaskEvents) Len() int {
@@ -236,7 +240,7 @@ func (a TaskEvents) GetLastElement(i int) interface{} {
 	return a[i]
 }
 
-func (v *Video) AddEvent(eventType EventType, notificationType NotificationType, notificationStatus NotificationStatus) (newEvent *TaskEvent) {
+func (v *Job) AddEvent(eventType EventType, notificationType NotificationType, notificationStatus NotificationStatus) (newEvent *TaskEvent) {
 	latestEvent := v.Events.GetLatest()
 	newEventID := 0
 	if latestEvent != nil {
@@ -253,10 +257,4 @@ func (v *Video) AddEvent(eventType EventType, notificationType NotificationType,
 	}
 	v.Events = append(v.Events, newEvent)
 	return newEvent
-}
-
-type Manager interface {
-	EventNotification(event TaskEvent)
-	ResponsePGSJob(response TaskPGSResponse) error
-	RequestPGSJob(pgsJob TaskPGS) <-chan *TaskPGSResponse
 }

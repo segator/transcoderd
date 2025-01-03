@@ -26,6 +26,7 @@ import (
 	"transcoder/helper"
 	"transcoder/helper/command"
 	"transcoder/model"
+	"transcoder/worker/serverclient"
 )
 
 const RESET_LINE = "\r\033[K"
@@ -40,57 +41,46 @@ type FFMPEGProgress struct {
 	percent  float64
 }
 type EncodeWorker struct {
-	model.Manager
-	name          string
-	ctx           context.Context
-	cancelContext context.CancelFunc
-	prefetchJobs  uint32
-	downloadChan  chan *model.WorkTaskEncode
-	encodeChan    chan *model.WorkTaskEncode
-	uploadChan    chan *model.WorkTaskEncode
-	workerConfig  Config
-	tempPath      string
-	wg            sync.WaitGroup
-	mu            sync.RWMutex
-	terminal      *ConsoleWorkerPrinter
-	ctxStopQueues context.Context
-	stopQueues    context.CancelFunc
+	name         string
+	prefetchJobs uint32
+	downloadChan chan *model.WorkTaskEncode
+	encodeChan   chan *model.WorkTaskEncode
+	uploadChan   chan *model.WorkTaskEncode
+	workerConfig Config
+	tempPath     string
+	wg           sync.WaitGroup
+	mu           sync.RWMutex
+	terminal     *ConsoleWorkerPrinter
+	pgsWorker    *PGSWorker
+	client       *serverclient.ServerClient
 }
 
-func NewEncodeWorker(ctx context.Context, workerConfig Config, workerName string, printer *ConsoleWorkerPrinter) *EncodeWorker {
-	newCtx, cancel := context.WithCancel(ctx)
-	ctxStopQueues, stopQueues := context.WithCancel(ctx)
+func NewEncodeWorker(workerConfig Config, pgsWorkers *PGSWorker, client *serverclient.ServerClient, workerName string, printer *ConsoleWorkerPrinter) *EncodeWorker {
 	tempPath := filepath.Join(workerConfig.TemporalPath, fmt.Sprintf("worker-%s", workerName))
 	encodeWorker := &EncodeWorker{
-		name:          workerName,
-		ctx:           newCtx,
-		ctxStopQueues: ctxStopQueues,
-		stopQueues:    stopQueues,
-		wg:            sync.WaitGroup{},
-		cancelContext: cancel,
-		workerConfig:  workerConfig,
-		downloadChan:  make(chan *model.WorkTaskEncode, 100),
-		encodeChan:    make(chan *model.WorkTaskEncode, 100),
-		uploadChan:    make(chan *model.WorkTaskEncode, 100),
-		tempPath:      tempPath,
-		terminal:      printer,
-		prefetchJobs:  0,
+		name:         workerName,
+		pgsWorker:    pgsWorkers,
+		client:       client,
+		wg:           sync.WaitGroup{},
+		workerConfig: workerConfig,
+		downloadChan: make(chan *model.WorkTaskEncode, 100),
+		encodeChan:   make(chan *model.WorkTaskEncode, 100),
+		uploadChan:   make(chan *model.WorkTaskEncode, 100),
+		tempPath:     tempPath,
+		terminal:     printer,
+		prefetchJobs: 0,
 	}
 	os.MkdirAll(tempPath, os.ModePerm)
 
 	return encodeWorker
 }
 
-func (E *EncodeWorker) Initialize() {
+func (E *EncodeWorker) Start(ctx context.Context) {
 	E.resumeJobs()
 	go E.terminal.Render()
-	go E.downloadQueue()
-
-	for i := 0; i < E.workerConfig.EncodeJobs; i++ {
-		go E.uploadQueue()
-		go E.encodeQueue()
-	}
-
+	go E.downloadQueue(ctx)
+	go E.uploadQueue(ctx)
+	go E.encodeQueue(ctx)
 }
 
 func (E *EncodeWorker) resumeJobs() {
@@ -171,32 +161,6 @@ func getDuration(res string) int {
 	return -1
 }
 
-/*func printProgress(ctx context.Context, reader *progress.Reader, size int64, wg *sync.WaitGroup, label string) {
-	wg.Add(1)
-	//TODO no calcula be el temps/velocitat, donat que el calcula desde el principi i hauria de calcular amb els ultims X segons
-	progressChan := progress.NewTicker(ctx, reader, size, 1*time.Second)
-
-	for p := range progressChan {
-		blocks := int((p.Percent() / 100) * 50)
-		line := "|<"
-		for i := 0; i < blocks; i++ {
-			line = line + "#"
-		}
-		for i := 0; i < (50 - blocks); i++ {
-			line = line + "-"
-		}
-		line = line + ">|"
-		fmt.Printf("%s%s %s Speed:%s/s Remaining:%s EstimatedAt: %02d:%02d", RESET_LINE, label, line, bytesize.New(p.Speed()), durafmt.Parse(p.Remaining()).LimitFirstN(2).String(), p.Estimated().Hour(), p.Estimated().Minute())
-	}
-	fmt.Printf("\n")
-	wg.Done()
-
-}*/
-
-func (J *EncodeWorker) IsTypeAccepted(jobType string) bool {
-	return jobType == string(model.EncodeJobType)
-}
-
 func (J *EncodeWorker) AcceptJobs() bool {
 	now := time.Now()
 	if J.workerConfig.Paused {
@@ -212,8 +176,9 @@ func (J *EncodeWorker) AcceptJobs() bool {
 
 func (j *EncodeWorker) dowloadFile(job *model.WorkTaskEncode, track *TaskTracks) (err error) {
 	err = retry.Do(func() error {
+
 		track.UpdateValue(0)
-		resp, err := http.Get(job.TaskEncode.DownloadURL)
+		resp, err := http.Get(j.client.GetDownloadURL(job.TaskEncode.Id))
 		if err != nil {
 			return err
 		}
@@ -252,7 +217,7 @@ func (j *EncodeWorker) dowloadFile(job *model.WorkTaskEncode, track *TaskTracks)
 		bodyString := ""
 
 		err = retry.Do(func() error {
-			respsha256, err := http.Get(job.TaskEncode.ChecksumURL)
+			respsha256, err := http.Get(j.client.GetChecksumURL(job.TaskEncode.Id))
 			if err != nil {
 				return err
 			}
@@ -298,7 +263,7 @@ func (j *EncodeWorker) dowloadFile(job *model.WorkTaskEncode, track *TaskTracks)
 		}))
 	return err
 }
-func (J *EncodeWorker) getVideoParameters(inputFile string) (data *ffprobe.ProbeData, size int64, err error) {
+func (J *EncodeWorker) getVideoParameters(ctx context.Context, inputFile string) (data *ffprobe.ProbeData, size int64, err error) {
 
 	fileReader, err := os.Open(inputFile)
 	if err != nil {
@@ -310,7 +275,7 @@ func (J *EncodeWorker) getVideoParameters(inputFile string) (data *ffprobe.Probe
 	}
 
 	defer fileReader.Close()
-	data, err = ffprobe.ProbeReader(J.ctx, fileReader)
+	data, err = ffprobe.ProbeReader(ctx, fileReader)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error getting data: %v", err)
 	}
@@ -417,18 +382,18 @@ func (j *EncodeWorker) clearData(data *ffprobe.ProbeData) (container *ContainerD
 	}
 	return container, nil
 }
-func (J *EncodeWorker) FFMPEG(job *model.WorkTaskEncode, videoContainer *ContainerData, ffmpegProgressChan chan<- FFMPEGProgress) error {
+func (J *EncodeWorker) FFMPEG(ctx context.Context, job *model.WorkTaskEncode, videoContainer *ContainerData, ffmpegProgressChan chan<- FFMPEGProgress) error {
 	isClosed := false
 	defer func() {
 		//close(ffmpegProgressChan)
 		isClosed = true
 	}()
 
-	ffmpeg := &FFMPEGGenerator{}
+	ffmpeg := &FFMPEGGenerator{Config: &J.workerConfig.EncodeConfig}
 	ffmpeg.setInputFilters(videoContainer, job.SourceFilePath, job.WorkDir)
 	ffmpeg.setVideoFilters(videoContainer)
 	ffmpeg.setAudioFilters(videoContainer)
-	ffmpeg.setSubtFilters(videoContainer)
+	ffmpeg.setSubtFilters(videoContainer, job.WorkDir)
 	ffmpeg.setMetadata(videoContainer)
 	ffmpegErrLog := ""
 	ffmpegOutLog := ""
@@ -474,7 +439,7 @@ func (J *EncodeWorker) FFMPEG(job *model.WorkTaskEncode, videoContainer *Contain
 	if runtime.GOOS == "linux" {
 		ffmpegCommand.AddEnv(fmt.Sprintf("LD_LIBRARY_PATH=%s", filepath.Dir(helper.GetFFmpegPath())))
 	}
-	exitCode, err := ffmpegCommand.RunWithContext(J.ctx)
+	exitCode, err := ffmpegCommand.RunWithContext(ctx)
 	if err != nil {
 		return fmt.Errorf("%w: stder:%s stdout:%s", err, ffmpegErrLog, ffmpegOutLog)
 	}
@@ -510,7 +475,7 @@ func (P *ProgressTrackReader) SumSha() []byte {
 	return P.sha.Sum(nil)
 }
 
-func (J *EncodeWorker) UploadJob(task *model.WorkTaskEncode, track *TaskTracks) error {
+func (J *EncodeWorker) UploadJob(ctx context.Context, task *model.WorkTaskEncode, track *TaskTracks) error {
 	J.updateTaskStatus(task, model.UploadNotification, model.StartedNotificationStatus, "")
 	err := retry.Do(func() error {
 		track.UpdateValue(0)
@@ -533,7 +498,7 @@ func (J *EncodeWorker) UploadJob(task *model.WorkTaskEncode, track *TaskTracks) 
 
 		client := &http.Client{}
 		//go printProgress(J.ctx, reader, fileSize, wg, "Uploading")
-		req, err := http.NewRequestWithContext(J.ctx, "POST", task.TaskEncode.UploadURL, reader)
+		req, err := http.NewRequestWithContext(ctx, "POST", J.client.GetUploadURL(task.TaskEncode.Id), reader)
 		if err != nil {
 			return err
 		}
@@ -587,12 +552,7 @@ func (J *EncodeWorker) errorJob(taskEncode *model.WorkTaskEncode, err error) {
 	taskEncode.Clean()
 }
 
-func (J *EncodeWorker) Execute(workData []byte) error {
-	taskEncode := &model.TaskEncode{}
-	err := json.Unmarshal(workData, taskEncode)
-	if err != nil {
-		return err
-	}
+func (J *EncodeWorker) Execute(taskEncode *model.TaskEncode) error {
 	workDir := filepath.Join(J.tempPath, taskEncode.Id.String())
 	workTaskEncode := &model.WorkTaskEncode{
 		TaskEncode: taskEncode,
@@ -605,14 +565,10 @@ func (J *EncodeWorker) Execute(workData []byte) error {
 	return nil
 }
 
-func (J *EncodeWorker) Cancel() {
-	J.cancelContext()
-}
 func (J *EncodeWorker) StopQueues() {
 	defer close(J.downloadChan)
 	defer close(J.uploadChan)
 	defer close(J.encodeChan)
-	J.stopQueues()
 	J.wg.Wait()
 }
 func (J *EncodeWorker) GetID() string {
@@ -630,7 +586,7 @@ func (J *EncodeWorker) updateTaskStatus(encode *model.WorkTaskEncode, notificati
 		Status:           status,
 		Message:          message,
 	}
-	J.Manager.EventNotification(event)
+	J.client.PublishEvent(event)
 	J.terminal.Log("[%s] %s have been %s: %s", event.Id.String(), event.NotificationType, event.Status, event.Message)
 
 	J.saveTaskStatusDisk(&model.TaskStatus{
@@ -673,7 +629,7 @@ func (J *EncodeWorker) readTaskStatusFromDiskByPath(filepath string) *model.Task
 	return taskStatus
 }
 
-func (J *EncodeWorker) PGSMkvExtractDetectAndConvert(taskEncode *model.WorkTaskEncode, track *TaskTracks, container *ContainerData) error {
+func (J *EncodeWorker) PGSMkvExtractDetectAndConvert(ctx context.Context, taskEncode *model.WorkTaskEncode, track *TaskTracks, container *ContainerData) error {
 	var PGSTOSrt []*Subtitle
 	for _, subt := range container.Subtitle {
 		if subt.isImageTypeSubtitle() {
@@ -684,7 +640,7 @@ func (J *EncodeWorker) PGSMkvExtractDetectAndConvert(taskEncode *model.WorkTaskE
 		J.updateTaskStatus(taskEncode, model.MKVExtractNotification, model.StartedNotificationStatus, "")
 		track.Message(string(model.MKVExtractNotification))
 		track.SetTotal(0)
-		err := J.MKVExtract(PGSTOSrt, taskEncode)
+		err := J.MKVExtract(ctx, PGSTOSrt, taskEncode)
 		if err != nil {
 			J.updateTaskStatus(taskEncode, model.MKVExtractNotification, model.FailedNotificationStatus, err.Error())
 			return err
@@ -693,7 +649,7 @@ func (J *EncodeWorker) PGSMkvExtractDetectAndConvert(taskEncode *model.WorkTaskE
 
 		J.updateTaskStatus(taskEncode, model.PGSNotification, model.StartedNotificationStatus, "")
 		track.Message(string(model.PGSNotification))
-		err = J.convertPGSToSrt(taskEncode, container, PGSTOSrt)
+		err = J.convertPGSToSrt(ctx, taskEncode, PGSTOSrt)
 		if err != nil {
 			J.updateTaskStatus(taskEncode, model.PGSNotification, model.FailedNotificationStatus, err.Error())
 			return err
@@ -704,61 +660,24 @@ func (J *EncodeWorker) PGSMkvExtractDetectAndConvert(taskEncode *model.WorkTaskE
 	return nil
 }
 
-func (J *EncodeWorker) convertPGSToSrt(taskEncode *model.WorkTaskEncode, container *ContainerData, subtitles []*Subtitle) error {
-	out := make(chan *model.TaskPGSResponse)
-	var pendingPGSResponses []<-chan *model.TaskPGSResponse
+func (J *EncodeWorker) convertPGSToSrt(ctx context.Context, taskEncode *model.WorkTaskEncode, subtitles []*Subtitle) error {
 	for _, subtitle := range subtitles {
-		subFile, err := os.Open(filepath.Join(taskEncode.WorkDir, fmt.Sprintf("%d.sup", subtitle.Id)))
-		if err != nil {
-			return err
-		}
-		outputBytes, err := ioutil.ReadAll(subFile)
-		if err != nil {
-			return err
-		}
-		subFile.Close()
-		//log.Infof("Subtitle %d is PGS, requesting  conversion...", subtitle.Id)
+		supPath := filepath.Join(taskEncode.WorkDir, fmt.Sprintf("%d.sup", subtitle.Id))
 
-		PGSResponse := J.RequestPGSJob(model.TaskPGS{
-			Id:          taskEncode.TaskEncode.Id,
-			PGSID:       int(subtitle.Id),
-			PGSdata:     outputBytes,
-			PGSLanguage: subtitle.Language,
+		err := J.pgsWorker.ConvertPGS(ctx, model.TaskPGS{
+			PGSID:         int(subtitle.Id),
+			PGSSourcePath: supPath,
+			PGSTargetPath: filepath.Join(taskEncode.WorkDir, fmt.Sprintf("%d.srt", subtitle.Id)),
+			PGSLanguage:   subtitle.Language,
 		})
-		pendingPGSResponses = append(pendingPGSResponses, PGSResponse)
-	}
-	go func() {
-		for _, c := range pendingPGSResponses {
-			for v := range c {
-				out <- v
-			}
-		}
-		close(out)
-	}()
-
-	for {
-		select {
-		case <-J.ctx.Done():
-			return J.ctx.Err()
-		case <-time.After(time.Minute * 90):
-			return errors.New("timeout Waiting for PGS Job Done")
-		case response, ok := <-out:
-			if !ok {
-				return nil
-			}
-			if response.Err != "" {
-				return fmt.Errorf("error on Process PGS %d: %s", response.PGSID, response.Err)
-			}
-			subtFilePath := filepath.Join(taskEncode.WorkDir, fmt.Sprintf("%d.srt", response.PGSID))
-			err := ioutil.WriteFile(subtFilePath, response.Srt, os.ModePerm)
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
-func (J *EncodeWorker) MKVExtract(subtitles []*Subtitle, taskEncode *model.WorkTaskEncode) error {
+func (J *EncodeWorker) MKVExtract(ctx context.Context, subtitles []*Subtitle, taskEncode *model.WorkTaskEncode) error {
 	mkvExtractCommand := command.NewCommand(helper.GetMKVExtractPath(), "tracks", taskEncode.SourceFilePath).
 		SetWorkDir(taskEncode.WorkDir)
 	if runtime.GOOS == "linux" {
@@ -768,7 +687,7 @@ func (J *EncodeWorker) MKVExtract(subtitles []*Subtitle, taskEncode *model.WorkT
 		mkvExtractCommand.AddParam(fmt.Sprintf("%d:%d.sup", subtitle.Id, subtitle.Id))
 	}
 
-	_, err := mkvExtractCommand.RunWithContext(J.ctx, command.NewAllowedCodesOption(0, 1))
+	_, err := mkvExtractCommand.RunWithContext(ctx, command.NewAllowedCodesOption(0, 1))
 	if err != nil {
 		J.terminal.Cmd("MKVExtract Command:%s", mkvExtractCommand.GetFullCommand())
 		return fmt.Errorf("MKVExtract unexpected error:%v", err.Error())
@@ -786,13 +705,12 @@ func (J *EncodeWorker) AddDownloadJob(job *model.WorkTaskEncode) {
 	J.downloadChan <- job
 }
 
-func (J *EncodeWorker) downloadQueue() {
+func (J *EncodeWorker) downloadQueue(ctx context.Context) {
 	J.wg.Add(1)
 	for {
 		select {
-		case <-J.ctx.Done():
-		case <-J.ctxStopQueues.Done():
-			J.terminal.Warn("Stopping Download Queue")
+		case <-ctx.Done():
+			J.terminal.Warn("Stopping Download ServerCoordinator")
 			J.wg.Done()
 			return
 		case job, ok := <-J.downloadChan:
@@ -819,13 +737,12 @@ func (J *EncodeWorker) downloadQueue() {
 
 }
 
-func (J *EncodeWorker) uploadQueue() {
+func (J *EncodeWorker) uploadQueue(ctx context.Context) {
 	J.wg.Add(1)
 	for {
 		select {
-		case <-J.ctx.Done():
-		case <-J.ctxStopQueues.Done():
-			J.terminal.Warn("Stopping Upload Queue")
+		case <-ctx.Done():
+			J.terminal.Warn("Stopping Upload ServerCoordinator")
 			J.wg.Done()
 			return
 		case job, ok := <-J.uploadChan:
@@ -833,7 +750,7 @@ func (J *EncodeWorker) uploadQueue() {
 				continue
 			}
 			taskTrack := J.terminal.AddTask(job.TaskEncode.Id.String(), UploadJobStepType)
-			err := J.UploadJob(job, taskTrack)
+			err := J.UploadJob(ctx, job, taskTrack)
 			if err != nil {
 				taskTrack.Error()
 				J.errorJob(job, err)
@@ -848,13 +765,12 @@ func (J *EncodeWorker) uploadQueue() {
 
 }
 
-func (J *EncodeWorker) encodeQueue() {
+func (J *EncodeWorker) encodeQueue(ctx context.Context) {
 	J.wg.Add(1)
 	for {
 		select {
-		case <-J.ctx.Done():
-		case <-J.ctxStopQueues.Done():
-			J.terminal.Warn("Stopping Encode Queue")
+		case <-ctx.Done():
+			J.terminal.Warn("Stopping Encode ServerCoordinator")
 			J.wg.Done()
 			return
 		case job, ok := <-J.encodeChan:
@@ -863,7 +779,7 @@ func (J *EncodeWorker) encodeQueue() {
 			}
 			atomic.AddUint32(&J.prefetchJobs, ^uint32(0))
 			taskTrack := J.terminal.AddTask(job.TaskEncode.Id.String(), EncodeJobStepType)
-			err := J.encodeVideo(job, taskTrack)
+			err := J.encodeVideo(ctx, job, taskTrack)
 			if err != nil {
 				taskTrack.Error()
 				J.errorJob(job, err)
@@ -877,10 +793,10 @@ func (J *EncodeWorker) encodeQueue() {
 
 }
 
-func (J *EncodeWorker) encodeVideo(job *model.WorkTaskEncode, track *TaskTracks) error {
+func (J *EncodeWorker) encodeVideo(ctx context.Context, job *model.WorkTaskEncode, track *TaskTracks) error {
 	J.updateTaskStatus(job, model.FFProbeNotification, model.StartedNotificationStatus, "")
 	track.Message(string(model.FFProbeNotification))
-	sourceVideoParams, sourceVideoSize, err := J.getVideoParameters(job.SourceFilePath)
+	sourceVideoParams, sourceVideoSize, err := J.getVideoParameters(ctx, job.SourceFilePath)
 	if err != nil {
 		J.updateTaskStatus(job, model.FFProbeNotification, model.FailedNotificationStatus, err.Error())
 		return err
@@ -892,7 +808,7 @@ func (J *EncodeWorker) encodeVideo(job *model.WorkTaskEncode, track *TaskTracks)
 		J.terminal.Warn("Error in clearData", J.GetID())
 		return err
 	}
-	if err = J.PGSMkvExtractDetectAndConvert(job, track, videoContainer); err != nil {
+	if err = J.PGSMkvExtractDetectAndConvert(ctx, job, track, videoContainer); err != nil {
 		return err
 	}
 	J.updateTaskStatus(job, model.FFMPEGSNotification, model.StartedNotificationStatus, "")
@@ -906,7 +822,7 @@ func (J *EncodeWorker) encodeVideo(job *model.WorkTaskEncode, track *TaskTracks)
 	loop:
 		for {
 			select {
-			case <-J.ctx.Done():
+			case <-ctx.Done():
 				return
 			case FFMPEGProgress, open := <-FFMPEGProgressChan:
 				if !open {
@@ -925,7 +841,7 @@ func (J *EncodeWorker) encodeVideo(job *model.WorkTaskEncode, track *TaskTracks)
 			}
 		}
 	}()
-	err = J.FFMPEG(job, videoContainer, FFMPEGProgressChan)
+	err = J.FFMPEG(ctx, job, videoContainer, FFMPEGProgressChan)
 	if err != nil {
 		//<-time.After(time.Minute*30)
 		J.updateTaskStatus(job, model.FFMPEGSNotification, model.FailedNotificationStatus, err.Error())
@@ -933,7 +849,7 @@ func (J *EncodeWorker) encodeVideo(job *model.WorkTaskEncode, track *TaskTracks)
 	}
 	<-time.After(time.Second * 1)
 
-	encodedVideoParams, encodedVideoSize, err := J.getVideoParameters(job.TargetFilePath)
+	encodedVideoParams, encodedVideoSize, err := J.getVideoParameters(ctx, job.TargetFilePath)
 	if err != nil {
 		J.updateTaskStatus(job, model.FFMPEGSNotification, model.FailedNotificationStatus, err.Error())
 		return err
@@ -953,11 +869,12 @@ func (J *EncodeWorker) encodeVideo(job *model.WorkTaskEncode, track *TaskTracks)
 	return nil
 }
 
-/*func (J *EncodeWorker) isQueueFull() bool {
-	return len(J.encodeChan) >= MAX_PREFETCHED_JOBS || len(J.downloadChan) > 0
-}*/
+func (E *EncodeWorker) GetName() string {
+	return E.name
+}
 
 type FFMPEGGenerator struct {
+	Config         *FFMPEGConfig
 	inputPaths     []string
 	VideoFilter    string
 	AudioFilter    []string
@@ -971,22 +888,27 @@ func (F *FFMPEGGenerator) setAudioFilters(container *ContainerData) {
 		//TODO que pasa quan el channelLayout esta empty??
 		title := fmt.Sprintf("%s (%s)", audioStream.Language, audioStream.ChannelLayour)
 		metadata := fmt.Sprintf(" -metadata:s:a:%d \"title=%s\"", index, title)
-		codecQuality := fmt.Sprintf("-c:a:%d %s -vbr %d", index, "libfdk_aac", 5)
+		codecQuality := fmt.Sprintf("-c:a:%d %s -vbr %d", index, F.Config.AudioCodec, F.Config.AudioVBR)
 		F.AudioFilter = append(F.AudioFilter, fmt.Sprintf(" -map 0:%d %s %s", audioStream.Id, metadata, codecQuality))
 	}
 }
 func (F *FFMPEGGenerator) setVideoFilters(container *ContainerData) {
-	videoFilterParameters := fmt.Sprintf("\"scale='min(%d,iw)':min'(%d,ih)':force_original_aspect_ratio=decrease\"", 1920, 1080)
-	videoEncoderQuality := fmt.Sprintf("-c:v %s -crf %d -preset %s", "libx265", 21, "medium")
+	videoFilterParameters := "\"scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease\""
+	videoEncoderQuality := fmt.Sprintf("-pix_fmt yuv420p10le -c:v %s -crf %d -profile:v %s -preset %s", F.Config.VideoCodec, F.Config.VideoCRF, F.Config.VideoProfile, F.Config.VideoPreset)
 	//TODO HDR??
 	videoHDR := ""
 	F.VideoFilter = fmt.Sprintf("-map 0:%d -map_chapters -1 -flags +global_header -filter:v %s %s %s", container.Video.Id, videoFilterParameters, videoHDR, videoEncoderQuality)
 
 }
-func (F *FFMPEGGenerator) setSubtFilters(container *ContainerData) {
+func (F *FFMPEGGenerator) setSubtFilters(container *ContainerData, workDir string) {
 	subtInputIndex := 1
 	for index, subtitle := range container.Subtitle {
 		if subtitle.isImageTypeSubtitle() {
+			srtEncodedFile := filepath.Join(workDir, fmt.Sprintf("%d.srt", subtitle.Id))
+			_, err := os.Stat(srtEncodedFile)
+			if os.IsNotExist(err) {
+				continue
+			}
 
 			subtitleMap := fmt.Sprintf("-map %d -c:s:%d srt", subtInputIndex, index)
 			subtitleForced := ""
@@ -1028,14 +950,17 @@ func (F *FFMPEGGenerator) buildArguments(threads uint8, outputFilePath string) s
 	return fmt.Sprintf("%s %s -max_muxing_queue_size 9999 %s %s %s %s %s -y", coreParameters, inputsParameters, F.VideoFilter, audioParameters, subtParameters, F.Metadata, outputFilePath)
 }
 
-func (F *FFMPEGGenerator) setInputFilters(container *ContainerData, sourceFilePath string, tempPath string) {
+func (F *FFMPEGGenerator) setInputFilters(container *ContainerData, sourceFilePath string, workDir string) {
 	F.inputPaths = append(F.inputPaths, sourceFilePath)
-	inputIndex := 0
 	if container.HaveImageTypeSubtitle() {
 		for _, subt := range container.Subtitle {
 			if subt.isImageTypeSubtitle() {
-				inputIndex++
-				F.inputPaths = append(F.inputPaths, filepath.Join(tempPath, fmt.Sprintf("%d.srt", subt.Id)))
+				srtEncodedFile := filepath.Join(workDir, fmt.Sprintf("%d.srt", subt.Id))
+				_, err := os.Stat(srtEncodedFile)
+				if os.IsNotExist(err) {
+					continue
+				}
+				F.inputPaths = append(F.inputPaths, srtEncodedFile)
 			}
 		}
 	}

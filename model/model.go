@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"github.com/google/uuid"
 	"os"
 	"time"
@@ -236,11 +237,22 @@ func (a TaskEvents) Less(i, j int) bool {
 func (a TaskEvents) Swap(i, j int) {
 	a[i], a[j] = a[j], a[i]
 }
+func (a TaskEvents) GetByEventId(i int) (*TaskEvent, error) {
+	for _, event := range a {
+		if event.EventID == i {
+			return event, nil
+		}
+	}
+	return nil, fmt.Errorf("event not found")
+}
 func (a TaskEvents) GetLastElement(i int) interface{} {
 	return a[i]
 }
-
 func (v *Job) AddEvent(eventType EventType, notificationType NotificationType, notificationStatus NotificationStatus) (newEvent *TaskEvent) {
+	return v.AddEventComplete(eventType, notificationType, notificationStatus, "")
+}
+
+func (v *Job) AddEventComplete(eventType EventType, notificationType NotificationType, notificationStatus NotificationStatus, message string) (newEvent *TaskEvent) {
 	latestEvent := v.Events.GetLatest()
 	newEventID := 0
 	if latestEvent != nil {
@@ -254,6 +266,7 @@ func (v *Job) AddEvent(eventType EventType, notificationType NotificationType, n
 		EventTime:        time.Now(),
 		NotificationType: notificationType,
 		Status:           notificationStatus,
+		Message:          message,
 	}
 	v.Events = append(v.Events, newEvent)
 	return newEvent

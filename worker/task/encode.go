@@ -186,7 +186,7 @@ func (j *EncodeWorker) dowloadFile(job *model.WorkTaskEncode, track *TaskTracks)
 			return ErrorJobNotFound
 		}
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf(fmt.Sprintf("not 200 respose in dowload code %d", resp.StatusCode))
+			return fmt.Errorf(fmt.Sprintf("not 200 respose in download code %d", resp.StatusCode))
 		}
 		defer resp.Body.Close()
 		size, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
@@ -956,7 +956,7 @@ func (F *FFMPEGGenerator) setMetadata(container *ContainerData) {
 	F.Metadata = fmt.Sprintf("-metadata encodeParameters='%s'", container.ToJson())
 }
 func (F *FFMPEGGenerator) buildArguments(threads uint8, outputFilePath string) string {
-	coreParameters := fmt.Sprintf("-fflags +genpts -hide_banner  -threads %d", threads)
+	coreParameters := fmt.Sprintf("-fflags +genpts -analyzeduration 2147483647 -probesize 2147483647 -hide_banner  -threads %d", threads)
 	inputsParameters := ""
 	for _, input := range F.inputPaths {
 		inputsParameters = fmt.Sprintf("%s -i \"%s\"", inputsParameters, input)

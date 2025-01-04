@@ -20,7 +20,7 @@ import (
 
 var (
 	x264ex = regexp.MustCompile(`(?i)(((x|h)264)|mpeg-4|mpeg-1|mpeg-2|mpeg|xvid|divx|vc-1|av1|vp8|vp9|wmv3|mp43)`)
-	ac3ex  = regexp.MustCompile(`(?i)(ac3|eac3|pcm|flac|mp2|dts|mp2|mp3|truehd|wma|vorbis|opus|mpeg audio)`)
+	ac3ex  = regexp.MustCompile(`(?i)(ac3|eac3|pcm|flac|mp2|dts|mp3|truehd|wma|vorbis|opus|mpeg audio)`)
 )
 
 type Scheduler interface {
@@ -149,10 +149,10 @@ func (R *RuntimeScheduler) Run(wg *sync.WaitGroup, ctx context.Context) {
 }
 
 func (R *RuntimeScheduler) start(ctx context.Context) {
-	go R.schedule(ctx)
+	go R.scheduleRoutine(ctx)
 }
 
-func (R *RuntimeScheduler) schedule(ctx context.Context) {
+func (R *RuntimeScheduler) scheduleRoutine(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -160,29 +160,10 @@ func (R *RuntimeScheduler) schedule(ctx context.Context) {
 		case checksumPath := <-R.checksumChan:
 			R.pathChecksumMap[checksumPath.path] = checksumPath.checksum
 		case <-time.After(R.config.ScheduleTime):
-			taskEvents, err := R.repo.GetTimeoutJobs(ctx, R.config.JobTimeout)
-			if err != nil {
-				log.Error(err)
+			if err := R.jobMaintenance(ctx); err != nil {
+				log.Errorf("Error on job maintenance %s", err)
 			}
-			for _, taskEvent := range taskEvents {
-				if taskEvent.IsAssigned() {
-					log.Infof("Rescheduling %s after job timeout", taskEvent.Id.String())
-					video, err := R.repo.GetJob(ctx, taskEvent.Id.String())
-					if err != nil {
-						log.Error(err)
-						continue
-					}
-					jobRequest := &model.JobRequest{
-						SourcePath:    video.SourcePath,
-						TargetPath:    video.TargetPath,
-						ForceAssigned: true,
-					}
-					video, err = R.scheduleJobRequest(ctx, jobRequest)
-					if err != nil {
-						log.Error(err)
-					}
-				}
-			}
+
 		}
 	}
 }
@@ -244,42 +225,42 @@ type ScheduleJobRequestResult struct {
 	SkippedFiles     []*model.JobRequestError `json:"skipped"`
 }
 
-func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *model.JobRequest) (video *model.Job, err error) {
+func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *model.JobRequest) (job *model.Job, err error) {
 	err = R.repo.WithTransaction(ctx, func(ctx context.Context, tx repository.Repository) error {
-		video, err = tx.GetJobByPath(ctx, jobRequest.SourcePath)
+		job, err = tx.GetJobByPath(ctx, jobRequest.SourcePath)
 		if err != nil {
 			return err
 		}
 		var eventsToAdd []*model.TaskEvent
-		if video == nil {
+		if job == nil {
 			newUUID, _ := uuid.NewUUID()
-			video = &model.Job{
+			job = &model.Job{
 				SourcePath: jobRequest.SourcePath,
 				SourceSize: jobRequest.SourceSize,
 				TargetPath: jobRequest.TargetPath,
 				Id:         newUUID,
 			}
-			err = tx.AddJob(ctx, video)
+			err = tx.AddJob(ctx, job)
 			if err != nil {
 				return err
 			}
-			startEvent := video.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
+			startEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
 			eventsToAdd = append(eventsToAdd, startEvent)
 		} else {
-			//If video exist we check if we can retry the job
-			lastEvent := video.Events.GetLatestPerNotificationType(model.JobNotification)
-			status := video.Events.GetStatus()
+			//If job exist we check if we can retry the job
+			lastEvent := job.Events.GetLatestPerNotificationType(model.JobNotification)
+			status := job.Events.GetStatus()
 			if jobRequest.ForceAssigned && (status == model.AssignedNotificationStatus || status == model.StartedNotificationStatus) {
-				cancelEvent := video.AddEvent(model.NotificationEvent, model.JobNotification, model.CanceledNotificationStatus)
+				cancelEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.CanceledNotificationStatus)
 				eventsToAdd = append(eventsToAdd, cancelEvent)
 			}
 			if (jobRequest.ForceCompleted && status == model.CompletedNotificationStatus) ||
 				(jobRequest.ForceFailed && (status == model.FailedNotificationStatus || status == model.CanceledNotificationStatus)) ||
 				(jobRequest.ForceAssigned && (status == model.StartedNotificationStatus || status == model.AssignedNotificationStatus)) {
-				requeueEvent := video.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
+				requeueEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
 				eventsToAdd = append(eventsToAdd, requeueEvent)
 			} else if !(jobRequest.ForceAssigned && status == model.QueuedNotificationStatus) {
-				return errors.New(fmt.Sprintf("%s (%s) job is in %s state by %s, can not be rescheduled", video.Id.String(), jobRequest.SourcePath, lastEvent.Status, lastEvent.WorkerName))
+				return errors.New(fmt.Sprintf("%s (%s) job is in %s state by %s, can not be rescheduled", job.Id.String(), jobRequest.SourcePath, lastEvent.Status, lastEvent.WorkerName))
 			}
 		}
 		if len(eventsToAdd) > 0 {
@@ -293,7 +274,7 @@ func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 
 		return nil
 	})
-	return video, err
+	return job, err
 }
 
 func (R *RuntimeScheduler) ScheduleJobRequests(ctx context.Context, jobRequest *model.JobRequest) (result *ScheduleJobRequestResult, returnError error) {
@@ -421,6 +402,192 @@ func (R *RuntimeScheduler) GetChecksum(ctx context.Context, uuid string) (string
 
 func (S *RuntimeScheduler) stop() {
 
+}
+
+func (R *RuntimeScheduler) jobMaintenance(ctx context.Context) error {
+	if err := R.queuedJobMaintenance(ctx); err != nil {
+		return err
+	}
+	if err := R.failedJobMaintenance(ctx); err != nil {
+		return err
+	}
+	return R.assignedJobMaintenance(ctx)
+
+}
+
+func (R *RuntimeScheduler) queuedJobMaintenance(ctx context.Context) error {
+	queuedJobs, err := R.repo.GetJobsByStatus(ctx, model.QueuedNotificationStatus)
+	if err != nil {
+		return err
+	}
+	for _, job := range queuedJobs {
+		sourcePath := filepath.Join(R.config.SourcePath, job.SourcePath)
+		// Check if source file exists
+		_, err = os.Stat(sourcePath)
+		if os.IsNotExist(err) {
+			newEvent := job.AddEventComplete(model.NotificationEvent, model.JobNotification, model.FailedNotificationStatus, "job source file not found")
+			if err = R.repo.AddNewTaskEvent(ctx, newEvent); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (R *RuntimeScheduler) failedJobMaintenance(ctx context.Context) error {
+	failedJobs, err := R.repo.GetJobsByStatus(ctx, model.FailedNotificationStatus)
+	if err != nil {
+		return err
+	}
+	for _, failedJob := range failedJobs {
+		if verifyFailureMessage(failedJob.StatusMessage) {
+			jobRequest := &model.JobRequest{
+				SourcePath:  failedJob.SourcePath,
+				TargetPath:  failedJob.TargetPath,
+				ForceFailed: true,
+			}
+			_, err = R.scheduleJobRequest(ctx, jobRequest)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (R *RuntimeScheduler) assignedJobMaintenance(ctx context.Context) error {
+	taskEvents, err := R.repo.GetTimeoutJobs(ctx, R.config.JobTimeout)
+	if err != nil {
+		return err
+	}
+	for _, taskEvent := range taskEvents {
+		if taskEvent.IsAssigned() {
+			log.Infof("Rescheduling %s after job timeout", taskEvent.Id.String())
+			job, err := R.repo.GetJob(ctx, taskEvent.Id.String())
+			if err != nil {
+				return err
+			}
+			jobRequest := &model.JobRequest{
+				SourcePath:    job.SourcePath,
+				TargetPath:    job.TargetPath,
+				ForceAssigned: true,
+			}
+			_, err = R.scheduleJobRequest(ctx, jobRequest)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func simpleRegex(pattern string, string string) bool {
+	m, err := regexp.MatchString(strings.ToLower(pattern), strings.ToLower(string))
+	if err != nil {
+		panic(err)
+	}
+	return m
+}
+
+func verifyFailureMessage(message string) bool {
+	if simpleRegex(`job not found`, message) {
+		return false
+	}
+	if simpleRegex(`runtime error: index out of range`, message) {
+		return false
+	}
+
+	if simpleRegex(`not 200 respose in dowload code 404`, message) {
+		return false
+	}
+	if simpleRegex(`source File size `, message) {
+		return false
+	}
+	if simpleRegex(`source File duration `, message) {
+		return false
+	}
+	if simpleRegex(`timeout Waiting for PGS Job Done`, message) {
+		return true
+	}
+	if simpleRegex(`Disk quota exceeded`, message) || simpleRegex(`No space left on device`, message) {
+		return true
+	}
+	if simpleRegex(`error on process PGS.*no such file or directory`, message) {
+		return true
+	}
+	if simpleRegex(`At least one output file must be specified`, message) {
+		return true
+	}
+	if simpleRegex(`MKVExtract unexpected error`, message) {
+		return true
+	}
+	if simpleRegex(`core dumped`, message) {
+		return true
+	}
+	if simpleRegex(`dow(n)?load code 500`, message) {
+		return true
+	}
+	if simpleRegex(`Trailing option\(s\) found in the command`, message) {
+		return true
+	}
+	if simpleRegex(`signal: killed`, message) {
+		return true
+	}
+	if simpleRegex(`signal: aborted`, message) {
+		return true
+	}
+	if simpleRegex(`error getting data`, message) {
+		return true
+	}
+	if message == "exit status 1: stder: stdout:" {
+		return true
+	}
+	if simpleRegex(`runtime error: invalid memory address or nil pointer dereference`, message) {
+		return true
+	}
+	if simpleRegex(`CHecksum error on download source`, message) {
+		return true
+	}
+	if simpleRegex(`maybe incorrect parameters such as bit_rate`, message) || simpleRegex(`Could not find codec parameters for stream`, message) {
+		return true
+	}
+	if simpleRegex(`GLIBC_2.34 not found`, message) || simpleRegex(`libc.so.6: version`, message) {
+		return true
+	}
+	if simpleRegex(`received signal 15`, message) {
+		return true
+	}
+	if simpleRegex(`no such host`, message) || simpleRegex(`server misbehaving`, message) || simpleRegex(`i/o timeout`, message) || simpleRegex(`connection failed because connected host has failed to respond`, message) {
+		return true
+	}
+	if simpleRegex(`connection refused`, message) {
+		return true
+	}
+	if simpleRegex(`srt: Invalid data found when processing input`, message) {
+		return true
+	}
+	if simpleRegex(`segmentation fault`, message) {
+		return true
+	}
+	if simpleRegex(`Subtitle: mov_text`, message) {
+		return false
+	}
+	if simpleRegex(`unsupported AVCodecID S_TEXT/WEBVTT`, message) {
+		return false
+	}
+	if simpleRegex(`Error while decoding stream`, message) {
+		return false
+	}
+	if simpleRegex(`Data: bin_data`, message) {
+		return false
+	}
+	if simpleRegex(`scale/rate is 0/0 which is invalid`, message) {
+		return false
+	}
+	if simpleRegex(`probably corrupt input`, message) {
+		return false
+	}
+	return false
 }
 
 func formatTargetName(path string) string {

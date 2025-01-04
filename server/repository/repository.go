@@ -22,6 +22,7 @@ type Repository interface {
 	PingServerUpdate(ctx context.Context, name string, ip string) error
 	GetTimeoutJobs(ctx context.Context, timeout time.Duration) ([]*model.TaskEvent, error)
 	GetJobs(ctx context.Context) (*[]model.Job, error)
+	GetJobsByStatus(ctx context.Context, status model.NotificationStatus) (jobs []*model.Job, returnError error)
 	GetJob(ctx context.Context, uuid string) (*model.Job, error)
 	GetJobByPath(ctx context.Context, path string) (*model.Job, error)
 	AddJob(ctx context.Context, video *model.Job) error
@@ -253,6 +254,42 @@ func (S *SQLRepository) RetrieveQueuedJob(ctx context.Context) (video *model.Job
 	return S.queuedJob(ctx, conn)
 }
 
+func (S *SQLRepository) GetJobsByStatus(ctx context.Context, status model.NotificationStatus) (jobs []*model.Job, returnError error) {
+	conn, err := S.getConnection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return S.getJobsByStatus(ctx, conn, status)
+}
+
+func (S *SQLRepository) getJobsByStatus(ctx context.Context, tx Transaction, statusFilter model.NotificationStatus) ([]*model.Job, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT v.id, v.source_path,v.source_size, v.target_path,v.target_size FROM jobs v INNER JOIN job_status vs ON v.id = vs.job_id WHERE vs.status = $1;", statusFilter)
+	if err != nil {
+		return nil, err
+	}
+	var jobs []*model.Job
+	defer rows.Close()
+	for rows.Next() {
+		job := model.Job{}
+		rows.Scan(&job.Id, &job.SourcePath, &job.SourceSize, &job.TargetPath, &job.TargetSize)
+		taskEvents, err := S.getTaskEvents(ctx, tx, job.Id.String())
+		if err != nil {
+			return nil, err
+		}
+		job.Events = taskEvents
+		lastUpdate, status, statusPhase, statusMessage, _ := S.getJobStatus(ctx, tx, job.Id.String())
+		if lastUpdate != nil {
+			job.LastUpdate = lastUpdate
+		}
+		job.Status = status
+		job.StatusPhase = statusPhase
+		job.StatusMessage = statusMessage
+		jobs = append(jobs, &job)
+	}
+
+	return jobs, nil
+}
+
 func (S *SQLRepository) GetTimeoutJobs(ctx context.Context, timeout time.Duration) (taskEvent []*model.TaskEvent, returnError error) {
 	conn, err := S.getConnection(ctx)
 	if err != nil {
@@ -367,10 +404,10 @@ func (S *SQLRepository) getJobByPath(ctx context.Context, tx Transaction, path s
 	if err != nil {
 		return nil, err
 	}
-	video := model.Job{}
+	job := model.Job{}
 	found := false
 	if rows.Next() {
-		rows.Scan(&video.Id, &video.SourcePath, &video.TargetPath, &video.SourceSize, &video.TargetSize)
+		rows.Scan(&job.Id, &job.SourcePath, &job.TargetPath, &job.SourceSize, &job.TargetSize)
 		found = true
 	}
 	rows.Close()
@@ -378,12 +415,20 @@ func (S *SQLRepository) getJobByPath(ctx context.Context, tx Transaction, path s
 		return nil, nil
 	}
 
-	taskEvents, err := S.getTaskEvents(ctx, tx, video.Id.String())
+	taskEvents, err := S.getTaskEvents(ctx, tx, job.Id.String())
 	if err != nil {
 		return nil, err
 	}
-	video.Events = taskEvents
-	return &video, nil
+	job.Events = taskEvents
+	lastUpdate, status, statusPhase, statusMessage, _ := S.getJobStatus(ctx, tx, job.Id.String())
+
+	if lastUpdate != nil {
+		job.LastUpdate = lastUpdate
+	}
+	job.Status = status
+	job.StatusPhase = statusPhase
+	job.StatusMessage = statusMessage
+	return &job, nil
 }
 
 func (S *SQLRepository) GetJobByPath(ctx context.Context, path string) (video *model.Job, returnError error) {

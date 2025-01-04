@@ -44,19 +44,12 @@ push-images: push-image-server push-image-worker
 push-images:		## build and push container images
 
 DOCKER_BUILD_ARG := --cache-to type=inline
-#DOCKER_BUILD_ARG += --cache-from $(IMAGE_NAME):latest-build
-#DOCKER_BUILD_ARG += --cache-from $(IMAGE_NAME):latest-base
+
 
 .PHONY: image-%
 .PHONY: push-image-%
 image-% push-image-%: build-%
 	@export DOCKER_BUILD_ARG="$(DOCKER_BUILD_ARG) $(if $(findstring push,$@),--push,--load)"; \
-	docker buildx build \
-	$${DOCKER_BUILD_ARG} \
-	-t $(IMAGE_NAME):$(IMAGE_VERSION)-build \
-	--target build \
-	-f Dockerfile \
-	. ; \
 	docker buildx build \
 		$${DOCKER_BUILD_ARG} \
 		--cache-from $(IMAGE_NAME):latest-$* \

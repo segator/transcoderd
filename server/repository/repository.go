@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"fmt"
 	_ "github.com/lib/pq"
+	log "github.com/sirupsen/logrus"
 	"time"
 	"transcoder/model"
 )
@@ -172,7 +173,7 @@ func (S *SQLRepository) prepareDatabase(ctx context.Context) error {
 		if err != nil || version <= currentVersion {
 			continue
 		}
-
+		log.Infof("upgrade db Schema from %d --> %d", currentVersion, version)
 		txErr = S.WithTransaction(ctx, func(ctx context.Context, tx Repository) error {
 			con, err := tx.getConnection(ctx)
 			if err != nil {

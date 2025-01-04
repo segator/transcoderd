@@ -2,7 +2,6 @@ package task
 
 import (
 	"context"
-	"fmt"
 	log "github.com/sirupsen/logrus"
 	"sync"
 	"transcoder/worker/serverclient"
@@ -14,8 +13,8 @@ func NewWorkerClient(config Config, client *serverclient.ServerClient, printer *
 		printer: printer,
 	}
 
-	runtime.PGSWorker = NewPGSWorker(config, fmt.Sprintf("%s-%d", "pgsToSrt"))
-	runtime.EncodeWorker = NewEncodeWorker(config, runtime.PGSWorker, client, fmt.Sprintf("%s-%d", "encoder", 1), printer)
+	runtime.PGSWorker = NewPGSWorker(config)
+	runtime.EncodeWorker = NewEncodeWorker(config, runtime.PGSWorker, client, config.Name, printer)
 	return runtime
 }
 

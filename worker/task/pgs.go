@@ -18,7 +18,6 @@ var langMapping []PGSTesseractLanguage
 
 type PGSWorker struct {
 	workerConfig Config
-	name         string
 }
 
 type PGSTesseractLanguage struct {
@@ -34,9 +33,8 @@ func init() {
 	langMapping = append(langMapping, PGSTesseractLanguage{"fra", []string{"fre"}})
 	langMapping = append(langMapping, PGSTesseractLanguage{"chi_tra", []string{"chi"}})
 }
-func NewPGSWorker(workerConfig Config, workerName string) *PGSWorker {
+func NewPGSWorker(workerConfig Config) *PGSWorker {
 	encodeWorker := &PGSWorker{
-		name:         workerName,
 		workerConfig: workerConfig,
 	}
 	return encodeWorker
@@ -121,8 +119,4 @@ func calculateTesseractLanguage(language string) string {
 		}
 	}
 	return language
-}
-
-func (P PGSWorker) GetID() string {
-	return P.name
 }

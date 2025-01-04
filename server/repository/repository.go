@@ -444,7 +444,7 @@ func (S *SQLRepository) PingServerUpdate(ctx context.Context, name string, ip st
 	if err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, "INSERT INTO workers (name, ip,queue_name,last_seen ) VALUES ($1,$2,$3,$4) ON CONFLICT (name) DO UPDATE SET ip = $2, queue_name=$3, last_seen=$4;", name, ip, "N/A", time.Now())
+	_, err = conn.ExecContext(ctx, "INSERT INTO workers (name, ip,last_seen ) VALUES ($1,$2,$3) ON CONFLICT (name) DO UPDATE SET ip = $2, last_seen=$3;", name, ip, time.Now())
 	return err
 }
 

@@ -99,24 +99,31 @@ func (R *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 	}
 	sourcePath := filepath.Join(R.config.SourcePath, video.SourcePath)
 	target := filepath.Join(R.config.SourcePath, video.TargetPath)
+	l := log.WithFields(log.Fields{
+		"job_id":      jobEvent.Id.String(),
+		"source_path": sourcePath,
+		"target_path": target,
+	})
 	targetStat, err := os.Stat(target)
 	if err != nil {
-		log.Warnf("Job %s completed, target file %s can not be found because %s", jobEvent.Id.String(), target, err)
+		l.Warnf("target path can not be found because: %v", err)
 		return err
 	}
 	video.TargetSize = targetStat.Size()
 
 	err = R.repo.UpdateJob(ctx, video)
 	if err != nil {
-		log.Warnf("Job %s completed, target file %s can not be updated because %s", jobEvent.Id.String(), target)
+		l.Warnf("target job can not be updated because %v", err)
 		return err
 	}
 
+	l.Infof("Job completed")
+
 	if R.config.DeleteSourceOnComplete {
-		log.Infof("Job %s completed, removing source file %s", jobEvent.Id.String(), sourcePath)
+		l.Info("Job completed, removing source file")
 		err = os.Remove(sourcePath)
 		if err != nil {
-			log.Warnf("Job %s completed, source file %s can not be removed because %s", jobEvent.Id.String(), sourcePath, err)
+			l.Warnf("Job completed, source file can not be removed because %v", err)
 			return err
 		}
 	}
@@ -231,6 +238,11 @@ func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 		if err != nil {
 			return err
 		}
+
+		l := log.WithFields(log.Fields{
+			"source_path": jobRequest.SourcePath,
+		})
+
 		var eventsToAdd []*model.TaskEvent
 		if job == nil {
 			newUUID, _ := uuid.NewUUID()
@@ -240,6 +252,7 @@ func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 				TargetPath: jobRequest.TargetPath,
 				Id:         newUUID,
 			}
+			l.WithField("job_id", job.Id.String()).Infof("Creating new job %s", job.Id.String())
 			err = tx.AddJob(ctx, job)
 			if err != nil {
 				return err
@@ -247,12 +260,14 @@ func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 			startEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
 			eventsToAdd = append(eventsToAdd, startEvent)
 		} else {
+
 			//If job exist we check if we can retry the job
 			lastEvent := job.Events.GetLatestPerNotificationType(model.JobNotification)
 			status := job.Events.GetStatus()
 			if jobRequest.ForceAssigned && (status == model.AssignedNotificationStatus || status == model.StartedNotificationStatus) {
 				cancelEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.CanceledNotificationStatus)
 				eventsToAdd = append(eventsToAdd, cancelEvent)
+
 			}
 			if (jobRequest.ForceCompleted && status == model.CompletedNotificationStatus) ||
 				(jobRequest.ForceFailed && (status == model.FailedNotificationStatus || status == model.CanceledNotificationStatus)) ||
@@ -269,6 +284,7 @@ func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 				if err != nil {
 					return err
 				}
+				l.WithField("job_id", job.Id.String()).Infof("job %s is %s", taskEvent.Id, taskEvent.Status)
 			}
 		}
 
@@ -429,6 +445,7 @@ func (R *RuntimeScheduler) queuedJobMaintenance(ctx context.Context) error {
 			if err = R.repo.AddNewTaskEvent(ctx, newEvent); err != nil {
 				return err
 			}
+			continue
 		}
 	}
 	return nil

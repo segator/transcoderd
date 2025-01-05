@@ -235,7 +235,7 @@ func (W *WebServer) Run(wg *sync.WaitGroup, ctx context.Context) {
 func (W *WebServer) start() {
 	go func() {
 		err := W.srv.ListenAndServe()
-		if err != nil {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Panic(err)
 		}
 	}()

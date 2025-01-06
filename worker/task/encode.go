@@ -71,7 +71,9 @@ func NewEncodeWorker(workerConfig Config, client *serverclient.ServerClient, pri
 		terminal:     printer,
 		prefetchJobs: 0,
 	}
-	os.MkdirAll(tempPath, os.ModePerm)
+	if err := os.MkdirAll(tempPath, os.ModePerm); err != nil {
+		log.Fatal(err)
+	}
 
 	return encodeWorker
 }

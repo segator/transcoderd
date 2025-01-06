@@ -25,7 +25,12 @@ type WebServer struct {
 }
 
 func (W *WebServer) requestJob(writer http.ResponseWriter, request *http.Request) {
-	job, err := W.scheduler.RequestJob(W.ctx)
+	workerName := request.Header.Get("workerName")
+	if workerName == "" {
+		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), 403)
+		return
+	}
+	job, err := W.scheduler.RequestJob(W.ctx, workerName)
 	if errors.Is(err, scheduler.NoJobsAvailable) {
 		webError(writer, err, 204)
 		return

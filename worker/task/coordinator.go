@@ -91,7 +91,7 @@ func (Q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 			return
 		case <-time.After(time.Second * 5):
 			if Q.worker.AcceptJobs() {
-				taskJob, err := Q.serverClient.RequestJob()
+				taskJob, err := Q.serverClient.RequestJob(Q.worker.GetName())
 				if err != nil {
 					if !errors.Is(err, serverclient.NoJobAvailable) {
 						Q.printer.Error("Error Requesting Job: %v", err)

@@ -29,7 +29,7 @@ type Scheduler interface {
 	GetUploadJobWriter(ctx context.Context, uuid string) (*UploadJobStream, error)
 	GetDownloadJobWriter(ctx context.Context, uuid string) (*DownloadJobStream, error)
 	GetChecksum(ctx context.Context, uuid string) (string, error)
-	RequestJob(ctx context.Context) (*model.TaskEncode, error)
+	RequestJob(ctx context.Context, workerName string) (*model.TaskEncode, error)
 	HandleWorkerEvent(ctx context.Context, taskEvent *model.TaskEvent) error
 }
 
@@ -51,7 +51,7 @@ type RuntimeScheduler struct {
 	handleEventMu   sync.Mutex
 }
 
-func (R *RuntimeScheduler) RequestJob(ctx context.Context) (*model.TaskEncode, error) {
+func (R *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*model.TaskEncode, error) {
 	R.jobRequestMu.Lock()
 	defer R.jobRequestMu.Unlock()
 	video, err := R.repo.RetrieveQueuedJob(ctx)
@@ -65,6 +65,7 @@ func (R *RuntimeScheduler) RequestJob(ctx context.Context) (*model.TaskEncode, e
 		return nil, nil
 	}
 	newEvent := video.AddEvent(model.NotificationEvent, model.JobNotification, model.AssignedNotificationStatus)
+	newEvent.WorkerName = workerName
 	if err = R.repo.AddNewTaskEvent(ctx, newEvent); err != nil {
 		return nil, err
 	}
@@ -73,6 +74,11 @@ func (R *RuntimeScheduler) RequestJob(ctx context.Context) (*model.TaskEncode, e
 		Id:      video.Id,
 		EventID: video.Events.GetLatest().EventID,
 	}
+	log.WithFields(log.Fields{
+		"job_id":      video.Id.String(),
+		"worker":      workerName,
+		"source_path": video.SourcePath,
+	}).Infof("Job assigned to %s", workerName)
 	return task, nil
 }
 

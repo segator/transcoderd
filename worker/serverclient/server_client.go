@@ -60,8 +60,9 @@ func (Q *ServerClient) PublishEvent(event model.TaskEvent) error {
 
 var NoJobAvailable = errors.New("no job available")
 
-func (Q *ServerClient) RequestJob() (*model.TaskEncode, error) {
+func (Q *ServerClient) RequestJob(workerName string) (*model.TaskEncode, error) {
 	req, err := Q.request("GET", "/api/v1/job/request", nil)
+	req.Header.Set("workerName", workerName)
 	if err != nil {
 		return nil, err
 	}

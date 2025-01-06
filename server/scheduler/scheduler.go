@@ -251,7 +251,7 @@ func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 				TargetPath: jobRequest.TargetPath,
 				Id:         newUUID,
 			}
-			l.WithField("job_id", job.Id.String()).Infof("Creating new job %s", job.Id.String())
+			l.WithField("job_id", job.Id.String()).Info("Creating new job")
 			err = tx.AddJob(ctx, job)
 			if err != nil {
 				return err
@@ -283,7 +283,7 @@ func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 				if err != nil {
 					return err
 				}
-				l.WithField("job_id", job.Id.String()).Infof("job %s is %s", taskEvent.Id, taskEvent.Status)
+				l.WithField("job_id", job.Id.String()).Infof("job is now %s", taskEvent.Status)
 			}
 		}
 

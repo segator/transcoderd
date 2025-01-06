@@ -588,7 +588,10 @@ func (J *EncodeWorker) Execute(taskEncode *model.TaskEncode) error {
 		TaskEncode: taskEncode,
 		WorkDir:    workDir,
 	}
-	os.MkdirAll(workDir, os.ModePerm)
+	err := os.MkdirAll(workDir, os.ModePerm)
+	if err != nil {
+		return err
+	}
 
 	J.updateTaskStatus(workTaskEncode, model.JobNotification, model.StartedNotificationStatus, "")
 	J.AddDownloadJob(workTaskEncode)

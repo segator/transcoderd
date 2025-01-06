@@ -63,6 +63,10 @@ func (W *WebServer) addJobs(writer http.ResponseWriter, request *http.Request) {
 		webError(writer, err, 500)
 		return
 	}
+	if jobRequest.SourcePath == "" {
+		webError(writer, fmt.Errorf("sourcePath is mandatory"), 400)
+		return
+	}
 
 	scheduleJobResults, err := W.scheduler.ScheduleJobRequests(W.ctx, jobRequest)
 	if webError(writer, err, 500) {

@@ -509,7 +509,7 @@ func (S *SQLRepository) getTimeoutJobs(ctx context.Context, tx Transaction, time
 
 	rows, err := tx.QueryContext(ctx, "select v.* from job_events v right join "+
 		"(select job_id,max(job_event_id) as job_event_id  from job_events where notification_type='Job'  group by job_id) as m "+
-		"on m.job_id=v.job_id and m.job_event_id=v.job_event_id where status='assigned' and v.event_time < $1::timestamptz", timeoutDate)
+		"on m.job_id=v.job_id and m.job_event_id=v.job_event_id where status in ('assigned','started') and v.event_time < $1::timestamptz", timeoutDate)
 
 	//2020-05-17 20:50:41.428531 +00:00
 	if err != nil {

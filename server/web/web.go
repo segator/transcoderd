@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"transcoder/model"
 	"transcoder/server/scheduler"
@@ -249,15 +250,29 @@ func (W *WebServer) stop(ctx context.Context) {
 
 func (S *WebServer) AuthFunc(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		t := r.URL.Query().Get("token")
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			writeUnauthorized(w)
+			return
+		}
+		const bearerPrefix = "Bearer "
+		if !strings.HasPrefix(authHeader, bearerPrefix) {
+			writeUnauthorized(w)
+			return
+		}
+
+		t := strings.TrimPrefix(authHeader, bearerPrefix)
 
 		if t != S.Token {
-			w.WriteHeader(401)
-			w.Write([]byte("Unauthorised.\n"))
+			writeUnauthorized(w)
 			return
 		}
 		handler(w, r)
 	}
+}
+func writeUnauthorized(w http.ResponseWriter) {
+	w.WriteHeader(401)
+	w.Write([]byte("Unauthorised.\n"))
 }
 
 func webError(writer http.ResponseWriter, err error, code int) bool {

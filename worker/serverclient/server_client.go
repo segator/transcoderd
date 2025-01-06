@@ -44,12 +44,11 @@ func (Q *ServerClient) PublishEvent(event model.TaskEvent) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest("POST", Q.buildURL("/api/v1/event"), bytes.NewBuffer(b))
+	req, err := Q.request("POST", "/api/v1/event", bytes.NewBuffer(b))
 	if err != nil {
 		fmt.Printf("Error creating request: %v\n", err)
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := Q.httpClient.Do(req)
 	if err != nil {
@@ -62,7 +61,11 @@ func (Q *ServerClient) PublishEvent(event model.TaskEvent) error {
 var NoJobAvailable = errors.New("no job available")
 
 func (Q *ServerClient) RequestJob() (*model.TaskEncode, error) {
-	resp, err := Q.httpClient.Get(Q.buildURL("/api/v1/job/request"))
+	req, err := Q.request("GET", "/api/v1/job/request", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := Q.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -88,21 +91,31 @@ func (Q *ServerClient) RequestJob() (*model.TaskEncode, error) {
 }
 
 func (Q *ServerClient) GetDownloadURL(id uuid.UUID) string {
-	return Q.buildURLWithParam("/api/v1/download", "uuid", id.String())
+	return fmt.Sprintf("%s?uuid=%s", Q.GetURL("/api/v1/download"), id.String())
 }
 
 func (Q *ServerClient) GetChecksumURL(id uuid.UUID) string {
-	return Q.buildURLWithParam("/api/v1/checksum", "uuid", id.String())
+	return fmt.Sprintf("%s?uuid=%s", Q.GetURL("/api/v1/checksum"), id.String())
 }
 
 func (Q *ServerClient) GetUploadURL(id uuid.UUID) string {
-	return Q.buildURLWithParam("/api/v1/upload", "uuid", id.String())
+	return fmt.Sprintf("%s?uuid=%s", Q.GetURL("/api/v1/upload"), id.String())
 }
 
-func (Q *ServerClient) buildURL(uri string) string {
-	return fmt.Sprintf("%s%s?token=%s", Q.webServerConfig.Domain, uri, Q.webServerConfig.Token)
+func (Q *ServerClient) GetURL(uri string) string {
+	return fmt.Sprintf("%s%s", Q.webServerConfig.Domain, uri)
 }
 
-func (Q *ServerClient) buildURLWithParam(uri, k, v string) string {
-	return fmt.Sprintf("%s&%s=%s", Q.buildURL(uri), k, v)
+func (Q *ServerClient) request(method string, uri string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, Q.GetURL(uri), body)
+	if err != nil {
+		fmt.Printf("Error creating request: %v\n", err)
+		return nil, err
+	}
+
+	authHeader := fmt.Sprintf("Bearer %s", Q.webServerConfig.Token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader)
+
+	return req, nil
 }

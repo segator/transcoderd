@@ -66,6 +66,9 @@ func NewConsoleWorkerPrinter() *ConsoleWorkerPrinter {
 		pw: pw,
 	}
 }
+func (C *ConsoleWorkerPrinter) Stop() {
+	C.pw.Stop()
+}
 func (C *ConsoleWorkerPrinter) Render() {
 	C.pw.Render()
 }

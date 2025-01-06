@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/avast/retry-go"
+	log "github.com/sirupsen/logrus"
 	"gopkg.in/vansante/go-ffprobe.v2"
 	"hash"
 	"io"
@@ -55,11 +56,11 @@ type EncodeWorker struct {
 	client       *serverclient.ServerClient
 }
 
-func NewEncodeWorker(workerConfig Config, pgsWorkers *PGSWorker, client *serverclient.ServerClient, workerName string, printer *ConsoleWorkerPrinter) *EncodeWorker {
-	tempPath := filepath.Join(workerConfig.TemporalPath, fmt.Sprintf("worker-%s", workerName))
+func NewEncodeWorker(workerConfig Config, client *serverclient.ServerClient, printer *ConsoleWorkerPrinter) *EncodeWorker {
+	tempPath := filepath.Join(workerConfig.TemporalPath, fmt.Sprintf("worker-%s", workerConfig.Name))
 	encodeWorker := &EncodeWorker{
-		name:         workerName,
-		pgsWorker:    pgsWorkers,
+		name:         workerConfig.Name,
+		pgsWorker:    NewPGSWorker(workerConfig),
 		client:       client,
 		wg:           sync.WaitGroup{},
 		workerConfig: workerConfig,
@@ -75,12 +76,41 @@ func NewEncodeWorker(workerConfig Config, pgsWorkers *PGSWorker, client *serverc
 	return encodeWorker
 }
 
-func (E *EncodeWorker) Start(ctx context.Context) {
+func (E *EncodeWorker) Run(wg *sync.WaitGroup, ctx context.Context) {
+	serviceCtx, cancelServiceCtx := context.WithCancel(context.Background())
+	log.Info("Starting WorkerConfig Client...")
+	E.start(serviceCtx)
+	log.Info("Started WorkerConfig Client...")
+	wg.Add(1)
+	go func() {
+		<-ctx.Done()
+		cancelServiceCtx()
+		E.stop()
+		log.Info("Stopping WorkerConfig Client...")
+		wg.Done()
+	}()
+}
+
+func (E *EncodeWorker) start(ctx context.Context) {
 	E.resumeJobs()
-	go E.terminal.Render()
-	go E.downloadQueue(ctx)
-	go E.uploadQueue(ctx)
-	go E.encodeQueue(ctx)
+	go E.terminalRefreshRoutine(ctx)
+	go E.downloadQueueRoutine(ctx)
+	go E.encodeQueueRoutine(ctx)
+	go E.uploadQueueRoutine(ctx)
+}
+
+func (E *EncodeWorker) stop() {
+	E.terminal.Stop()
+	defer close(E.downloadChan)
+	defer close(E.uploadChan)
+	defer close(E.encodeChan)
+}
+func (E *EncodeWorker) terminalRefreshRoutine(ctx context.Context) {
+	E.wg.Add(1)
+	E.terminal.Render()
+	<-ctx.Done()
+	E.terminal.Stop()
+	E.wg.Done()
 }
 
 func (E *EncodeWorker) resumeJobs() {
@@ -97,20 +127,20 @@ func (E *EncodeWorker) resumeJobs() {
 
 			if taskEncode.LastState.IsDownloading() {
 				E.AddDownloadJob(taskEncode.Task)
-				//E.downloadChan <- taskEncode.Task
 				return nil
 			}
 			if taskEncode.LastState.IsEncoding() {
+				// add as prefetched job so won't try to download more jobs until jobs are in encoding phase
 				atomic.AddUint32(&E.prefetchJobs, 1)
 				t := E.terminal.AddTask(fmt.Sprintf("CACHED: %s", taskEncode.Task.TaskEncode.Id.String()), DownloadJobStepType)
 				t.Done()
-				E.encodeChan <- taskEncode.Task
+				E.AddEncodeJob(taskEncode.Task)
 				return nil
 			}
 			if taskEncode.LastState.IsUploading() {
 				t := E.terminal.AddTask(fmt.Sprintf("CACHED: %s", taskEncode.Task.TaskEncode.Id.String()), EncodeJobStepType)
 				t.Done()
-				E.uploadChan <- taskEncode.Task
+				E.AddUploadJob(taskEncode.Task)
 				return nil
 			}
 		}
@@ -565,16 +595,12 @@ func (J *EncodeWorker) Execute(taskEncode *model.TaskEncode) error {
 	return nil
 }
 
-func (J *EncodeWorker) StopQueues() {
-	defer close(J.downloadChan)
-	defer close(J.uploadChan)
-	defer close(J.encodeChan)
-	J.wg.Wait()
-}
 func (J *EncodeWorker) GetID() string {
 	return J.name
 }
 func (J *EncodeWorker) updateTaskStatus(encode *model.WorkTaskEncode, notificationType model.NotificationType, status model.NotificationStatus, message string) {
+	J.mu.Lock()
+	defer J.mu.Unlock()
 	encode.TaskEncode.EventID++
 	event := model.TaskEvent{
 		Id:               encode.TaskEncode.Id,
@@ -586,29 +612,35 @@ func (J *EncodeWorker) updateTaskStatus(encode *model.WorkTaskEncode, notificati
 		Status:           status,
 		Message:          message,
 	}
-	defer J.saveTaskStatusDisk(&model.TaskStatus{
+
+	if err := J.client.PublishEvent(event); err != nil {
+		J.terminal.Error("Error on publishing event %s", err.Error())
+	}
+	if err := J.saveTaskStatusDisk(&model.TaskStatus{
 		LastState: &event,
 		Task:      encode,
-	})
-	J.client.PublishEvent(event)
+	}); err != nil {
+		J.terminal.Error("Error on publishing event %s", err.Error())
+	}
 	J.terminal.Log("[%s] %s have been %s: %s", event.Id.String(), event.NotificationType, event.Status, event.Message)
 
 }
 
-func (J *EncodeWorker) saveTaskStatusDisk(taskEncode *model.TaskStatus) {
-	J.mu.Lock()
-	defer J.mu.Unlock()
+func (J *EncodeWorker) saveTaskStatusDisk(taskEncode *model.TaskStatus) error {
 	b, err := json.MarshalIndent(taskEncode, "", "\t")
 	if err != nil {
-		panic(err)
+		return err
 	}
 	eventFile, err := os.OpenFile(filepath.Join(taskEncode.Task.WorkDir, fmt.Sprintf("%s.json", taskEncode.Task.TaskEncode.Id)), os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)
 	if err != nil {
-		return
+		return err
 	}
 	defer eventFile.Close()
-	eventFile.Write(b)
-	eventFile.Sync()
+	_, err = eventFile.Write(b)
+	if err != nil {
+		return err
+	}
+	return eventFile.Sync()
 }
 func (J *EncodeWorker) readTaskStatusFromDiskByPath(filepath string) *model.TaskStatus {
 	eventFile, err := os.Open(filepath)
@@ -728,19 +760,26 @@ func (J *EncodeWorker) AddDownloadJob(job *model.WorkTaskEncode) {
 	J.downloadChan <- job
 }
 
-func (J *EncodeWorker) downloadQueue(ctx context.Context) {
+func (J *EncodeWorker) AddEncodeJob(job *model.WorkTaskEncode) {
+	J.encodeChan <- job
+}
+
+func (J *EncodeWorker) AddUploadJob(job *model.WorkTaskEncode) {
+	J.uploadChan <- job
+}
+
+func (J *EncodeWorker) downloadQueueRoutine(ctx context.Context) {
 	J.wg.Add(1)
+	defer J.wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
 			J.terminal.Warn("Stopping Download ServerCoordinator")
-			J.wg.Done()
 			return
 		case job, ok := <-J.downloadChan:
 			if !ok {
-				continue
+				return
 			}
-
 			taskTrack := J.terminal.AddTask(job.TaskEncode.Id.String(), DownloadJobStepType)
 
 			J.updateTaskStatus(job, model.DownloadNotification, model.StartedNotificationStatus, "")
@@ -754,13 +793,13 @@ func (J *EncodeWorker) downloadQueue(ctx context.Context) {
 			}
 			J.updateTaskStatus(job, model.DownloadNotification, model.CompletedNotificationStatus, "")
 			taskTrack.Done()
-			J.encodeChan <- job
+			J.AddEncodeJob(job)
 		}
 	}
 
 }
 
-func (J *EncodeWorker) uploadQueue(ctx context.Context) {
+func (J *EncodeWorker) uploadQueueRoutine(ctx context.Context) {
 	J.wg.Add(1)
 	for {
 		select {
@@ -788,17 +827,17 @@ func (J *EncodeWorker) uploadQueue(ctx context.Context) {
 
 }
 
-func (J *EncodeWorker) encodeQueue(ctx context.Context) {
+func (J *EncodeWorker) encodeQueueRoutine(ctx context.Context) {
 	J.wg.Add(1)
+	defer J.wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
-			J.terminal.Warn("Stopping Encode ServerCoordinator")
-			J.wg.Done()
+			J.terminal.Warn("Stopping Encode Queue")
 			return
 		case job, ok := <-J.encodeChan:
 			if !ok {
-				continue
+				return
 			}
 			atomic.AddUint32(&J.prefetchJobs, ^uint32(0))
 			taskTrack := J.terminal.AddTask(job.TaskEncode.Id.String(), EncodeJobStepType)
@@ -810,7 +849,7 @@ func (J *EncodeWorker) encodeQueue(ctx context.Context) {
 			}
 
 			taskTrack.Done()
-			J.uploadChan <- job
+			J.AddUploadJob(job)
 		}
 	}
 

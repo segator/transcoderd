@@ -20,8 +20,8 @@ import (
 )
 
 type CmdLineOpts struct {
-	Web    web.WebServerConfig `mapstructure:"web"`
-	Worker task.Config         `mapstructure:"worker"`
+	WebConfig    web.WebServerConfig `mapstructure:"web"`
+	WorkerConfig task.Config         `mapstructure:"worker"`
 }
 
 var (
@@ -41,9 +41,9 @@ func init() {
 	pflag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 	pflag.Bool("worker.noUpdateMode", false, "Run as Updater")
 	pflag.String("worker.temporalPath", os.TempDir(), "Path used for temporal data")
-	pflag.String("worker.name", hostname, "Worker Name used for statistics")
-	pflag.Int("worker.threads", runtime.NumCPU(), "Worker Threads")
-	pflag.Int("worker.pgsConfig.parallelJobs", int(math.Ceil(float64(runtime.NumCPU())/4)), "Worker PGS Jobs in parallel")
+	pflag.String("worker.name", hostname, "WorkerConfig Name used for statistics")
+	pflag.Int("worker.threads", runtime.NumCPU(), "WorkerConfig Threads")
+	pflag.Int("worker.pgsConfig.parallelJobs", int(math.Ceil(float64(runtime.NumCPU())/4)), "WorkerConfig PGS Jobs in parallel")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
 	pflag.String("worker.pgsConfig.DLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")
 	pflag.String("worker.pgsConfig.tessdataPath", "./tessdata", "tesseract data path")
@@ -58,8 +58,8 @@ func init() {
 	pflag.String("worker.ffmpegConfig.videoProfile", "main10", "FFMPEG Video Profile")
 	pflag.Int("worker.ffmpegConfig.videoCRF", 21, "FFMPEG Video CRF")
 
-	pflag.Var(&opts.Worker.StartAfter, "worker.startAfter", "Accept jobs only After HH:mm")
-	pflag.Var(&opts.Worker.StopAfter, "worker.stopAfter", "Stop Accepting new Jobs after HH:mm")
+	pflag.Var(&opts.WorkerConfig.StartAfter, "worker.startAfter", "Accept jobs only After HH:mm")
+	pflag.Var(&opts.WorkerConfig.StopAfter, "worker.stopAfter", "Stop Accepting new Jobs after HH:mm")
 	pflag.Usage = usage
 
 	viper.SetConfigType("yaml")
@@ -119,14 +119,16 @@ func main() {
 
 	//Prepare work environment
 	printer := task.NewConsoleWorkerPrinter()
-	serverClient := serverclient.NewServerClient(opts.Web)
-	worker := task.NewWorkerClient(opts.Worker, serverClient, printer)
-	worker.Run(wg, ctx)
+	serverClient := serverclient.NewServerClient(opts.WebConfig)
+	encodeWorker := task.NewEncodeWorker(opts.WorkerConfig, serverClient, printer)
 
-	coordinator := task.NewServerCoordinator(serverClient, worker.EncodeWorker, printer)
+	encodeWorker.Run(wg, ctx)
+
+	coordinator := task.NewServerCoordinator(serverClient, encodeWorker, printer)
 	coordinator.Run(wg, ctx)
 
 	wg.Wait()
+	log.Info("Exit...")
 }
 
 func shutdownHandler(ctx context.Context, sigs chan os.Signal, cancel context.CancelFunc) {

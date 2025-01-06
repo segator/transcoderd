@@ -24,7 +24,7 @@ func NewServerClient(webServerConfig web.WebServerConfig) *ServerClient {
 	client := retryablehttp.NewClient()
 	client.RetryMax = 999999999999
 	client.RetryWaitMin = 5 * time.Second
-	//client.Logger = nil
+	client.Logger = nil
 	//client.ResponseLogHook = func(l retryablehttp.Logger, r *http.Response) {
 	//	log.Warn("Response: ", r.StatusCode)
 	//}

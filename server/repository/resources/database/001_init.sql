@@ -1,13 +1,13 @@
 -- Define jobs table
 CREATE TABLE IF NOT EXISTS jobs (
-                                    id varchar(255) PRIMARY KEY,
+    id varchar(255) PRIMARY KEY,
     source_path text NOT NULL,
     destination_path text NOT NULL
     );
 
 -- Define job_events table
 CREATE TABLE IF NOT EXISTS job_events (
-                                          job_id varchar(255) NOT NULL,
+    job_id varchar(255) NOT NULL,
     job_event_id int NOT NULL,
     worker_name varchar(255) NOT NULL,
     event_time timestamp NOT NULL,

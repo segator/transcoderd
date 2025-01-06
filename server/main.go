@@ -41,7 +41,7 @@ func init() {
 	pflag.String("scheduler.sourcePath", "/data/current", "Download path")
 	pflag.Int64("scheduler.minFileSize", 1e+8, "Min File Size")
 
-	//Web Config
+	//WebConfig Config
 
 	cmd.WebFlags()
 
@@ -149,7 +149,7 @@ func main() {
 	}
 	scheduler.Run(wg, ctx)
 
-	//Web Server
+	//WebConfig Server
 	var webServer *web.WebServer
 	webServer = web.NewWebServer(opts.Web, scheduler)
 	webServer.Run(wg, ctx)

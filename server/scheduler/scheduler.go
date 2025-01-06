@@ -47,12 +47,13 @@ type RuntimeScheduler struct {
 	repo            repository.Repository
 	checksumChan    chan PathChecksum
 	pathChecksumMap map[string]string
+	jobRequestMu    sync.Mutex
+	handleEventMu   sync.Mutex
 }
 
 func (R *RuntimeScheduler) RequestJob(ctx context.Context) (*model.TaskEncode, error) {
-	mut := sync.Mutex{}
-	mut.Lock()
-	defer mut.Unlock()
+	R.jobRequestMu.Lock()
+	defer R.jobRequestMu.Unlock()
 	video, err := R.repo.RetrieveQueuedJob(ctx)
 	if err != nil {
 		if errors.As(err, &repository.ErrElementNotFound) {
@@ -76,10 +77,8 @@ func (R *RuntimeScheduler) RequestJob(ctx context.Context) (*model.TaskEncode, e
 }
 
 func (R *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, jobEvent *model.TaskEvent) error {
-	// Store any event
-	var mut sync.Mutex
-	mut.Lock()
-	defer mut.Unlock()
+	R.handleEventMu.Lock()
+	defer R.handleEventMu.Unlock()
 	if err := R.repo.ProcessEvent(ctx, jobEvent); err != nil {
 		return err
 	}

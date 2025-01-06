@@ -64,7 +64,7 @@ func (Q *ServerCoordinator) connection() {
 }
 
 func (Q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
-	//Declare Worker Unique ServerCoordinator
+	//Declare WorkerConfig Unique ServerCoordinator
 
 	for {
 		select {
@@ -77,7 +77,9 @@ func (Q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
 				EventTime:  time.Now(),
 				IP:         helper.GetPublicIP(),
 			}
-			Q.serverClient.PublishEvent(pingEvent)
+			if err := Q.serverClient.PublishEvent(pingEvent); err != nil {
+				Q.printer.Error("Error Publishing Ping Event: %v", err)
+			}
 		}
 	}
 }

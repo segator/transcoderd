@@ -31,7 +31,7 @@ import (
 )
 
 const RESET_LINE = "\r\033[K"
-const MAX_PREFETCHED_JOBS = 2
+const MAX_PREFETCHED_JOBS = 1
 
 var ffmpegSpeedRegex = regexp.MustCompile(`speed=(\d*\.?\d+)x`)
 var ErrorJobNotFound = errors.New("job Not found")

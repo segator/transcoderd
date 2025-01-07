@@ -265,7 +265,6 @@ func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 			startEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
 			eventsToAdd = append(eventsToAdd, startEvent)
 		} else {
-
 			//If job exist we check if we can retry the job
 			lastEvent := job.Events.GetLatestPerNotificationType(model.JobNotification)
 			status := job.Events.GetStatus()

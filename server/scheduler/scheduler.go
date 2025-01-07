@@ -89,9 +89,9 @@ func (R *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, jobEvent *mode
 		return err
 	}
 
-	if jobEvent.EventType == model.NotificationEvent && jobEvent.NotificationType == model.JobNotification && jobEvent.Status == model.CompletedNotificationStatus {
+	if jobEvent.IsCompleted() {
 		if err := R.completeJob(ctx, jobEvent); err != nil {
-			log.Error(err)
+			return err
 		}
 	}
 	return nil

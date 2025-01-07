@@ -133,6 +133,16 @@ func (e TaskEvent) IsAssigned() bool {
 	return false
 }
 
+func (e TaskEvent) IsCompleted() bool {
+	if e.EventType != NotificationEvent {
+		return false
+	}
+	if e.NotificationType == JobNotification && e.Status == CompletedNotificationStatus {
+		return true
+	}
+	return false
+}
+
 func (e TaskEvent) IsDownloading() bool {
 	if e.EventType != NotificationEvent {
 		return false

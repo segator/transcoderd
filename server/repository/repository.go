@@ -112,14 +112,14 @@ func (S *SQLRepository) Initialize(ctx context.Context) error {
 }
 
 func (S *SQLRepository) ProcessEvent(ctx context.Context, taskEvent *model.TaskEvent) error {
-	var err error
 	switch taskEvent.EventType {
 	case model.PingEvent:
-		err = S.PingServerUpdate(ctx, taskEvent.WorkerName, taskEvent.IP)
+		return S.PingServerUpdate(ctx, taskEvent.WorkerName, taskEvent.IP)
 	case model.NotificationEvent:
-		err = S.AddNewTaskEvent(ctx, taskEvent)
+		return S.AddNewTaskEvent(ctx, taskEvent)
+	default:
+		return fmt.Errorf("unknown event type %s", taskEvent.EventType)
 	}
-	return err
 }
 
 //go:embed resources/database/*.sql
@@ -455,6 +455,7 @@ func (S *SQLRepository) AddNewTaskEvent(ctx context.Context, event *model.TaskEv
 		return err
 	}
 	return S.addNewTaskEvent(ctx, conn, event)
+
 }
 
 func (S *SQLRepository) addNewTaskEvent(ctx context.Context, tx Transaction, event *model.TaskEvent) error {
@@ -462,12 +463,12 @@ func (S *SQLRepository) addNewTaskEvent(ctx context.Context, tx Transaction, eve
 	if err != nil {
 		return err
 	}
-
+	defer rows.Close()
 	videoEventID := -1
 	if rows.Next() {
 		rows.Scan(&videoEventID)
 	}
-	rows.Close()
+
 	if videoEventID+1 != event.EventID {
 		return fmt.Errorf("EventID for %s not match,lastReceived %d, new %d", event.Id.String(), videoEventID, event.EventID)
 	}

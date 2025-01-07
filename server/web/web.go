@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"transcoder/model"
 	"transcoder/server/scheduler"
 )
@@ -57,6 +58,7 @@ func (W *WebServer) handleWorkerEvent(writer http.ResponseWriter, request *http.
 	if webError(writer, err, 500) {
 		return
 	}
+
 	writer.WriteHeader(200)
 }
 
@@ -215,8 +217,11 @@ func NewWebServer(config WebServerConfig, scheduler scheduler.Scheduler) *WebSer
 		WebServerConfig: config,
 		scheduler:       scheduler,
 		srv: http.Server{
-			Addr:    ":" + strconv.Itoa(config.Port),
-			Handler: rtr,
+			Addr:         ":" + strconv.Itoa(config.Port),
+			Handler:      rtr,
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 10 * time.Second,
+			IdleTimeout:  15 * time.Second,
 		},
 	}
 	rtr.Handle("/api/v1/job/", webServer.AuthFunc(webServer.addJobs)).Methods("POST")
@@ -286,8 +291,7 @@ func writeUnauthorized(w http.ResponseWriter) {
 
 func webError(writer http.ResponseWriter, err error, code int) bool {
 	if err != nil {
-		writer.WriteHeader(code)
-		writer.Write([]byte(err.Error()))
+		http.Error(writer, err.Error(), code)
 		return true
 	}
 	return false

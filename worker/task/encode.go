@@ -213,7 +213,7 @@ func (j *EncodeWorker) dowloadFile(ctx context.Context, job *model.WorkTaskEncod
 		if err != nil {
 			return err
 		}
-		req.Header.Set("workerName", j.name)
+		req.Header.Set("workerName", j.workerConfig.Name)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return err
@@ -543,7 +543,7 @@ func (J *EncodeWorker) UploadJob(ctx context.Context, task *model.WorkTaskEncode
 		req.GetBody = func() (io.ReadCloser, error) {
 			return ioutil.NopCloser(reader), nil
 		}
-		req.Header.Set("workerName", J.name)
+		req.Header.Set("workerName", J.workerConfig.Name)
 		req.Header.Add("checksum", checksum)
 		req.Header.Add("Content-Type", "application/octet-stream")
 		req.Header.Add("Content-Length", strconv.FormatInt(fileSize, 10))

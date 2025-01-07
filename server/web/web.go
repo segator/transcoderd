@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"transcoder/model"
 	"transcoder/server/scheduler"
 )
@@ -217,11 +216,8 @@ func NewWebServer(config WebServerConfig, scheduler scheduler.Scheduler) *WebSer
 		WebServerConfig: config,
 		scheduler:       scheduler,
 		srv: http.Server{
-			Addr:         ":" + strconv.Itoa(config.Port),
-			Handler:      rtr,
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 10 * time.Second,
-			IdleTimeout:  15 * time.Second,
+			Addr:    ":" + strconv.Itoa(config.Port),
+			Handler: rtr,
 		},
 	}
 	rtr.Handle("/api/v1/job/", webServer.AuthFunc(webServer.addJobs)).Methods("POST")

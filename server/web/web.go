@@ -93,12 +93,17 @@ func (W *WebServer) addJobs(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (W *WebServer) upload(writer http.ResponseWriter, request *http.Request) {
+	workerName := request.Header.Get("workerName")
+	if workerName == "" {
+		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), 403)
+		return
+	}
 	values := request.URL.Query()
 	uuid := values.Get("uuid")
 	if uuid == "" {
 		webError(writer, fmt.Errorf("UUID get parameter not found"), 404)
 	}
-	uploadStream, err := W.scheduler.GetUploadJobWriter(request.Context(), uuid)
+	uploadStream, err := W.scheduler.GetUploadJobWriter(request.Context(), uuid, workerName)
 	if errors.Is(err, scheduler.ErrorStreamNotAllowed) {
 		webError(writer, err, 403)
 		return
@@ -151,12 +156,17 @@ loop:
 }
 
 func (W *WebServer) download(writer http.ResponseWriter, request *http.Request) {
+	workerName := request.Header.Get("workerName")
+	if workerName == "" {
+		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), 403)
+		return
+	}
 	values := request.URL.Query()
 	uuid := values.Get("uuid")
 	if uuid == "" {
 		webError(writer, fmt.Errorf("UUID get parameter not found"), 404)
 	}
-	downloadStream, err := W.scheduler.GetDownloadJobWriter(request.Context(), uuid)
+	downloadStream, err := W.scheduler.GetDownloadJobWriter(request.Context(), uuid, workerName)
 	if errors.Is(err, scheduler.ErrorStreamNotAllowed) {
 		webError(writer, err, 403)
 		return

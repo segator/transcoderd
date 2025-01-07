@@ -26,8 +26,8 @@ var (
 type Scheduler interface {
 	Run(wg *sync.WaitGroup, ctx context.Context)
 	ScheduleJobRequests(ctx context.Context, jobRequest *model.JobRequest) (*ScheduleJobRequestResult, error)
-	GetUploadJobWriter(ctx context.Context, uuid string) (*UploadJobStream, error)
-	GetDownloadJobWriter(ctx context.Context, uuid string) (*DownloadJobStream, error)
+	GetUploadJobWriter(ctx context.Context, uuid string, workerName string) (*UploadJobStream, error)
+	GetDownloadJobWriter(ctx context.Context, uuid string, workerName string) (*DownloadJobStream, error)
 	GetChecksum(ctx context.Context, uuid string) (string, error)
 	RequestJob(ctx context.Context, workerName string) (*model.TaskEncode, error)
 	HandleWorkerEvent(ctx context.Context, taskEvent *model.TaskEvent) error
@@ -338,19 +338,22 @@ func (R *RuntimeScheduler) ScheduleJobRequests(ctx context.Context, jobRequest *
 	return result, returnError
 }
 
-func (R *RuntimeScheduler) isValidStremeableJob(ctx context.Context, uuid string) (*model.Job, error) {
+func (R *RuntimeScheduler) isValidStremeableJob(ctx context.Context, uuid string, workerName string) (*model.Job, error) {
 	video, err := R.repo.GetJob(ctx, uuid)
 	if err != nil {
 		return nil, err
 	}
-	status := video.Events.GetLatestPerNotificationType(model.JobNotification).Status
-	if status != model.StartedNotificationStatus {
-		return nil, fmt.Errorf("%w: job is in status %s", ErrorStreamNotAllowed, status)
+	te := video.Events.GetLatestPerNotificationType(model.JobNotification)
+	if te.Status != model.AssignedNotificationStatus {
+		return nil, fmt.Errorf("%w: job is in status %s", ErrorStreamNotAllowed, te.Status)
+	}
+	if te.WorkerName != workerName {
+		return nil, fmt.Errorf("%w: job is not assigned to worker %s", ErrorStreamNotAllowed, workerName)
 	}
 	return video, nil
 }
-func (R *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string) (*DownloadJobStream, error) {
-	video, err := R.isValidStremeableJob(ctx, uuid)
+func (R *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string, workerName string) (*DownloadJobStream, error) {
+	video, err := R.isValidStremeableJob(ctx, uuid, workerName)
 	if err != nil {
 		return nil, err
 	}
@@ -384,8 +387,8 @@ func (R *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string
 
 }
 
-func (R *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string) (*UploadJobStream, error) {
-	video, err := R.isValidStremeableJob(ctx, uuid)
+func (R *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, workerName string) (*UploadJobStream, error) {
+	video, err := R.isValidStremeableJob(ctx, uuid, workerName)
 	if err != nil {
 		return nil, err
 	}

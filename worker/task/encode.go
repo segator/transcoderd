@@ -206,11 +206,15 @@ func (J *EncodeWorker) AcceptJobs() bool {
 	return J.PrefetchJobs() < MAX_PREFETCHED_JOBS
 }
 
-func (j *EncodeWorker) dowloadFile(job *model.WorkTaskEncode, track *TaskTracks) (err error) {
+func (j *EncodeWorker) dowloadFile(ctx context.Context, job *model.WorkTaskEncode, track *TaskTracks) (err error) {
 	err = retry.Do(func() error {
-
 		track.UpdateValue(0)
-		resp, err := http.Get(j.client.GetDownloadURL(job.TaskEncode.Id))
+		req, err := http.NewRequestWithContext(ctx, "GET", j.client.GetDownloadURL(job.TaskEncode.Id), nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("workerName", j.name)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return err
 		}
@@ -539,7 +543,7 @@ func (J *EncodeWorker) UploadJob(ctx context.Context, task *model.WorkTaskEncode
 		req.GetBody = func() (io.ReadCloser, error) {
 			return ioutil.NopCloser(reader), nil
 		}
-
+		req.Header.Set("workerName", J.name)
 		req.Header.Add("checksum", checksum)
 		req.Header.Add("Content-Type", "application/octet-stream")
 		req.Header.Add("Content-Length", strconv.FormatInt(fileSize, 10))
@@ -788,7 +792,7 @@ func (J *EncodeWorker) downloadQueueRoutine(ctx context.Context) {
 			taskTrack := J.terminal.AddTask(job.TaskEncode.Id.String(), DownloadJobStepType)
 
 			J.updateTaskStatus(job, model.DownloadNotification, model.StartedNotificationStatus, "")
-			err := J.dowloadFile(job, taskTrack)
+			err := J.dowloadFile(ctx, job, taskTrack)
 			if err != nil {
 				J.updateTaskStatus(job, model.DownloadNotification, model.FailedNotificationStatus, err.Error())
 				taskTrack.Error()

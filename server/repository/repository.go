@@ -463,18 +463,19 @@ func (S *SQLRepository) addNewTaskEvent(ctx context.Context, tx Transaction, eve
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+
 	videoEventID := -1
 	if rows.Next() {
 		rows.Scan(&videoEventID)
 	}
+	rows.Close()
 
 	if videoEventID+1 != event.EventID {
 		return fmt.Errorf("EventID for %s not match,lastReceived %d, new %d", event.Id.String(), videoEventID, event.EventID)
 	}
 
 	_, err = tx.ExecContext(ctx, "INSERT INTO job_events (job_id, job_event_id,worker_name,event_time,event_type,notification_type,status,message)"+
-		" VALUES ($1,$2,$3,$4,$5,$6,$7,$8);", event.Id.String(), event.EventID, event.WorkerName, time.Now(), event.EventType, event.NotificationType, event.Status, event.Message)
+		" VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", event.Id.String(), event.EventID, event.WorkerName, time.Now(), event.EventType, event.NotificationType, event.Status, event.Message)
 	return err
 }
 func (S *SQLRepository) AddJob(ctx context.Context, job *model.Job) error {
@@ -537,13 +538,15 @@ func (S *SQLRepository) WithTransaction(ctx context.Context, transactionFunc fun
 
 	err = transactionFunc(ctx, &txRepository)
 	if err != nil {
-		sqlTx.Rollback()
-		return err
-	} else {
-		if err = sqlTx.Commit(); err != nil {
-			return err
+		if errTx := sqlTx.Rollback(); errTx != nil {
+			return errTx
 		}
+		return err
 	}
+	if err = sqlTx.Commit(); err != nil {
+		return err
+	}
+
 	return nil
 }
 

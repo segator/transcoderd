@@ -344,7 +344,7 @@ func (R *RuntimeScheduler) isValidStremeableJob(ctx context.Context, uuid string
 		return nil, err
 	}
 	te := video.Events.GetLatestPerNotificationType(model.JobNotification)
-	if te.Status != model.AssignedNotificationStatus {
+	if te.Status != model.StartedNotificationStatus {
 		return nil, fmt.Errorf("%w: job is in status %s", ErrorStreamNotAllowed, te.Status)
 	}
 	if te.WorkerName != workerName {
@@ -368,11 +368,7 @@ func (R *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string
 	}
 	dfStat, err := downloadFile.Stat()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrorJobNotFound
-		} else {
-			return nil, err
-		}
+		return nil, err
 	}
 	return &DownloadJobStream{
 		JobStream: &JobStream{

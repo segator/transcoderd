@@ -988,7 +988,12 @@ func (F *FFMPEGGenerator) setSubtFilters(container *ContainerData, workDir strin
 				subtitleComment = fmt.Sprintf(" -disposition:s:s:%d comment", index)
 			}
 
-			F.SubtitleFilter = append(F.SubtitleFilter, fmt.Sprintf("%s %s %s -metadata:s:s:%d language=%s -metadata:s:s:%d \"title=%s\" -max_interleave_delta 0", subtitleMap, subtitleForced, subtitleComment, index, subtitle.Language, index, subtitle.Title))
+			//Clean subtitle title to avoid PGS in title
+			re := regexp.MustCompile(`(?i)pgs`)
+			subtitleTitle := re.ReplaceAllString(subtitle.Title, "")
+			subtitleTitle = strings.TrimSpace(strings.ReplaceAll(subtitleTitle, "  ", " "))
+
+			F.SubtitleFilter = append(F.SubtitleFilter, fmt.Sprintf("%s %s %s -metadata:s:s:%d language=%s -metadata:s:s:%d \"title=%s\" -max_interleave_delta 0", subtitleMap, subtitleForced, subtitleComment, index, subtitle.Language, index, subtitleTitle))
 			subtInputIndex++
 		} else {
 			F.SubtitleFilter = append(F.SubtitleFilter, fmt.Sprintf("-map 0:%d -c:s:%d copy", subtitle.Id, index))

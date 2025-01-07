@@ -264,28 +264,27 @@ func (S *SQLRepository) GetJobsByStatus(ctx context.Context, status model.Notifi
 }
 
 func (S *SQLRepository) getJobsByStatus(ctx context.Context, tx Transaction, statusFilter model.NotificationStatus) ([]*model.Job, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT v.id, v.source_path,v.source_size, v.target_path,v.target_size FROM jobs v INNER JOIN job_status vs ON v.id = vs.job_id WHERE vs.status = $1;", statusFilter)
+	rows, err := tx.QueryContext(ctx, "SELECT v.id, v.source_path,v.source_size, v.target_path,v.target_size,vs.event_time, vs.status, vs.notification_type, vs.message FROM jobs v INNER JOIN job_status vs ON v.id = vs.job_id WHERE vs.status = $1;", statusFilter)
 	if err != nil {
 		return nil, err
 	}
 	var jobs []*model.Job
-	defer rows.Close()
+
 	for rows.Next() {
 		job := model.Job{}
-		rows.Scan(&job.Id, &job.SourcePath, &job.SourceSize, &job.TargetPath, &job.TargetSize)
+		rows.Scan(&job.Id, &job.SourcePath, &job.SourceSize, &job.TargetPath, &job.TargetSize, &job.LastUpdate, &job.Status, &job.StatusPhase, &job.StatusMessage)
+		jobs = append(jobs, &job)
+	}
+	err = rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, job := range jobs {
 		taskEvents, err := S.getTaskEvents(ctx, tx, job.Id.String())
 		if err != nil {
 			return nil, err
 		}
 		job.Events = taskEvents
-		lastUpdate, status, statusPhase, statusMessage, _ := S.getJobStatus(ctx, tx, job.Id.String())
-		if lastUpdate != nil {
-			job.LastUpdate = lastUpdate
-		}
-		job.Status = status
-		job.StatusPhase = statusPhase
-		job.StatusMessage = statusMessage
-		jobs = append(jobs, &job)
 	}
 
 	return jobs, nil

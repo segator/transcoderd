@@ -76,6 +76,10 @@ func init() {
 		}
 	}
 	pflag.Parse()
+	log.SetFormatter(&log.TextFormatter{
+		ForceColors:               true,
+		EnvironmentOverrideColors: true,
+	})
 	if verbose {
 		log.SetLevel(log.DebugLevel)
 	} else {

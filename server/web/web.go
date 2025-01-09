@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"transcoder/model"
 	"transcoder/server/scheduler"
 )
@@ -222,6 +223,7 @@ type WebServerConfig struct {
 
 func NewWebServer(config WebServerConfig, scheduler scheduler.Scheduler) *WebServer {
 	rtr := mux.NewRouter()
+	rtr.Use(LoggingMiddleware())
 	webServer := &WebServer{
 		WebServerConfig: config,
 		scheduler:       scheduler,
@@ -237,6 +239,24 @@ func NewWebServer(config WebServerConfig, scheduler scheduler.Scheduler) *WebSer
 	rtr.HandleFunc("/api/v1/checksum", webServer.checksum).Methods("GET")
 	rtr.HandleFunc("/api/v1/upload", webServer.upload).Methods("POST", "PUT")
 	return webServer
+}
+
+func LoggingMiddleware() mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			start := time.Now()
+			next.ServeHTTP(w, req) // Call the next handler
+			duration := time.Since(start)
+
+			log.WithFields(log.Fields{
+				"method":      req.Method,
+				"url":         req.URL.String(),
+				"remote_addr": req.RemoteAddr,
+				"user_agent":  req.UserAgent(),
+				"duration_ms": duration.Milliseconds(),
+			}).Debug("HTTP request")
+		})
+	}
 }
 
 func (W *WebServer) Run(wg *sync.WaitGroup, ctx context.Context) {

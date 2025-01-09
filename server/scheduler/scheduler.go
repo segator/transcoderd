@@ -83,9 +83,9 @@ func (R *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 }
 
 func (R *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, jobEvent *model.TaskEvent) error {
-	R.handleEventMu.Lock()
-	defer R.handleEventMu.Unlock()
-	if err := R.repo.ProcessEvent(ctx, jobEvent); err != nil {
+	//R.handleEventMu.Lock()
+	//defer R.handleEventMu.Unlock()
+	if err := R.processEvent(ctx, jobEvent); err != nil {
 		return err
 	}
 
@@ -95,6 +95,20 @@ func (R *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, jobEvent *mode
 		}
 	}
 	return nil
+}
+
+func (R *RuntimeScheduler) processEvent(ctx context.Context, taskEvent *model.TaskEvent) error {
+	var err error
+	switch taskEvent.EventType {
+	case model.PingEvent:
+		err = R.repo.PingServerUpdate(ctx, taskEvent.WorkerName, taskEvent.IP)
+	case model.NotificationEvent:
+		err = R.repo.AddNewTaskEvent(ctx, taskEvent)
+	default:
+		err = fmt.Errorf("unknown event type %s", taskEvent.EventType)
+	}
+
+	return err
 }
 
 func (R *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.TaskEvent) error {
@@ -419,7 +433,7 @@ func (R *RuntimeScheduler) GetChecksum(ctx context.Context, uuid string) (string
 	return checksum, nil
 }
 
-func (S *RuntimeScheduler) stop() {
+func (R *RuntimeScheduler) stop() {
 
 }
 

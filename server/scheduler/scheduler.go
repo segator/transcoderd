@@ -555,9 +555,9 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`MKVExtract unexpected error`, message) {
 		return true
 	}
-	if simpleRegex(`core dumped`, message) {
-		return true
-	}
+	//if simpleRegex(`core dumped`, message) {
+	//	return true
+	//}
 	if simpleRegex(`dow(n)?load code 500`, message) {
 		return true
 	}
@@ -600,9 +600,9 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`srt: Invalid data found when processing input`, message) {
 		return true
 	}
-	if simpleRegex(`segmentation fault`, message) {
-		return true
-	}
+	//if simpleRegex(`segmentation fault`, message) {
+	//	return true
+	//}
 	if simpleRegex(`Subtitle: mov_text`, message) {
 		return false
 	}

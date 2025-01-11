@@ -83,8 +83,8 @@ func (R *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 }
 
 func (R *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, jobEvent *model.TaskEvent) error {
-	//R.handleEventMu.Lock()
-	//defer R.handleEventMu.Unlock()
+	R.handleEventMu.Lock()
+	defer R.handleEventMu.Unlock()
 	if err := R.processEvent(ctx, jobEvent); err != nil {
 		return err
 	}

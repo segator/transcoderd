@@ -548,7 +548,6 @@ func (J *EncodeWorker) UploadJob(ctx context.Context, task *model.WorkTaskEncode
 		req.Header.Add("Content-Type", "application/octet-stream")
 		req.Header.Add("Content-Length", strconv.FormatInt(fileSize, 10))
 		resp, err := client.Do(req)
-
 		if err != nil {
 			return err
 		}

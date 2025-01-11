@@ -58,6 +58,7 @@ func (Q *ServerClient) PublishEvent(event model.TaskEvent) error {
 		return errors.New(fmt.Sprintf("Error publishing event: %s", resp.Status))
 	}
 	defer resp.Body.Close()
+
 	return nil
 }
 

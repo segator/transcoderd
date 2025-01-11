@@ -144,12 +144,12 @@ func NewSQLRepository(config SQLServerConfig) (*SQLRepository, error) {
 	db.SetConnMaxLifetime(0)
 	db.SetMaxIdleConns(5)
 
-		go func(){
-		for {
-			fmt.Printf("In use %d not use %d  open %d wait %d\n",db.Stats().Idle, db.Stats().InUse, db.Stats().OpenConnections,db.Stats().WaitCount)
-			time.Sleep(time.Second*5)
-		}
-	}()
+	//go func() {
+	//	for {
+	//		fmt.Printf("In use %d not use %d  open %d wait %d\n", db.Stats().Idle, db.Stats().InUse, db.Stats().OpenConnections, db.Stats().WaitCount)
+	//		time.Sleep(time.Second * 5)
+	//	}
+	//}()
 	return &SQLRepository{
 		db: &SQLDatabase{db},
 	}, nil
@@ -183,6 +183,7 @@ func (S *SQLRepository) prepareDatabase(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to fetch schema version: %w", err)
 		}
+		defer rows.Close()
 		if rows.Next() {
 			if err = rows.Scan(&currentVersion); err != nil {
 				return fmt.Errorf("failed to fetch schema version: %w", err)
@@ -266,6 +267,7 @@ func (S *SQLRepository) getWorker(ctx context.Context, db SQLDBOperations, name 
 		rows.Scan(&worker.Name, &worker.Ip, &worker.QueueName, &worker.LastSeen)
 		found = true
 	}
+
 	if !found {
 		return nil, fmt.Errorf("%w, %s", ErrElementNotFound, name)
 	}
@@ -550,6 +552,7 @@ func (S *SQLRepository) getTimeoutJobs(ctx context.Context, tx SQLDBOperations, 
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	var taskEvents []*model.TaskEvent
 	for rows.Next() {
 		event := model.TaskEvent{}
@@ -595,12 +598,12 @@ func (S *SQLRepository) queuedJob(ctx context.Context, tx SQLDBOperations) (*mod
 	if err != nil {
 		return nil, err
 	}
-
+	defer rows.Close()
 	if rows.Next() {
 		event := model.TaskEvent{}
 		rows.Scan(&event.Id, &event.EventID)
 		return S.getJob(ctx, tx, event.Id.String())
 	}
-	defer rows.Close()
+
 	return nil, fmt.Errorf("%w, %s", ErrElementNotFound, "No jobs found")
 }

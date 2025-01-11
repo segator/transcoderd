@@ -6,6 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"go.opentelemetry.io/otel"
 	"net/url"
 	"os"
 	"os/signal"
@@ -18,6 +19,7 @@ import (
 	"transcoder/helper"
 	"transcoder/server/repository"
 	"transcoder/server/scheduler"
+	"transcoder/server/tracing"
 	"transcoder/server/web"
 )
 
@@ -25,6 +27,7 @@ type CmdLineOpts struct {
 	Database  repository.SQLServerConfig `mapstructure:"database"`
 	Web       web.WebServerConfig        `mapstructure:"web"`
 	Scheduler scheduler.SchedulerConfig  `mapstructure:"scheduler"`
+	Tracing   tracing.TracingConfig      `mapstructure:"tracing"`
 }
 
 var (
@@ -46,12 +49,17 @@ func init() {
 	cmd.WebFlags()
 
 	//DB Config
-	pflag.String("database.Driver", "postgres", "DB Driver")
 	pflag.String("database.Host", "localhost", "DB Host")
 	pflag.Int("database.port", 5432, "DB Port")
 	pflag.String("database.User", "postgres", "DB User")
 	pflag.String("database.Password", "postgres", "DB Password")
 	pflag.String("database.Scheme", "server", "DB Scheme")
+
+	//Tracing Config
+	pflag.Bool("tracing.enabled", false, "Enable Tracing")
+	pflag.String("tracing.endpoint", "http://localhost:4317", "Tracing Endpoint")
+	pflag.String("tracing.serviceName", "transcoderd", "Tracing Service Name")
+
 	pflag.Usage = usage
 
 	//pflag.Parse()
@@ -74,6 +82,7 @@ func init() {
 	pflag.Parse()
 	log.SetFormatter(&log.TextFormatter{
 		ForceColors:               true,
+		FullTimestamp:             true,
 		EnvironmentOverrideColors: true,
 	})
 	if verbose {
@@ -133,11 +142,16 @@ func main() {
 		shutdownHandler(ctx, sigs, cancel)
 		wg.Done()
 	}()
-	//Prepare resources
-	log.Infof("Preparing to RunWithContext...")
+
+	tp, err := tracing.NewTracing(ctx, &opts.Tracing)
+	if err != nil {
+		log.Panic(err)
+	}
+	otel.SetTracerProvider(tp)
+
 	//Repository persist
 	var repo repository.Repository
-	repo, err := repository.NewSQLRepository(opts.Database)
+	repo, err = repository.NewSQLRepository(opts.Database)
 	if err != nil {
 		log.Panic(err)
 	}

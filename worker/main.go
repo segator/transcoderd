@@ -78,6 +78,7 @@ func init() {
 	pflag.Parse()
 	log.SetFormatter(&log.TextFormatter{
 		ForceColors:               true,
+		FullTimestamp:             true,
 		EnvironmentOverrideColors: true,
 	})
 	if verbose {

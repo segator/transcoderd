@@ -6,8 +6,13 @@ import (
 	"embed"
 	_ "embed"
 	"fmt"
-	_ "github.com/lib/pq"
+	"github.com/chenquan/sqltrace"
+	"github.com/google/uuid"
+	pg "github.com/lib/pq"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"time"
 	"transcoder/model"
 )
@@ -34,10 +39,6 @@ type Repository interface {
 }
 
 type SQLDBOperations interface {
-	Exec(query string, args ...interface{}) (sql.Result, error)
-	Prepare(query string) (*sql.Stmt, error)
-	Query(query string, args ...interface{}) (*sql.Rows, error)
-	QueryRow(query string, args ...interface{}) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
@@ -46,83 +47,9 @@ type SQLTransaction struct {
 	tx *sql.Tx
 }
 
-func (S *SQLTransaction) Exec(query string, args ...interface{}) (sql.Result, error) {
-	log.Debugf("Exec: %s, args: %v", query, args)
-	return S.tx.Exec(query, args...)
-
-}
-
-func (S *SQLTransaction) Prepare(query string) (*sql.Stmt, error) {
-	log.Debugf("Prepare: %s", query)
-	return S.tx.Prepare(query)
-}
-
-func (S *SQLTransaction) Query(query string, args ...interface{}) (*sql.Rows, error) {
-	log.Debugf("Query: %s, args: %v", query, args)
-	return S.tx.Query(query, args...)
-}
-
-func (S *SQLTransaction) QueryRow(query string, args ...interface{}) *sql.Row {
-	log.Debugf("QueryRow: %s, args: %v", query, args)
-	return S.tx.QueryRow(query, args...)
-}
-
-func (S *SQLTransaction) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
-	log.Debugf("QueryContext: %s, args: %v", query, args)
-	return S.tx.QueryContext(ctx, query, args...)
-}
-
-func (S *SQLTransaction) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
-	log.Debugf("ExecContext: %s, args: %v", query, args)
-	return S.tx.ExecContext(ctx, query, args...)
-}
-
-type SQLDatabase struct {
-	db *sql.DB
-}
-
-func (S *SQLDatabase) Exec(query string, args ...interface{}) (sql.Result, error) {
-	log.Debugf("Exec query: %s, args: %v", query, args)
-	return S.db.Exec(query, args...)
-}
-
-func (S *SQLDatabase) Prepare(query string) (*sql.Stmt, error) {
-	log.Debugf("Prepare: %s", query)
-	return S.db.Prepare(query)
-}
-
-func (S *SQLDatabase) Query(query string, args ...interface{}) (*sql.Rows, error) {
-	log.Debugf("Query: %s, args: %v", query, args)
-	return S.db.Query(query, args...)
-}
-
-func (S *SQLDatabase) QueryRow(query string, args ...interface{}) *sql.Row {
-	log.Debugf("QueryRow: %s, args: %v", query, args)
-	return S.db.QueryRow(query, args...)
-}
-
-func (S *SQLDatabase) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
-	log.Debugf("QueryContext: %s, args: %v", query, args)
-	return S.db.QueryContext(ctx, query, args...)
-}
-
-func (S *SQLDatabase) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
-	log.Debugf("ExecContext: %s, args: %v", query, args)
-	return S.db.ExecContext(ctx, query, args...)
-}
-
-func (S *SQLDatabase) BeginTx(ctx context.Context, s *sql.TxOptions) (*sql.Tx, error) {
-	log.Debugf("BeginTx")
-	tx, err := S.db.BeginTx(ctx, s)
-	if err != nil {
-		return nil, err
-	}
-	return tx, nil
-}
-
 type SQLRepository struct {
-	db *SQLDatabase
-	tx SQLDBOperations
+	db     *sql.DB
+	tracer trace.Tracer
 }
 
 type SQLServerConfig struct {
@@ -131,12 +58,17 @@ type SQLServerConfig struct {
 	User     string `mapstructure:"user", envconfig:"DB_USER"`
 	Password string `mapstructure:"password", envconfig:"DB_PASSWORD"`
 	Scheme   string `mapstructure:"scheme", envconfig:"DB_SCHEME"`
-	Driver   string `mapstructure:"driver", envconfig:"DB_DRIVER"`
 }
 
 func NewSQLRepository(config SQLServerConfig) (*SQLRepository, error) {
+	driver := sqltrace.NewDriver(sqltrace.Config{
+		DataSourceName: config.Scheme,
+	}, &pg.Driver{})
+
+	sql.Register("postgres_trace", driver)
+	tracer := otel.GetTracerProvider().Tracer("SQL Repository")
 	connectionString := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", config.Host, config.Port, config.User, config.Password, config.Scheme)
-	db, err := sql.Open(config.Driver, connectionString)
+	db, err := sql.Open("postgres_trace", connectionString)
 	if err != nil {
 		return nil, err
 	}
@@ -144,14 +76,15 @@ func NewSQLRepository(config SQLServerConfig) (*SQLRepository, error) {
 	db.SetConnMaxLifetime(0)
 	db.SetMaxIdleConns(5)
 
-	/*	go func(){
+	go func() {
 		for {
-			fmt.Printf("In use %d not use %d  open %d wait %d\n",db.Stats().Idle, db.Stats().InUse, db.Stats().OpenConnections,db.Stats().WaitCount)
-			time.Sleep(time.Second*5)
+			fmt.Printf("In use %d not use %d  open %d wait %d\n", db.Stats().Idle, db.Stats().InUse, db.Stats().OpenConnections, db.Stats().WaitCount)
+			time.Sleep(time.Second * 5)
 		}
-	}()*/
+	}()
 	return &SQLRepository{
-		db: &SQLDatabase{db},
+		db:     db,
+		tracer: tracer,
 	}, nil
 
 }
@@ -164,9 +97,11 @@ func (S *SQLRepository) Initialize(ctx context.Context) error {
 var databaseSchemas embed.FS
 
 func (S *SQLRepository) prepareDatabase(ctx context.Context) error {
+	spanCtx, span := S.tracer.Start(ctx, "prepare database", trace.WithSpanKind(trace.SpanKindClient))
+	defer span.End()
 	var currentVersion int
-	txErr := S.WithTransaction(ctx, func(ctx context.Context, tx Repository) error {
-		con, err := tx.getConnection(ctx)
+	txErr := S.WithTransaction(spanCtx, func(ctx context.Context, tx Repository) error {
+		con, err := tx.getConnection(spanCtx)
 		if err != nil {
 			return err
 		}
@@ -174,12 +109,12 @@ func (S *SQLRepository) prepareDatabase(ctx context.Context) error {
 		// Ensure `schema_version` table exists
 		const createTableSchemaVersion = `CREATE TABLE IF NOT EXISTS schema_version (version INT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );`
 
-		_, err = con.ExecContext(ctx, createTableSchemaVersion)
+		_, err = con.ExecContext(spanCtx, createTableSchemaVersion)
 		if err != nil {
 			return fmt.Errorf("failed to ensure schema_version table: %w", err)
 		}
 
-		rows, err := con.QueryContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_version;`)
+		rows, err := con.QueryContext(spanCtx, `SELECT COALESCE(MAX(version), 0) FROM schema_version;`)
 		if err != nil {
 			return fmt.Errorf("failed to fetch schema version: %w", err)
 		}
@@ -208,7 +143,7 @@ func (S *SQLRepository) prepareDatabase(ctx context.Context) error {
 			continue
 		}
 		log.Infof("upgrade db Schema from %d --> %d", currentVersion, version)
-		txErr = S.WithTransaction(ctx, func(ctx context.Context, tx Repository) error {
+		txErr = S.WithTransaction(spanCtx, func(ctx context.Context, tx Repository) error {
 			con, err := tx.getConnection(ctx)
 			if err != nil {
 				return err
@@ -219,13 +154,13 @@ func (S *SQLRepository) prepareDatabase(ctx context.Context) error {
 				return fmt.Errorf("failed to read migration file %s: %w", file.Name(), err)
 			}
 
-			_, err = con.ExecContext(ctx, string(content))
+			_, err = con.ExecContext(spanCtx, string(content))
 			if err != nil {
 				return fmt.Errorf("failed to apply migration %s: %w", file.Name(), err)
 			}
 
 			// Record the applied migration
-			_, err = con.ExecContext(ctx, `INSERT INTO schema_version (version) VALUES ($1);`, version)
+			_, err = con.ExecContext(spanCtx, `INSERT INTO schema_version (version) VALUES ($1);`, version)
 			if err != nil {
 				return fmt.Errorf("failed to update schema version: %w", err)
 			}
@@ -490,19 +425,26 @@ func (S *SQLRepository) AddNewTaskEvent(ctx context.Context, event *model.TaskEv
 	return S.addNewTaskEvent(ctx, conn, event)
 
 }
-
-func (S *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations, event *model.TaskEvent) error {
-	rows, err := tx.QueryContext(ctx, "select max(job_event_id) from job_events where job_id=$1", event.Id.String())
+func (S *SQLRepository) getLatestVideoEventIDByJobID(ctx context.Context, tx SQLDBOperations, jobId uuid.UUID) (int, error) {
+	rows, err := tx.QueryContext(ctx, "select max(job_event_id) from job_events where job_id=$1", jobId.String())
 	if err != nil {
-		return err
+		return 0, err
 	}
+	defer rows.Close()
 
 	videoEventID := -1
 	if rows.Next() {
-		rows.Scan(&videoEventID)
+		if err = rows.Scan(&videoEventID); err != nil {
+			return 0, err
+		}
 	}
-	rows.Close()
-
+	return videoEventID, nil
+}
+func (S *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations, event *model.TaskEvent) error {
+	videoEventID, err := S.getLatestVideoEventIDByJobID(ctx, tx, event.Id)
+	if err != nil {
+		return err
+	}
 	if videoEventID+1 != event.EventID {
 		return fmt.Errorf("EventID for %s not match,lastReceived %d, new %d", event.Id.String(), videoEventID, event.EventID)
 	}
@@ -560,31 +502,38 @@ func (S *SQLRepository) getTimeoutJobs(ctx context.Context, tx SQLDBOperations, 
 }
 
 func (S *SQLRepository) WithTransaction(ctx context.Context, transactionFunc func(ctx context.Context, tx Repository) error) error {
+	_, span := S.tracer.Start(ctx, "With Transaction", trace.WithSpanKind(trace.SpanKindClient))
+	defer span.End()
 	sqlTx, err := S.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault})
 	if err != nil {
 		return err
 	}
+	span.AddEvent("Transaction Begin")
 	defer func() {
+		span.AddEvent("Transaction End")
 		if p := recover(); p != nil {
+			span.SetStatus(codes.Error, fmt.Sprintf("%v", p))
 			err := sqlTx.Rollback()
 			if err != nil {
 				log.Error(p)
 			}
 			log.Panic(p)
 		} else if err != nil {
-			log.Debugf("Rollback SQLDBOperations %v", sqlTx)
+			log.Debugf("Rollback SQLDBOperations %v", err)
+			span.SetStatus(codes.Error, fmt.Sprintf("rollback by %v", err))
 			err = sqlTx.Rollback()
 			if err != nil {
 				log.Error(err)
 			}
 		} else {
+			span.SetStatus(codes.Ok, "Transaction Commit")
 			if err = sqlTx.Commit(); err != nil {
 				log.Error(err)
 			}
 		}
 	}()
 
-	txRepository := SQLRepository{tx: &SQLTransaction{sqlTx}}
+	txRepository := SQLTransaction{tx: sqlTx}
 	return transactionFunc(ctx, &txRepository)
 }
 

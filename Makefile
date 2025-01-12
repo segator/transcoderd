@@ -6,7 +6,7 @@ GOOS ?= $(shell $(GO) env GOHOSTOS)
 GOARCH ?= $(shell $(GO) env GOHOSTARCH)
 
 IMAGE_NAME ?= ghcr.io/segator/transcoderd
-PROJECT_VERSION := 0.1.11
+PROJECT_VERSION ?= 0.1.11
 
 .DEFAULT: help
 .PHONY: help
@@ -41,6 +41,7 @@ buildcontainer-% publishcontainer-%:
 		$${DOCKER_BUILD_ARG} \
 		--cache-from $(IMAGE_NAME):latest-$* \
 		-t $(IMAGE_NAME):$(PROJECT_VERSION)-$* \
+		-t $(IMAGE_NAME):main-$* \
 		-f Dockerfile \
 		--target $* \
 		. ;

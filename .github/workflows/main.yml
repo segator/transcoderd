@@ -3,9 +3,9 @@ name: Build and Push
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
-    branches: [master]
+    branches: [main]
 
 permissions:
   contents: write

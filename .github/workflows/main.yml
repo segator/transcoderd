@@ -46,9 +46,9 @@ jobs:
       - name: Publish release artifacts
         if: ${{ steps.release.outputs.release_created }}
         run: |
-          PROJECT_VERSION=${{ steps.release.outputs.patch }} make publish
-          PROJECT_VERSION=${{ steps.release.outputs.minor }} make publish
-          PROJECT_VERSION=${{ steps.release.outputs.major }} make publish
+          PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }} make publish
+          PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} make publish
+          PROJECT_VERSION=v${{ steps.release.outputs.major }} make publish
       - name: Upload Release Artifact to GH Release
         if: ${{ steps.release.outputs.release_created }}
         env:

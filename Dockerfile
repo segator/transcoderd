@@ -53,8 +53,9 @@ ENTRYPOINT ["/app/transcoderd-server"]
 
 FROM mcr.microsoft.com/dotnet/sdk:6.0 AS builder-pgs
 WORKDIR /src
-ADD https://github.com/Tentacule/PgsToSrt/archive/refs/heads/master.zip pgstosrt.zip
-ADD https://github.com/tesseract-ocr/tessdata/archive/refs/heads/main.zip tessdata.zip
+ARG tessdata_version=ced78752cc61322fb554c280d13360b35b8684e4
+ARG pgstosrt_version=9b0a8e3ca9500373b2e53e3ae5de11e5b9f4a5c8
+
 RUN apt-get -y update && \
   apt-get -y upgrade && \
   apt-get -y install \
@@ -69,11 +70,13 @@ RUN apt-get -y update && \
     unzip \
     libc6-dev
 
-RUN unzip tessdata.zip && \
+RUN wget -O tessdata.zip "https://github.com/tesseract-ocr/tessdata/archive/${tessdata_version}.zip" && \
+    unzip tessdata.zip && \
     rm tessdata.zip && \
     mv tessdata-main tessdata
 
-RUN unzip pgstosrt.zip && \
+RUN wget -O pgstosrt.zip "https://github.com/Tentacule/PgsToSrt/archive/${pgstosrt_version}.zip" && \
+    unzip pgstosrt.zip && \
     rm pgstosrt.zip && \
     cd PgsToSrt-master/src && \
     dotnet restore  && \

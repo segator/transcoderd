@@ -43,7 +43,6 @@ buildcontainer-% publishcontainer-%:
 		--cache-from $(IMAGE_NAME):main-$* \
 		--cache-from $(IMAGE_NAME):$(GIT_BRANCH_NAME)-$* \
 		-t $(IMAGE_NAME):$(PROJECT_VERSION)-$* \
-		-t $(IMAGE_NAME):$(GIT_BRANCH_NAME)-$* \
 		-f Dockerfile \
 		--target $* \
 		. ;

@@ -17,6 +17,7 @@ import (
 	"transcoder/server/web"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/task"
+	"transcoder/worker/update"
 )
 
 type CmdLineOpts struct {
@@ -120,6 +121,11 @@ func main() {
 		shutdownHandler(ctx, sigs, cancel)
 		wg.Done()
 	}()
+
+	if !opts.WorkerConfig.NoUpdateMode {
+		updater := update.NewUpdater()
+		updater.Run(wg, ctx)
+	}
 
 	//Prepare work environment
 	printer := task.NewConsoleWorkerPrinter()

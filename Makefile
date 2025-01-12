@@ -40,9 +40,9 @@ buildcontainer-% publishcontainer-%:
 	@export DOCKER_BUILD_ARG="$(DOCKER_BUILD_ARG) $(if $(findstring publishcontainer,$@),--push,--load)"; \
 	docker buildx build \
 		$${DOCKER_BUILD_ARG} \
-		--cache-from $(IMAGE_NAME):main-$* \
-		--cache-from $(IMAGE_NAME):$(GIT_BRANCH_NAME)-$* \
-		-t $(IMAGE_NAME):$(PROJECT_VERSION)-$* \
+		--cache-from $(IMAGE_NAME):$*-main \
+		--cache-from $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
+		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION) \
 		-f Dockerfile \
 		--target $* \
 		. ;

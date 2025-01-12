@@ -42,6 +42,7 @@ jobs:
       - name: Build
         run: make build
       - name: Publish dev artifacts
+        if: ${{ !steps.release.outputs.release_created }}
         run: make publish
       - name: Publish release artifacts
         if: ${{ steps.release.outputs.release_created }}

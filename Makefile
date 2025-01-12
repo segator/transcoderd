@@ -6,8 +6,6 @@ GOOS ?= $(shell $(GO) env GOHOSTOS)
 GOARCH ?= $(shell $(GO) env GOHOSTARCH)
 
 IMAGE_NAME ?= ghcr.io/segator/transcoderd
-IMAGE_VERSION ?= latest
-
 PROJECT_VERSION := 0.1.11
 
 .DEFAULT: help
@@ -18,42 +16,31 @@ help:	## show this help menu.
 	@@egrep -h "#[#]" $(MAKEFILE_LIST) | sed -e 's/\\$$//' | awk 'BEGIN {FS = "[:=].*?#[#] "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 
-.PHONY: build-all
-build-all: server worker
-build-all:	## build all binaries
+.PHONY: build
+build: buildgo-server buildgo-worker buildcontainer-server buildcontainer-worker  ## Build all artifacts
 
-.PHONY: server
-server: build-server
-server:		## build server binary
 
-.PHONY: worker
-worker: build-worker
-worker:		## build worker binary
 
-.PHONY: build-%
-build-%:
+.PHONY: buildgo-%
+buildgo-%:
 	@echo "Building dist/transcoderd-$*"
 	@CGO_ENABLED=0 go build -o dist/transcoderd-$* $*/main.go
 
-.PHONY: images
-images: image-server image-worker
-images:		## build container images
+.PHONY: publish
+publish: publishcontainer-server publishcontainer-worker ## Publish all artifacts
 
-.PHONY: images
-push-images: push-image-server push-image-worker
-push-images:		## build and push container images
 
 DOCKER_BUILD_ARG := --cache-to type=inline
 
 
-.PHONY: image-%
-.PHONY: push-image-%
-image-% push-image-%: build-%
-	@export DOCKER_BUILD_ARG="$(DOCKER_BUILD_ARG) $(if $(findstring push,$@),--push,--load)"; \
+.PHONY: buildcontainer-%
+.PHONY: publishcontainer-%
+buildcontainer-% publishcontainer-%:
+	@export DOCKER_BUILD_ARG="$(DOCKER_BUILD_ARG) $(if $(findstring publishcontainer,$@),--push,--load)"; \
 	docker buildx build \
 		$${DOCKER_BUILD_ARG} \
 		--cache-from $(IMAGE_NAME):latest-$* \
-		-t $(IMAGE_NAME):$(IMAGE_VERSION)-$* \
+		-t $(IMAGE_NAME):$(PROJECT_VERSION)-$* \
 		-f Dockerfile \
 		--target $* \
 		. ;

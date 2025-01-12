@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/segator/transcoderd/compare/v1.2.0...v1.3.0) (2025-01-12)
+
+
+### Features
+
+* set proper versioning ([8f83249](https://github.com/segator/transcoderd/commit/8f832494fc1a014027acbf378e7c2587583e0377))
+
 ## [1.2.0](https://github.com/segator/transcoderd/compare/v1.1.0...v1.2.0) (2025-01-12)
 
 

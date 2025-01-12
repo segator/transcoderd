@@ -7,7 +7,7 @@ GOARCH ?= $(shell $(GO) env GOHOSTARCH)
 GIT_COMMIT_SHA := $(shell git rev-parse --short HEAD)
 GIT_BRANCH_NAME := $(shell git rev-parse --abbrev-ref HEAD)
 IMAGE_NAME ?= ghcr.io/segator/transcoderd
-PROJECT_VERSION ?= $(GIT_BRANCH_NAME)-$(GIT_COMMIT_SHA)
+PROJECT_VERSION ?= $(GIT_BRANCH_NAME)
 
 .DEFAULT: help
 .PHONY: help
@@ -40,11 +40,9 @@ buildcontainer-% publishcontainer-%:
 	@export DOCKER_BUILD_ARG="$(DOCKER_BUILD_ARG) $(if $(findstring publishcontainer,$@),--push,--load)"; \
 	docker buildx build \
 		$${DOCKER_BUILD_ARG} \
-		--cache-from $(IMAGE_NAME):latest-$* \
 		--cache-from $(IMAGE_NAME):main-$* \
 		--cache-from $(IMAGE_NAME):$(GIT_BRANCH_NAME)-$* \
 		-t $(IMAGE_NAME):$(PROJECT_VERSION)-$* \
-		-t $(IMAGE_NAME):$(GIT_BRANCH_NAME)-$* \
 		-f Dockerfile \
 		--target $* \
 		. ;

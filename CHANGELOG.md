@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/segator/transcoderd/compare/v1.0.0...v1.1.0) (2025-01-12)
+
+
+### Features
+
+* release-please more tests ([8f5e1ae](https://github.com/segator/transcoderd/commit/8f5e1ae14bcbea34d49b548b553b02efc177ce19))
+
 ## 1.0.0 (2025-01-12)
 
 

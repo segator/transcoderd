@@ -73,12 +73,12 @@ RUN apt-get -y update && \
 RUN wget -O tessdata.zip "https://github.com/tesseract-ocr/tessdata/archive/${tessdata_version}.zip" && \
     unzip tessdata.zip && \
     rm tessdata.zip && \
-    mv tessdata-main tessdata
+    mv tessdata-${tessdata_version} tessdata
 
 RUN wget -O pgstosrt.zip "https://github.com/Tentacule/PgsToSrt/archive/${pgstosrt_version}.zip" && \
     unzip pgstosrt.zip && \
     rm pgstosrt.zip && \
-    cd PgsToSrt-master/src && \
+    cd PgsToSrt-${pgstosrt_version}/src && \
     dotnet restore  && \
     dotnet publish -c Release -f net6.0 -o /src/PgsToSrt/out
 

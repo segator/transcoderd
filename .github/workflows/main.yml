@@ -35,9 +35,10 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set Project version
+      - name: Set Release  version
+        if: ${{ steps.release.outputs.release_created }}
         run: |
-          echo "PROJECT_VERSION=${{ steps.release.outputs.major }}" >> $GITHUB_ENV
+          echo "PROJECT_VERSION=${{ steps.release.outputs.patch }}" >> $GITHUB_ENV
       - name: Build
         run: make build
       - name: Publish

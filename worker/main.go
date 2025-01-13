@@ -26,8 +26,12 @@ type CmdLineOpts struct {
 }
 
 var (
-	opts                CmdLineOpts
-	ApplicationFileName string
+	opts            CmdLineOpts
+	showVersion     bool
+	Version         = "v0.0.0"
+	Commit          = "0000000"
+	Date            = "0000-00-00T00:00:00Z"
+	ApplicationName = "transcoderd-worker"
 )
 
 func init() {
@@ -39,6 +43,7 @@ func init() {
 
 	cmd.WebFlags()
 	var verbose bool
+	pflag.BoolVar(&showVersion, "version", false, "Print version and exit")
 	pflag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 	pflag.Bool("worker.noUpdateMode", false, "Run as Updater")
 	pflag.String("worker.temporalPath", os.TempDir(), "Path used for temporal data")
@@ -112,36 +117,56 @@ func usage() {
 }
 
 func main() {
+	if showVersion {
+		log.WithFields(log.Fields{
+			"Version": Version,
+			"Commit":  Commit,
+			"Date":    Date,
+			"AppName": ApplicationName,
+		}).Info("Version Info")
+		os.Exit(0)
+	}
+
 	wg := &sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		wg.Add(1)
-		shutdownHandler(ctx, sigs, cancel)
+		shutdownHandler(sigs, cancel)
 		wg.Done()
 	}()
 
-	if !opts.WorkerConfig.NoUpdateMode {
-		updater := update.NewUpdater()
+	updater, err := update.NewUpdater(Version, ApplicationName, opts.WorkerConfig.TemporalPath)
+
+	if opts.WorkerConfig.NoUpdateMode {
+		log.WithFields(log.Fields{
+			"Version": Version,
+			"Commit":  Commit,
+			"Date":    Date,
+			"AppName": ApplicationName,
+		}).Info("Starting Worker")
+		printer := task.NewConsoleWorkerPrinter()
+		serverClient := serverclient.NewServerClient(opts.WebConfig)
+		encodeWorker := task.NewEncodeWorker(opts.WorkerConfig, serverClient, printer)
+
+		encodeWorker.Run(wg, ctx)
+
+		coordinator := task.NewServerCoordinator(serverClient, encodeWorker, updater, printer)
+		coordinator.Run(wg, ctx)
+	} else {
+
+		if err != nil {
+			log.Panic(err)
+		}
 		updater.Run(wg, ctx)
 	}
-
-	//Prepare work environment
-	printer := task.NewConsoleWorkerPrinter()
-	serverClient := serverclient.NewServerClient(opts.WebConfig)
-	encodeWorker := task.NewEncodeWorker(opts.WorkerConfig, serverClient, printer)
-
-	encodeWorker.Run(wg, ctx)
-
-	coordinator := task.NewServerCoordinator(serverClient, encodeWorker, printer)
-	coordinator.Run(wg, ctx)
 
 	wg.Wait()
 	log.Info("Exit...")
 }
 
-func shutdownHandler(ctx context.Context, sigs chan os.Signal, cancel context.CancelFunc) {
+func shutdownHandler(sigs chan os.Signal, cancel context.CancelFunc) {
 	select {
 	case <-sigs:
 		cancel()

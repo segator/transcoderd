@@ -33,6 +33,10 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           release-type: simple
+      - name: Set Release PROJECT_VERSION
+        if: ${{ !steps.release.outputs.release_created }}
+        run: echo "PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}" >> $GITHUB_ENV
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -41,16 +45,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build
         run: make build
-      - name: Publish dev artifacts
-        if: ${{ !steps.release.outputs.release_created }}
+      - name: Publish artifacts
         run: make publish
-      - name: Publish release artifacts
+      - name: Publish simplified tag artifacts
         if: ${{ steps.release.outputs.release_created }}
         run: |
-          PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }} make publish
           PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} make publish
           PROJECT_VERSION=v${{ steps.release.outputs.major }} make publish
-      - name: Upload Release Artifact to GH Release
+      - name: Upload Github release assets
         if: ${{ steps.release.outputs.release_created }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

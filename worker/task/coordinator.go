@@ -102,7 +102,7 @@ func (Q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 				}
 				if requireUpdate {
 					Q.printer.Log("New version available %s,exiting ...", release.TagName)
-					os.Exit(0)
+					os.Exit(update.UPDATE_EXIT_CODE)
 				}
 
 				taskJob, err := Q.serverClient.RequestJob(Q.worker.GetName())

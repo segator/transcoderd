@@ -28,7 +28,7 @@ type CmdLineOpts struct {
 var (
 	opts            CmdLineOpts
 	showVersion     bool
-	Version         = "v0.0.0"
+	Version         = "v0.0.0-dev"
 	Commit          = "0000000"
 	Date            = "0000-00-00T00:00:00Z"
 	ApplicationName = "transcoderd-worker"

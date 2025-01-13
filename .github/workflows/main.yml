@@ -45,6 +45,7 @@ jobs:
       - name: Build
         run: make build
       - name: Publish artifacts
+        if: github.event_name != 'pull_request'
         run: make publish
       - name: Publish simplified tag artifacts
         if: ${{ steps.release.outputs.release_created }}

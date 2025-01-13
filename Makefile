@@ -6,8 +6,10 @@ GOOS ?= $(shell $(GO) env GOHOSTOS)
 GOARCH ?= $(shell $(GO) env GOHOSTARCH)
 GIT_COMMIT_SHA := $(shell git rev-parse --short HEAD)
 GIT_BRANCH_NAME := $(shell git rev-parse --abbrev-ref HEAD)
+BUILD_DATE := $(shell date +%Y-%m-%dT%H:%M:%SZ)
 IMAGE_NAME ?= ghcr.io/segator/transcoderd
 PROJECT_VERSION ?= $(GIT_BRANCH_NAME)
+
 
 .DEFAULT: help
 .PHONY: help
@@ -25,7 +27,7 @@ build: buildgo-server buildgo-worker buildcontainer-server buildcontainer-worker
 .PHONY: buildgo-%
 buildgo-%:
 	@echo "Building dist/transcoderd-$*"
-	@CGO_ENABLED=0 go build -o dist/transcoderd-$* $*/main.go
+	@CGO_ENABLED=0 go build  -ldflags "-X main.ApplicationName=transcoderd-$* -X main.Version=${PROJECT_VERSION} -X main.Commit=${GIT_COMMIT_SHA} -X main.Date=${BUILD_DATE}" -o dist/transcoderd-$* $*/main.go
 
 .PHONY: publish
 publish: publishcontainer-server publishcontainer-worker ## Publish all artifacts

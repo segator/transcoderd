@@ -23,6 +23,7 @@ const (
 	repoOwner         = "segator"
 	repoName          = "transcoderd"
 	latestReleasesURL = "https://api.github.com/repos/%s/%s/releases/latest"
+	UPDATE_EXIT_CODE  = 5
 )
 
 type GitHubRelease struct {
@@ -89,7 +90,10 @@ func (U *Updater) runApplication(ctx context.Context) {
 	if err != nil {
 		panic(err)
 	}
-	os.Exit(ecode)
+	if ecode != 5 {
+		os.Exit(UPDATE_EXIT_CODE)
+
+	}
 }
 
 func (U *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
@@ -99,12 +103,12 @@ func (U *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	l := log.WithFields(log.Fields{
-		"currentVersion": U.currentVersion.String(),
-		"latestVersion":  latestReleaseVersion.String(),
-	})
-	if latestReleaseVersion.GTE(U.currentVersion) {
-		l.Info("Newer version available")
+
+	if latestReleaseVersion.GT(U.currentVersion) {
+		log.WithFields(log.Fields{
+			"currentVersion": U.currentVersion.String(),
+			"latestVersion":  latestReleaseVersion.String(),
+		}).Info("Newer version available")
 		return &latestRelease, true, nil
 	}
 	return nil, false, nil

@@ -8,7 +8,7 @@ GIT_COMMIT_SHA := $(shell git rev-parse --short HEAD)
 GIT_BRANCH_NAME := $(shell git rev-parse --abbrev-ref HEAD)
 BUILD_DATE := $(shell date +%Y-%m-%dT%H:%M:%SZ)
 IMAGE_NAME ?= ghcr.io/segator/transcoderd
-PROJECT_VERSION ?= $(GIT_BRANCH_NAME)
+PROJECT_VERSION ?= $(shell cat version.txt)-dev
 
 
 .DEFAULT: help

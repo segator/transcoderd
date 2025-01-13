@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/segator/transcoderd/compare/v1.4.0...v1.5.0) (2025-01-13)
+
+
+### Features
+
+* Enable back auto-updater ([#9](https://github.com/segator/transcoderd/issues/9)) ([7ad9859](https://github.com/segator/transcoderd/commit/7ad9859fa0e8f0a75cf16ea75a3b6b3ea00e1c92))
+
 ## [1.4.0](https://github.com/segator/transcoderd/compare/v1.3.0...v1.4.0) (2025-01-12)
 
 

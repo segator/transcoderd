@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/segator/transcoderd/compare/v1.5.0...v1.5.1) (2025-01-13)
+
+
+### Bug Fixes
+
+* updater were not comparing properly equal versions ([#11](https://github.com/segator/transcoderd/issues/11)) ([f566e21](https://github.com/segator/transcoderd/commit/f566e213b4db1e0f8b242ddf0234808d2699f124))
+
 ## [1.5.0](https://github.com/segator/transcoderd/compare/v1.4.0...v1.5.0) (2025-01-13)
 
 

@@ -1,9 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",  
-  
-  "extra-files": [
-    "readme.md"
-  ],  
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "changelog-sections": [
     {
       "section": "🎉 Features",
@@ -54,11 +50,15 @@
       "type": "refactor"
     }
   ],
-  "draft-pull-request": true,
-  "include-v-in-tag": true,
+  "include-component-in-tag": false,
   "packages": {
     ".": {
-      "package-name": "transcoderd"
+      "release-type": "simple",
+      "include-v-in-tag": true,
+      "package-name": "transcoderd",
+      "extra-files": [
+        "readme.md"
+      ]
     }
   },
   "release-type": "simple"

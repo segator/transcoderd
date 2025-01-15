@@ -105,7 +105,10 @@ func (U *Updater) runApplication(ctx context.Context) {
 }
 
 func (U *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
-	latestRelease := GetGitHubLatestVersion()
+	latestRelease, err := GetGitHubLatestVersion()
+	if err != nil {
+		return nil, false, err
+	}
 
 	latestReleaseVersion, err := semver.Parse(cleanVersion(latestRelease.TagName))
 	if err != nil {
@@ -122,7 +125,7 @@ func (U *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
 		}
 
 		l.Info("Newer version available")
-		return &latestRelease, true, nil
+		return latestRelease, true, nil
 	}
 	l.Info("No new version available")
 	return nil, false, nil
@@ -178,7 +181,7 @@ func cleanVersion(version string) string {
 	return strings.TrimPrefix(version, "v")
 }
 
-func GetGitHubLatestVersion() GitHubRelease {
+func GetGitHubLatestVersion() (*GitHubRelease, error) {
 	var latestRelease GitHubRelease
 
 	err := retry.Do(func() error {
@@ -188,6 +191,9 @@ func GetGitHubLatestVersion() GitHubRelease {
 			return err
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -200,11 +206,14 @@ func GetGitHubLatestVersion() GitHubRelease {
 		}
 
 		return nil
-	}, retry.Delay(time.Second*5), retry.Attempts(3), retry.LastErrorOnly(true))
+	},
+		retry.Delay(time.Second*5),
+		retry.Attempts(100),
+		retry.LastErrorOnly(true))
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return latestRelease
+	return &latestRelease, nil
 }

@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/segator/transcoderd/compare/v1.5.1...v1.6.0) (2025-01-15)
+
+
+### Features
+
+* cli flag to disable app auto updates ([78ad193](https://github.com/segator/transcoderd/commit/78ad19373c0ca31a8a1b14ba308929b0c9910a90))
+
+
+### Bug Fixes
+
+* tessdata support det lang ([6492f03](https://github.com/segator/transcoderd/commit/6492f03f0a1fb638fd2c25f8978a18608f86b444))
+
 ## [1.5.1](https://github.com/segator/transcoderd/compare/v1.5.0...v1.5.1) (2025-01-13)
 
 

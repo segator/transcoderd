@@ -47,7 +47,7 @@ docker run -d \
        -p 8080:8080 \
        -v /mnt/media:/mnt/media 
       -v ./transcoderd.yml:/etc/transcoderd/config.yml \
-      ghcr.io/segator/transcoderd:latest-server
+      ghcr.io/segator/transcoderd:server-v1
 ```
 
 ### Grafana Statistics
@@ -63,7 +63,7 @@ docker run -d \
        --restart=always \
        -v /tmp:/tmp \ # Ensure to have enough space (+50G, but depends on your biggest media size) on your temporal folder, as the worker will use it heavily for encoding
        --hostname $(hostname) \ 
-       ghcr.io/segator/transcoderd:latest-worker \
+       ghcr.io/segator/transcoderd:worker-v1 \
        --web.token my_secret_token \ # Replace it for the same value as in the server config
        --web.domain http://192.168.1.55:8080 # Replace it for the server IP or public endpoint if you want remote access.
         

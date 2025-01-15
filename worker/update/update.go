@@ -3,6 +3,7 @@ package update
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/avast/retry-go"
 	"github.com/blang/semver/v4"
@@ -67,10 +68,17 @@ func (U *Updater) Run(wg *sync.WaitGroup, ctx context.Context) {
 			latestVersion, newUpdate, err := U.CheckForUpdate()
 			if err != nil {
 				log.Error(err)
+				select {
+				case <-time.After(time.Minute):
+					continue
+				case <-ctx.Done():
+					return
+				}
 			}
 			if newUpdate {
 				if err = U.update(latestVersion); err != nil {
 					log.Error(err)
+					continue
 				}
 			}
 			U.runApplication(ctx)
@@ -88,7 +96,7 @@ func (U *Updater) runApplication(ctx context.Context) {
 		SetStdoutFunc(func(buffer []byte, exit bool) {
 			os.Stdout.Write(buffer)
 		}).RunWithContext(ctx, command.NewAllowedCodesOption(1))
-	if err != nil {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		panic(err)
 	}
 	if ecode != 5 {

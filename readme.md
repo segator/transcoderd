@@ -1,5 +1,7 @@
 # TranscoderD
 
+![GitHub Release](https://img.shields.io/github/v/release/segator/transcoderd) ![CI](https://github.com/segator/transcoderd/actions/workflows/main.yml/badge.svg)
+
 TranscoderD is a solution that helps to reduce of your video library by converting it to efficient video codec like h265.
 
 TranscoderD have a server and a worker application. The server will manage and schedule the jobs, the worker will do the actual encoding.

@@ -10,7 +10,6 @@ import (
 	"github.com/minio/selfupdate"
 	log "github.com/sirupsen/logrus"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -69,7 +68,7 @@ func (U *Updater) Run(wg *sync.WaitGroup, ctx context.Context) {
 			if err != nil {
 				log.Error(err)
 				select {
-				case <-time.After(time.Minute):
+				case <-time.After(time.Second * 5):
 					continue
 				case <-ctx.Done():
 					return
@@ -190,7 +189,7 @@ func GetGitHubLatestVersion() GitHubRelease {
 		}
 		defer resp.Body.Close()
 
-		body, err := ioutil.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return err
 		}

@@ -30,6 +30,7 @@ func init() {
 	langMapping = append(langMapping, PGSTesseractLanguage{"eus", []string{"baq", "eus"}})
 	langMapping = append(langMapping, PGSTesseractLanguage{"eng", []string{"en", "uk"}})
 	langMapping = append(langMapping, PGSTesseractLanguage{"spa", []string{"es", "esp"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"deu", []string{"det"}})
 	langMapping = append(langMapping, PGSTesseractLanguage{"fra", []string{"fre"}})
 	langMapping = append(langMapping, PGSTesseractLanguage{"chi_tra", []string{"chi"}})
 }

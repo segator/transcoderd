@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.6.1](https://github.com/segator/transcoderd/compare/v1.6.0...v1.6.1) (2025-01-15)
+
+
+### 🐛 Bug Fixes
+
+* improve error handling on update.go ([d7649af](https://github.com/segator/transcoderd/commit/d7649af6ef9ba61e55f06ff6ac020f8d4c1d5701))
+* improve error handling on update.go ([0d2a3ac](https://github.com/segator/transcoderd/commit/0d2a3ac271e236721658445d35febeca6d1f2c58))
+* improve error handling on update.go ([f8e62cb](https://github.com/segator/transcoderd/commit/f8e62cb21ae336133b61630d973482662018f520))
+* release-please not working properly? ([259e060](https://github.com/segator/transcoderd/commit/259e0609386c2f6036a49c51f8afe7325d7b0770))
+
 ## [1.6.0](https://github.com/segator/transcoderd/compare/v1.5.1...v1.6.0) (2025-01-15)
 
 

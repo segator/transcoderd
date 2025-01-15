@@ -41,9 +41,10 @@ type Updater struct {
 	currentVersion semver.Version
 	assetName      string
 	tmpPath        string
+	noUpdates      bool
 }
 
-func NewUpdater(currentVersionString string, assetName string, tmpPath string) (*Updater, error) {
+func NewUpdater(currentVersionString string, assetName string, noUpdates bool, tmpPath string) (*Updater, error) {
 	currentVersion, err := semver.Parse(cleanVersion(currentVersionString))
 	if err != nil {
 		return nil, err
@@ -54,6 +55,7 @@ func NewUpdater(currentVersionString string, assetName string, tmpPath string) (
 		binaryPath:     os.Args[0],
 		assetName:      assetName,
 		tmpPath:        tmpPath,
+		noUpdates:      noUpdates,
 	}
 	return updater, nil
 }
@@ -62,7 +64,6 @@ func (U *Updater) Run(wg *sync.WaitGroup, ctx context.Context) {
 	wg.Add(1)
 	go func() {
 		for {
-			log.Info("Checking for Updates...")
 			latestVersion, newUpdate, err := U.CheckForUpdate()
 			if err != nil {
 				log.Error(err)
@@ -103,14 +104,20 @@ func (U *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-
+	l := log.WithFields(log.Fields{
+		"currentVersion": U.currentVersion.String(),
+		"latestVersion":  latestReleaseVersion.String(),
+	})
 	if latestReleaseVersion.GT(U.currentVersion) {
-		log.WithFields(log.Fields{
-			"currentVersion": U.currentVersion.String(),
-			"latestVersion":  latestReleaseVersion.String(),
-		}).Info("Newer version available")
+		if U.noUpdates {
+			l.Warn("Newer version available but updates are disabled")
+			return nil, false, nil
+		}
+
+		l.Info("Newer version available")
 		return &latestRelease, true, nil
 	}
+	l.Info("No new version available")
 	return nil, false, nil
 }
 

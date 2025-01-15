@@ -45,7 +45,7 @@ func init() {
 	var verbose bool
 	pflag.BoolVar(&showVersion, "version", false, "Print version and exit")
 	pflag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
-	pflag.Bool("worker.noUpdateMode", false, "Run as Updater")
+
 	pflag.String("worker.temporalPath", os.TempDir(), "Path used for temporal data")
 	pflag.String("worker.name", hostname, "WorkerConfig Name used for statistics")
 	pflag.Int("worker.threads", runtime.NumCPU(), "WorkerConfig Threads")
@@ -66,6 +66,8 @@ func init() {
 
 	pflag.Var(&opts.WorkerConfig.StartAfter, "worker.startAfter", "Accept jobs only After HH:mm")
 	pflag.Var(&opts.WorkerConfig.StopAfter, "worker.stopAfter", "Stop Accepting new Jobs after HH:mm")
+	pflag.Bool("worker.noUpdateMode", false, "DON'T USE THIS FLAG, INTERNAL USE")
+	pflag.Bool("worker.noUpdates", false, "Application will not update itself")
 	pflag.Usage = usage
 
 	viper.SetConfigType("yaml")
@@ -137,33 +139,42 @@ func main() {
 		wg.Done()
 	}()
 
-	updater, err := update.NewUpdater(Version, ApplicationName, opts.WorkerConfig.TemporalPath)
+	appLogger := log.WithFields(log.Fields{
+		"Version": Version,
+		"Commit":  Commit,
+		"Date":    Date,
+		"AppName": ApplicationName,
+	})
 
-	if opts.WorkerConfig.NoUpdateMode {
-		log.WithFields(log.Fields{
-			"Version": Version,
-			"Commit":  Commit,
-			"Date":    Date,
-			"AppName": ApplicationName,
-		}).Info("Starting Worker")
-		printer := task.NewConsoleWorkerPrinter()
-		serverClient := serverclient.NewServerClient(opts.WebConfig)
-		encodeWorker := task.NewEncodeWorker(opts.WorkerConfig, serverClient, printer)
+	if opts.WorkerConfig.NoUpdates {
+		appLogger.Warnf("Updates are disabled, %s won't check for updates", ApplicationName)
+	}
 
-		encodeWorker.Run(wg, ctx)
+	updater, err := update.NewUpdater(Version, ApplicationName, opts.WorkerConfig.NoUpdates, opts.WorkerConfig.TemporalPath)
+	if err != nil {
+		log.Panic(err)
+	}
 
-		coordinator := task.NewServerCoordinator(serverClient, encodeWorker, updater, printer)
-		coordinator.Run(wg, ctx)
+	if opts.WorkerConfig.NoUpdateMode || opts.WorkerConfig.NoUpdates {
+		applicationRun(appLogger, wg, ctx, updater)
 	} else {
-
-		if err != nil {
-			log.Panic(err)
-		}
 		updater.Run(wg, ctx)
 	}
 
 	wg.Wait()
 	log.Info("Exit...")
+}
+
+func applicationRun(appLogger log.FieldLogger, wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) {
+	appLogger.Info("Starting Worker")
+	printer := task.NewConsoleWorkerPrinter()
+	serverClient := serverclient.NewServerClient(opts.WebConfig)
+	encodeWorker := task.NewEncodeWorker(opts.WorkerConfig, serverClient, printer)
+
+	encodeWorker.Run(wg, ctx)
+
+	coordinator := task.NewServerCoordinator(serverClient, encodeWorker, updater, printer)
+	coordinator.Run(wg, ctx)
 }
 
 func shutdownHandler(sigs chan os.Signal, cancel context.CancelFunc) {

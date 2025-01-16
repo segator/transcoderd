@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.7.0](https://github.com/segator/transcoderd/compare/v1.6.1...v1.7.0) (2025-01-16)
+
+
+### 🎉 Features
+
+* server supports for auto update ([0678e12](https://github.com/segator/transcoderd/commit/0678e12442c6b47945c16e169a17b866e338c7f0))
+
+
+### 🐛 Bug Fixes
+
+* server was trying to retry some not retriable errors ([e259d1d](https://github.com/segator/transcoderd/commit/e259d1d8cceded72bd0240a350bed97ddb0fa6c2))
+
+
+### 🤖 Continuous Integration
+
+* allow to ignore cache by workflow dispatch ([4fe0b75](https://github.com/segator/transcoderd/commit/4fe0b75a2914efa9fad580e62c69ef101e4bfebf))
+* broken ci ([8f05e18](https://github.com/segator/transcoderd/commit/8f05e18570d8af1f9d3891a58e2dec12331aebae))
+* broken ci ([18ad558](https://github.com/segator/transcoderd/commit/18ad55874af86f378a9bed1aa1d0e236bb3dd089))
+* docker cache in a separate image ([07bfbe6](https://github.com/segator/transcoderd/commit/07bfbe6e6acf15a579dd021614f3dfe6cca4124b))
+* fix broken ci ([01a042d](https://github.com/segator/transcoderd/commit/01a042dd22b74b69dc64ab5883ec1b555f31be1a))
+* invert cache bool var ([b2efcb0](https://github.com/segator/transcoderd/commit/b2efcb0154de1010a41b8f94c353f17f9e65ae60))
+
 ## [1.6.1](https://github.com/segator/transcoderd/compare/v1.6.0...v1.6.1) (2025-01-15)
 
 

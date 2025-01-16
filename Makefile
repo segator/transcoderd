@@ -34,7 +34,7 @@ buildgo-%:
 publish: publishcontainer-server publishcontainer-worker ## Publish all artifacts
 
 
-DOCKER_BUILD_ARG := --cache-to type=inline
+DOCKER_BUILD_ARG := --cache-to type=registry
 
 
 .PHONY: buildcontainer-%
@@ -43,7 +43,7 @@ buildcontainer-% publishcontainer-%:
 	@export DOCKER_BUILD_ARG="$(DOCKER_BUILD_ARG) $(if $(findstring publishcontainer,$@),--push,--load) $(if $(filter false,$(CACHE)),--no-cache,)"; \
 	docker buildx build \
 		$${DOCKER_BUILD_ARG} \
-		--export-cache type=registry,ref=$(IMAGE_NAME):$*-cache-$(GIT_BRANCH_NAME) \
+		--cache-to type=registry,ref=$(IMAGE_NAME):$*-cache-$(GIT_BRANCH_NAME) \
 		--cache-from $(IMAGE_NAME):$*-cache-$(GIT_BRANCH_NAME) \
 		--cache-from $(IMAGE_NAME):$*-cache-main \
 		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION)

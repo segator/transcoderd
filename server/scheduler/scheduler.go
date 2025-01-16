@@ -549,9 +549,9 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`error on process PGS.*no such file or directory`, message) {
 		return true
 	}
-	if simpleRegex(`At least one output file must be specified`, message) {
-		return true
-	}
+	//if simpleRegex(`At least one output file must be specified`, message) {
+	//	return true
+	//}
 	if simpleRegex(`MKVExtract unexpected error`, message) {
 		return true
 	}
@@ -561,18 +561,18 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`dow(n)?load code 500`, message) {
 		return true
 	}
-	if simpleRegex(`Trailing option\(s\) found in the command`, message) {
-		return true
-	}
-	if simpleRegex(`signal: killed`, message) {
-		return true
-	}
-	if simpleRegex(`signal: aborted`, message) {
-		return true
-	}
-	if simpleRegex(`error getting data`, message) {
-		return true
-	}
+	//if simpleRegex(`Trailing option\(s\) found in the command`, message) {
+	//	return true
+	//}
+	//if simpleRegex(`signal: killed`, message) {
+	//	return true
+	//}
+	//if simpleRegex(`signal: aborted`, message) {
+	//	return true
+	//}
+	//if simpleRegex(`error getting data`, message) {
+	//	return true
+	//}
 	if message == "exit status 1: stder: stdout:" {
 		return true
 	}
@@ -597,9 +597,9 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`connection refused`, message) {
 		return true
 	}
-	if simpleRegex(`srt: Invalid data found when processing input`, message) {
-		return true
-	}
+	//if simpleRegex(`srt: Invalid data found when processing input`, message) {
+	//	return true
+	//}
 	//if simpleRegex(`segmentation fault`, message) {
 	//	return true
 	//}

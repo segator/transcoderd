@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"sync"
 	"transcoder/server/web"
+	"transcoder/update"
 	"transcoder/worker/serverclient"
-	"transcoder/worker/update"
-
-	log "github.com/sirupsen/logrus"
 
 	"time"
 	"transcoder/helper"

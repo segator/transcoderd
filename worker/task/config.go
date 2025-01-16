@@ -57,8 +57,6 @@ type FFMPEGConfig struct {
 }
 
 type Config struct {
-	NoUpdateMode bool           `mapstructure:"noUpdateMode", envconfig:"WORKER_NOUPDATE"`
-	NoUpdates    bool           `mapstructure:"noUpdates", envconfig:"WORKER_NOUPDATES"`
 	TemporalPath string         `mapstructure:"temporalPath", envconfig:"WORKER_TMP_PATH"`
 	Name         string         `mapstructure:"name", envconfig:"WORKER_NAME"`
 	Threads      int            `mapstructure:"threads", envconfig:"WORKER_THREADS"`

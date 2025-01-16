@@ -28,7 +28,7 @@ build: buildgo-server buildgo-worker buildcontainer-server buildcontainer-worker
 .PHONY: buildgo-%
 buildgo-%:
 	@echo "Building dist/transcoderd-$*"
-	@CGO_ENABLED=0 go build  -ldflags "-X main.ApplicationName=transcoderd-$* -X main.Version=${PROJECT_VERSION} -X main.Commit=${GIT_COMMIT_SHA} -X main.Date=${BUILD_DATE}" -o dist/transcoderd-$* $*/main.go
+	@CGO_ENABLED=0 go build  -ldflags "-X main.ApplicationName=transcoderd-$* -X transcoder/version.Version=${PROJECT_VERSION} -X transcoder/version.Commit=${GIT_COMMIT_SHA} -X transcoder/version.Date=${BUILD_DATE}" -o dist/transcoderd-$* $*/main.go
 
 .PHONY: publish
 publish: publishcontainer-server publishcontainer-worker ## Publish all artifacts

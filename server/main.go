@@ -19,22 +19,28 @@ import (
 	"transcoder/server/repository"
 	"transcoder/server/scheduler"
 	"transcoder/server/web"
+	"transcoder/update"
+	"transcoder/version"
 )
 
 type CmdLineOpts struct {
-	Database  repository.SQLServerConfig `mapstructure:"database"`
-	Web       web.WebServerConfig        `mapstructure:"web"`
-	Scheduler scheduler.SchedulerConfig  `mapstructure:"scheduler"`
+	Database     repository.SQLServerConfig `mapstructure:"database"`
+	Web          web.WebServerConfig        `mapstructure:"web"`
+	Scheduler    scheduler.SchedulerConfig  `mapstructure:"scheduler"`
+	NoUpdateMode bool                       `mapstructure:"noUpdateMode"`
+	NoUpdates    bool                       `mapstructure:"noUpdates"`
 }
 
 var (
-	opts                CmdLineOpts
-	ApplicationFileName string
+	ApplicationName = "transcoderd-server"
+	showVersion     = false
+	opts            CmdLineOpts
 )
 
 func init() {
 	//Scheduler
 	var verbose bool
+	pflag.BoolVar(&showVersion, "version", false, "Print version and exit")
 	pflag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 	pflag.Duration("scheduler.scheduleTime", time.Minute*5, "Execute the scheduling loop every X seconds")
 	pflag.Duration("scheduler.jobTimeout", time.Hour*24, "Requeue jobs that are running for more than X minutes")
@@ -52,6 +58,7 @@ func init() {
 	pflag.String("database.User", "postgres", "DB User")
 	pflag.String("database.Password", "postgres", "DB Password")
 	pflag.String("database.Scheme", "server", "DB Scheme")
+	update.PFlags()
 	pflag.Usage = usage
 
 	//pflag.Parse()
@@ -104,18 +111,6 @@ func init() {
 	//Fix Paths
 	opts.Scheduler.SourcePath = filepath.Clean(opts.Scheduler.SourcePath)
 	helper.CheckPath(opts.Scheduler.SourcePath)
-
-	/*
-		scheduleTimeDuration, err := time.ParseDuration(opts.ScheduleTime)
-		if err!=nil {
-			log.Panic(err)
-		}
-		jobTimeout, err := time.ParseDuration(opts.JobTimeout)
-		if err!=nil {
-			log.Panic(err)
-		}
-		opts.Scheduler.ScheduleTime = scheduleTimeDuration
-		opts.Scheduler.JobTimeout = jobTimeout*/
 }
 
 func usage() {
@@ -125,6 +120,10 @@ func usage() {
 }
 
 func main() {
+	if showVersion {
+		version.LogVersion()
+		os.Exit(0)
+	}
 	wg := &sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)
@@ -133,8 +132,28 @@ func main() {
 		shutdownHandler(ctx, sigs, cancel)
 		wg.Done()
 	}()
-	//Prepare resources
-	log.Infof("Preparing to RunWithContext...")
+
+	if opts.NoUpdates {
+		version.AppLogger().Warnf("Updates are disabled, %s won't check for updates", ApplicationName)
+	}
+
+	updater, err := update.NewUpdater(version.Version, ApplicationName, opts.NoUpdates, os.TempDir())
+	if err != nil {
+		log.Panic(err)
+	}
+
+	if opts.NoUpdateMode || opts.NoUpdates {
+		version.AppLogger().Infof("Starting server")
+		applicationRun(wg, ctx, updater)
+	} else {
+		updater.Run(wg, ctx)
+	}
+
+	wg.Wait()
+	log.Info("Exit...")
+}
+
+func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) {
 	//Repository persist
 	var repo repository.Repository
 	repo, err := repository.NewSQLRepository(opts.Database)
@@ -155,9 +174,8 @@ func main() {
 
 	//WebConfig Server
 	var webServer *web.WebServer
-	webServer = web.NewWebServer(opts.Web, scheduler)
+	webServer = web.NewWebServer(opts.Web, scheduler, updater)
 	webServer.Run(wg, ctx)
-	wg.Wait()
 }
 
 func shutdownHandler(ctx context.Context, sigs chan os.Signal, cancel context.CancelFunc) {

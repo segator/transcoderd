@@ -9,6 +9,7 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/minio/selfupdate"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/pflag"
 	"io"
 	"net/http"
 	"os"
@@ -44,6 +45,10 @@ type Updater struct {
 	noUpdates      bool
 }
 
+func PFlags() {
+	pflag.Bool("noUpdateMode", false, "DON'T USE THIS FLAG, INTERNAL USE")
+	pflag.Bool("noUpdates", false, "Application will not update itself")
+}
 func NewUpdater(currentVersionString string, assetName string, noUpdates bool, tmpPath string) (*Updater, error) {
 	currentVersion, err := semver.Parse(cleanVersion(currentVersionString))
 	if err != nil {
@@ -87,7 +92,7 @@ func (U *Updater) Run(wg *sync.WaitGroup, ctx context.Context) {
 
 func (U *Updater) runApplication(ctx context.Context) {
 	arguments := os.Args[1:]
-	arguments = append(arguments, "--worker.noUpdateMode")
+	arguments = append(arguments, "--noUpdateMode")
 	ecode, err := command.NewCommand(U.binaryPath, arguments...).
 		SetStderrFunc(func(buffer []byte, exit bool) {
 			os.Stderr.Write(buffer)
@@ -127,7 +132,7 @@ func (U *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
 		l.Info("Newer version available")
 		return latestRelease, true, nil
 	}
-	l.Info("No new version available")
+	l.Debug("No new version available")
 	return nil, false, nil
 }
 

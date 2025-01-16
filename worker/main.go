@@ -15,23 +15,23 @@ import (
 	"syscall"
 	"transcoder/cmd"
 	"transcoder/server/web"
+	"transcoder/update"
+	"transcoder/version"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/task"
-	"transcoder/worker/update"
 )
 
 type CmdLineOpts struct {
 	WebConfig    web.WebServerConfig `mapstructure:"web"`
 	WorkerConfig task.Config         `mapstructure:"worker"`
+	NoUpdateMode bool                `mapstructure:"noUpdateMode"`
+	NoUpdates    bool                `mapstructure:"noUpdates"`
 }
 
 var (
+	ApplicationName = "transcoderd-worker"
 	opts            CmdLineOpts
 	showVersion     bool
-	Version         = "v0.0.0-dev"
-	Commit          = "0000000"
-	Date            = "0000-00-00T00:00:00Z"
-	ApplicationName = "transcoderd-worker"
 )
 
 func init() {
@@ -66,8 +66,7 @@ func init() {
 
 	pflag.Var(&opts.WorkerConfig.StartAfter, "worker.startAfter", "Accept jobs only After HH:mm")
 	pflag.Var(&opts.WorkerConfig.StopAfter, "worker.stopAfter", "Stop Accepting new Jobs after HH:mm")
-	pflag.Bool("worker.noUpdateMode", false, "DON'T USE THIS FLAG, INTERNAL USE")
-	pflag.Bool("worker.noUpdates", false, "Application will not update itself")
+	update.PFlags()
 	pflag.Usage = usage
 
 	viper.SetConfigType("yaml")
@@ -120,12 +119,7 @@ func usage() {
 
 func main() {
 	if showVersion {
-		log.WithFields(log.Fields{
-			"Version": Version,
-			"Commit":  Commit,
-			"Date":    Date,
-			"AppName": ApplicationName,
-		}).Info("Version Info")
+		version.LogVersion()
 		os.Exit(0)
 	}
 
@@ -139,24 +133,18 @@ func main() {
 		wg.Done()
 	}()
 
-	appLogger := log.WithFields(log.Fields{
-		"Version": Version,
-		"Commit":  Commit,
-		"Date":    Date,
-		"AppName": ApplicationName,
-	})
-
-	if opts.WorkerConfig.NoUpdates {
-		appLogger.Warnf("Updates are disabled, %s won't check for updates", ApplicationName)
+	if opts.NoUpdates {
+		version.AppLogger().Warnf("Updates are disabled, %s won't check for updates", ApplicationName)
 	}
 
-	updater, err := update.NewUpdater(Version, ApplicationName, opts.WorkerConfig.NoUpdates, opts.WorkerConfig.TemporalPath)
+	updater, err := update.NewUpdater(version.Version, ApplicationName, opts.NoUpdates, os.TempDir())
 	if err != nil {
 		log.Panic(err)
 	}
 
-	if opts.WorkerConfig.NoUpdateMode || opts.WorkerConfig.NoUpdates {
-		applicationRun(appLogger, wg, ctx, updater)
+	if opts.NoUpdateMode || opts.NoUpdates {
+		version.AppLogger().Info("Starting Worker")
+		applicationRun(wg, ctx, updater)
 	} else {
 		updater.Run(wg, ctx)
 	}
@@ -165,8 +153,7 @@ func main() {
 	log.Info("Exit...")
 }
 
-func applicationRun(appLogger log.FieldLogger, wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) {
-	appLogger.Info("Starting Worker")
+func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) {
 	printer := task.NewConsoleWorkerPrinter()
 	serverClient := serverclient.NewServerClient(opts.WebConfig)
 	encodeWorker := task.NewEncodeWorker(opts.WorkerConfig, serverClient, printer)

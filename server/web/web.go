@@ -10,19 +10,24 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"transcoder/model"
 	"transcoder/server/scheduler"
+	"transcoder/update"
 )
 
 type WebServer struct {
 	WebServerConfig
-	scheduler scheduler.Scheduler
-	srv       http.Server
-	ctx       context.Context
+	scheduler     scheduler.Scheduler
+	srv           http.Server
+	ctx           context.Context
+	activeTracker *ActiveTracker
+	updater       *update.Updater
 }
 
 func (W *WebServer) requestJob(writer http.ResponseWriter, request *http.Request) {
@@ -221,11 +226,24 @@ type WebServerConfig struct {
 	Domain string `mapstructure:"domain", envconfig:"WEB_DOMAIN"`
 }
 
-func NewWebServer(config WebServerConfig, scheduler scheduler.Scheduler) *WebServer {
+type ActiveTracker struct {
+	activeRequests int64
+}
+
+func (A *ActiveTracker) ActiveRequests() bool {
+	return atomic.LoadInt64(&A.activeRequests) > 0
+}
+
+func NewWebServer(config WebServerConfig, scheduler scheduler.Scheduler, updater *update.Updater) *WebServer {
 	rtr := mux.NewRouter()
+	at := &ActiveTracker{}
+	rtr.Use(at.ActiveRequestsMiddleware())
 	rtr.Use(LoggingMiddleware())
+
 	webServer := &WebServer{
 		WebServerConfig: config,
+		activeTracker:   at,
+		updater:         updater,
 		scheduler:       scheduler,
 		srv: http.Server{
 			Addr:    ":" + strconv.Itoa(config.Port),
@@ -239,6 +257,17 @@ func NewWebServer(config WebServerConfig, scheduler scheduler.Scheduler) *WebSer
 	rtr.HandleFunc("/api/v1/checksum", webServer.checksum).Methods("GET")
 	rtr.HandleFunc("/api/v1/upload", webServer.upload).Methods("POST", "PUT")
 	return webServer
+}
+
+func (A *ActiveTracker) ActiveRequestsMiddleware() mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			atomic.AddInt64(&A.activeRequests, 1)
+			defer atomic.AddInt64(&A.activeRequests, -1)
+			next.ServeHTTP(w, req)
+		})
+	}
+
 }
 
 func LoggingMiddleware() mux.MiddlewareFunc {
@@ -274,10 +303,33 @@ func (W *WebServer) Run(wg *sync.WaitGroup, ctx context.Context) {
 }
 
 func (W *WebServer) start() {
+	// Web server
 	go func() {
 		err := W.srv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Panic(err)
+		}
+	}()
+
+	// updater
+	go func() {
+		for {
+			select {
+			case <-time.After(time.Minute * 5):
+				log.Debug("Checking for updates")
+				if !W.activeTracker.ActiveRequests() {
+					release, updateRequired, err := W.updater.CheckForUpdate()
+					if err != nil {
+						log.Error(err)
+						continue
+					}
+					if updateRequired {
+						log.Warnf("New version available %s,exiting ...", release.TagName)
+						os.Exit(update.UPDATE_EXIT_CODE)
+					}
+				}
+
+			}
 		}
 	}()
 }

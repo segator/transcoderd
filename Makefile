@@ -9,7 +9,7 @@ GIT_BRANCH_NAME := $(shell git rev-parse --abbrev-ref HEAD)
 BUILD_DATE := $(shell date +%Y-%m-%dT%H:%M:%SZ)
 IMAGE_NAME ?= ghcr.io/segator/transcoderd
 PROJECT_VERSION ?= $(shell cat version.txt)-dev
-NO_CACHE ?=false
+CACHE ?=true
 
 
 .DEFAULT: help
@@ -40,7 +40,7 @@ DOCKER_BUILD_ARG := --cache-to type=inline
 .PHONY: buildcontainer-%
 .PHONY: publishcontainer-%
 buildcontainer-% publishcontainer-%:
-	@export DOCKER_BUILD_ARG="$(DOCKER_BUILD_ARG) $(if $(findstring publishcontainer,$@),--push,--load) $(if $(filter true,$(NO_CACHE)),--no-cache,)"; \
+	@export DOCKER_BUILD_ARG="$(DOCKER_BUILD_ARG) $(if $(findstring publishcontainer,$@),--push,--load) $(if $(filter false,$(CACHE)),--no-cache,)"; \
 	docker buildx build \
 		$${DOCKER_BUILD_ARG} \
 		--cache-from $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \

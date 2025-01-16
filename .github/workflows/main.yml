@@ -8,10 +8,10 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      no_cache:
-        description: "Ignore Build cache"
+      cache:
+        description: "Use cache"
         required: false
-        default: false
+        default: true
 permissions:
   contents: write
   pull-requests: write
@@ -25,11 +25,11 @@ jobs:
         id: cache
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "no_cache=${{ inputs.no_cache }}" >> "$GITHUB_OUTPUT"
-            echo "NO_CACHE=${{ inputs.no_cache }}" >> "$GITHUB_ENV"
+            echo "cache=${{ inputs.cache }}" >> "$GITHUB_OUTPUT"
+            echo "CACHE=${{ inputs.cache }}" >> "$GITHUB_ENV"
           else
-            echo "no_cache=false" >> "$GITHUB_OUTPUT"
-            echo "NO_CACHE=false" >> "$GITHUB_ENV"
+            echo "cache=true" >> "$GITHUB_OUTPUT"
+            echo "CACHE=true" >> "$GITHUB_ENV"
           fi
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          cache: ${{ steps.cache.outputs.no_cache }}
+          cache: ${{ steps.cache.outputs.cache }}
           go-version: 1.22
       - name: Set up release please
         id: release

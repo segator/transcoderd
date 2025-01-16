@@ -9,7 +9,7 @@ GIT_BRANCH_NAME := $(shell git rev-parse --abbrev-ref HEAD)
 BUILD_DATE := $(shell date +%Y-%m-%dT%H:%M:%SZ)
 IMAGE_NAME ?= ghcr.io/segator/transcoderd
 PROJECT_VERSION ?= $(shell cat version.txt)-dev
-
+export NO_CACHE
 
 .DEFAULT: help
 .PHONY: help
@@ -39,12 +39,13 @@ DOCKER_BUILD_ARG := --cache-to type=inline
 .PHONY: buildcontainer-%
 .PHONY: publishcontainer-%
 buildcontainer-% publishcontainer-%:
-	@export DOCKER_BUILD_ARG="$(DOCKER_BUILD_ARG) $(if $(findstring publishcontainer,$@),--push,--load)"; \
-	docker buildx build \
+	@export DOCKER_BUILD_ARG="$(DOCKER_BUILD_ARG) $(if $(findstring publishcontainer,$@),--push,--load) $(if $(NO_CACHE),--no-cache,) "; \
+	@docker buildx build \
 		$${DOCKER_BUILD_ARG} \
-		--cache-from $(IMAGE_NAME):$*-main \
-		--cache-from $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
-		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION) \
+		--cache-from $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \ # Generally for non main branches cache
+		--cache-from $(IMAGE_NAME):$*-main \ # In case no cache for branches use main cache
+		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION) \ # Publish specific version image
+		-t $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \ # publish specific branch image for cache porpuses
 		-f Dockerfile \
 		--target $* \
 		. ;

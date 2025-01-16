@@ -6,7 +6,12 @@ on:
       - main
   pull_request:
     branches: [main]
-
+  workflow_dispatch:
+    inputs:
+      no_cache:
+        description: "Ignore Build cache"
+        required: false
+        default: false
 permissions:
   contents: write
   pull-requests: write
@@ -16,6 +21,16 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
+      - name: Determine Cache Behavior
+        id: cache
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "no_cache=${{ inputs.no_cache }}" >> "$GITHUB_OUTPUT"
+            echo "NO_CACHE=${{ inputs.no_cache }}" >> "$GITHUB_ENV"
+          else
+            echo "no_cache=false" >> "$GITHUB_OUTPUT"
+            echo "NO_CACHE=false" >> "$GITHUB_ENV"
+          fi
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -24,6 +39,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
+          cache: ${{ steps.cache.outputs.no_cache }}
           go-version: 1.22
       - name: Set up release please
         id: release

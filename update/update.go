@@ -99,13 +99,12 @@ func (U *Updater) runApplication(ctx context.Context) {
 		}).
 		SetStdoutFunc(func(buffer []byte, exit bool) {
 			os.Stdout.Write(buffer)
-		}).RunWithContext(ctx, command.NewAllowedCodesOption(1))
+		}).RunWithContext(ctx, command.NewAllowedCodesOption(UPDATE_EXIT_CODE))
 	if err != nil && !errors.Is(err, context.Canceled) {
 		panic(err)
 	}
-	if ecode != 5 {
-		os.Exit(UPDATE_EXIT_CODE)
-
+	if ecode != UPDATE_EXIT_CODE {
+		os.Exit(ecode)
 	}
 }
 

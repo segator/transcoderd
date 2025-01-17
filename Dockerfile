@@ -4,31 +4,19 @@ FROM ${BASE_IMAGE} AS builder-ffmpeg
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
-    && apt-get -y --no-install-recommends install \
-        build-essential \
-        curl \
-        ca-certificates \
-        libva-dev \
-        python3 \
-        python-is-python3 \
-        ninja-build \
-        meson \
+    && apt-get -y --no-install-recommends install git build-essential curl ca-certificates libva-dev \
+        python3 python-is-python3 ninja-build meson git curl \
     && apt-get clean; rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* \
     && update-ca-certificates
 
 WORKDIR /app
 
-ARG FFMPEG_BUILD_SCRIPT_VERSION=7ea5427c1f91d5eb3400f47dfe5e425844e4af35
+ARG FFMPEG_BUILD_SCRIPT_VERSION=v1.54
 # ADD doesn't cache when used from URL
-RUN curl -sLO \
-    https://raw.githubusercontent.com/markus-perl/ffmpeg-build-script/${FFMPEG_BUILD_SCRIPT_VERSION}/build-ffmpeg && \
-    chmod 755 ./build-ffmpeg && \
-    SKIPINSTALL=yes ./build-ffmpeg \
-        --build \
-        --enable-gpl-and-non-free && \
-    rm -rf packages && \
-    find workspace -mindepth 1 -maxdepth 1 -type d ! -name 'bin' -exec rm -rf {} \; && \
-    find workspace/bin -mindepth 1 -maxdepth 1 -type f ! -name 'ff*' -exec rm -f {} \;
+RUN git clone --depth 1 --branch ${FFMPEG_BUILD_SCRIPT_VERSION}  https://github.com/markus-perl/ffmpeg-build-script.git && \
+    cd ffmpeg-build-script && \
+    SKIPINSTALL=yes ./build-ffmpeg --build --enable-gpl-and-non-free && \
+    rm -rf packages
 
 FROM debian:trixie-20241223-slim  AS base
 RUN apt-get update \
@@ -39,7 +27,7 @@ RUN apt-get update \
         wget \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder-ffmpeg /app/workspace/bin/ff* /usr/bin/
+COPY --from=builder-ffmpeg /app/ffmpeg-build-script/workspace/bin/ff* /usr/bin/
 
 # Check shared library
 RUN ldd /usr/bin/ffmpeg && \

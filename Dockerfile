@@ -1,7 +1,5 @@
-ARG BASE_IMAGE=ubuntu:22.04@sha256:77906da86b60585ce12215807090eb327e7386c8fafb5402369e421f44eff17e
+ARG BASE_IMAGE=ubuntu:24.04
 FROM ${BASE_IMAGE} AS builder-ffmpeg
-
-ARG FFMPEG_BUILD_SCRIPT_VERSION=1.48
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -20,9 +18,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
+ARG FFMPEG_BUILD_SCRIPT_VERSION=7ea5427c1f91d5eb3400f47dfe5e425844e4af35
 # ADD doesn't cache when used from URL
 RUN curl -sLO \
-    https://raw.githubusercontent.com/markus-perl/ffmpeg-build-script/v${FFMPEG_BUILD_SCRIPT_VERSION}/build-ffmpeg && \
+    https://raw.githubusercontent.com/markus-perl/ffmpeg-build-script/${FFMPEG_BUILD_SCRIPT_VERSION}/build-ffmpeg && \
     chmod 755 ./build-ffmpeg && \
     SKIPINSTALL=yes ./build-ffmpeg \
         --build \

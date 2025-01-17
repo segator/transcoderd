@@ -31,6 +31,7 @@ type Scheduler interface {
 	GetChecksum(ctx context.Context, uuid string) (string, error)
 	RequestJob(ctx context.Context, workerName string) (*model.TaskEncode, error)
 	HandleWorkerEvent(ctx context.Context, taskEvent *model.TaskEvent) error
+	CancelJob(ctx context.Context, id string) error
 }
 
 type SchedulerConfig struct {
@@ -95,6 +96,30 @@ func (R *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, jobEvent *mode
 		}
 	}
 	return nil
+}
+
+func (R *RuntimeScheduler) CancelJob(ctx context.Context, id string) error {
+	job, err := R.repo.GetJob(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	status := job.Events.GetStatus()
+	switch {
+	case status == model.CompletedNotificationStatus:
+		return fmt.Errorf("job already completed")
+	case status == model.FailedNotificationStatus:
+		return fmt.Errorf("job is failed")
+	case status == model.CanceledNotificationStatus:
+		return fmt.Errorf("job already canceled")
+	case status == model.AssignedNotificationStatus, status == model.StartedNotificationStatus:
+		newEvent := job.AddEventComplete(model.NotificationEvent, model.JobNotification, model.CanceledNotificationStatus, "Job canceled by user")
+		err = R.repo.AddNewTaskEvent(ctx, newEvent)
+		if err != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("job %s is in unknown state", id)
 }
 
 func (R *RuntimeScheduler) processEvent(ctx context.Context, taskEvent *model.TaskEvent) error {

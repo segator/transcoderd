@@ -98,6 +98,19 @@ func (W *WebServer) addJobs(writer http.ResponseWriter, request *http.Request) {
 	writer.Write(b)
 }
 
+func (W *WebServer) cancelJobs(writer http.ResponseWriter, request *http.Request) {
+	vars := mux.Vars(request)
+	jobId := vars["jobid"]
+	if jobId == "" {
+		webError(writer, fmt.Errorf("jobId is mandatory"), 400)
+		return
+	}
+	err := W.scheduler.CancelJob(W.ctx, jobId)
+	if webError(writer, err, 500) {
+		return
+	}
+}
+
 func (W *WebServer) upload(writer http.ResponseWriter, request *http.Request) {
 	workerName := request.Header.Get("workerName")
 	if workerName == "" {
@@ -251,6 +264,7 @@ func NewWebServer(config WebServerConfig, scheduler scheduler.Scheduler, updater
 		},
 	}
 	rtr.Handle("/api/v1/job/", webServer.AuthFunc(webServer.addJobs)).Methods("POST")
+	rtr.Handle("/api/v1/job/{jobid}", webServer.AuthFunc(webServer.cancelJobs)).Methods("DELETE")
 	rtr.Handle("/api/v1/job/request", webServer.AuthFunc(webServer.requestJob)).Methods("GET")
 	rtr.Handle("/api/v1/event", webServer.AuthFunc(webServer.handleWorkerEvent)).Methods("POST")
 	rtr.HandleFunc("/api/v1/download", webServer.download).Methods("GET")

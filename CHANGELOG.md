@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.8.0](https://github.com/segator/transcoderd/compare/v1.7.0...v1.8.0) (2025-01-17)
+
+
+### 🎉 Features
+
+* server supports to cancel jobs ([c4618f8](https://github.com/segator/transcoderd/commit/c4618f81dc6ee93cd3260d68d9609fd4d76dbc18))
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** update ffmpeg build script to latest ([c4618f8](https://github.com/segator/transcoderd/commit/c4618f81dc6ee93cd3260d68d9609fd4d76dbc18))
+* **deps:** update how ffmpeg build script runs as seems not works for latest versions. ([84842f4](https://github.com/segator/transcoderd/commit/84842f4a2386b80bfe1d398a11daec3d55c76c12))
+
 ## [1.7.0](https://github.com/segator/transcoderd/compare/v1.6.1...v1.7.0) (2025-01-16)
 
 

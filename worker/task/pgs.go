@@ -33,6 +33,8 @@ func init() {
 	langMapping = append(langMapping, PGSTesseractLanguage{"deu", []string{"det"}})
 	langMapping = append(langMapping, PGSTesseractLanguage{"fra", []string{"fre"}})
 	langMapping = append(langMapping, PGSTesseractLanguage{"chi_tra", []string{"chi"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"ell", []string{"gre"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"isl", []string{"ice"}})
 }
 func NewPGSWorker(workerConfig Config) *PGSWorker {
 	encodeWorker := &PGSWorker{

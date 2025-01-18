@@ -70,11 +70,12 @@ func (P *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS) (err 
 	})
 	log.Debugf("PGSTOSrt Command: %s", PGSToSrtCommand.GetFullCommand())
 	ecode, err := PGSToSrtCommand.RunWithContext(ctx)
+	pgslog := fmt.Sprintf("stdout: %s, stderr: %s", outLog, errLog)
 	if err != nil {
-		return err
+		return fmt.Errorf("%v: %s", err, pgslog)
 	}
 	if ecode != 0 {
-		return errors.New(fmt.Sprintf("PGSToSrt invalid exit code %d, stdout %s, stderr %s", ecode, outLog, errLog))
+		return fmt.Errorf("invalid exit code %d: %s", ecode, pgslog)
 	}
 	langNotFound := fmt.Sprintf("Language '%s' is not available in Tesseract data directory", language)
 	if strings.Contains(outLog, langNotFound) {
@@ -82,16 +83,16 @@ func (P *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS) (err 
 	}
 
 	if !strings.Contains(outLog, "Finished OCR.") {
-		return fmt.Errorf("PGSToSrt failed: %s", outLog)
+		return fmt.Errorf("PGSToSrt no Finished OCR line: %s", pgslog)
 	}
 
 	if strings.Contains(outLog, "with 0 items.") {
-		return fmt.Errorf("PGSToSrt failed no Items converted: %s", outLog)
+		return fmt.Errorf("no items converted: %s", pgslog)
 	}
 
 	subtitles, err := astisub.OpenFile(outputFilePath)
 	if err != nil {
-		return fmt.Errorf("could not parse subtitles: %v", err)
+		return fmt.Errorf("could not parse subtitles: %v: %s", err, pgslog)
 	}
 
 	for _, item := range subtitles.Items {

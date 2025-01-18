@@ -986,7 +986,7 @@ func (F *FFMPEGGenerator) setSubtFilters(container *ContainerData, workDir strin
 			}
 
 			//Clean subtitle title to avoid PGS in title
-			re := regexp.MustCompile(`(?i)pgs`)
+			re := regexp.MustCompile(`(?i)\(?pgs\)?`)
 			subtitleTitle := re.ReplaceAllString(subtitle.Title, "")
 			subtitleTitle = strings.TrimSpace(strings.ReplaceAll(subtitleTitle, "  ", " "))
 

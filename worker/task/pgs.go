@@ -46,7 +46,6 @@ func NewPGSWorker(workerConfig Config) *PGSWorker {
 
 func (P *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS) (err error) {
 	log.Debugf("Converting PGS To Srt for Job stream %d", taskPGS.PGSID)
-	//TODO events??
 	inputFilePath := taskPGS.PGSSourcePath
 	outputFilePath := taskPGS.PGSTargetPath
 
@@ -65,13 +64,17 @@ func (P *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS) (err 
 	PGSToSrtCommand.SetStdoutFunc(func(buffer []byte, exit bool) {
 		outLog += string(buffer)
 	})
+	errLog := ""
+	PGSToSrtCommand.SetStderrFunc(func(buffer []byte, exit bool) {
+		errLog += string(buffer)
+	})
 	log.Debugf("PGSTOSrt Command: %s", PGSToSrtCommand.GetFullCommand())
 	ecode, err := PGSToSrtCommand.RunWithContext(ctx)
 	if err != nil {
 		return err
 	}
 	if ecode != 0 {
-		return errors.New(fmt.Sprintf("PGSToSrt invalid exit code %d", ecode))
+		return errors.New(fmt.Sprintf("PGSToSrt invalid exit code %d, stdout %s, stderr %s", ecode, outLog, errLog))
 	}
 	langNotFound := fmt.Sprintf("Language '%s' is not available in Tesseract data directory", language)
 	if strings.Contains(outLog, langNotFound) {
@@ -83,9 +86,7 @@ func (P *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS) (err 
 	}
 
 	if strings.Contains(outLog, "with 0 items.") {
-		// This could happens if the PGS file is empty, in such case we delete the empty generated srt
-		os.Remove(outputFilePath)
-		return nil
+		return fmt.Errorf("PGSToSrt failed no Items converted: %s", outLog)
 	}
 
 	subtitles, err := astisub.OpenFile(outputFilePath)

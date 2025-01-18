@@ -230,7 +230,7 @@ func (S *SQLRepository) prepareDatabase(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("failed to update schema version: %w", err)
 			}
-
+			currentVersion = version
 			return nil
 		})
 		if txErr != nil {

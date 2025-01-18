@@ -975,12 +975,6 @@ func (F *FFMPEGGenerator) setSubtFilters(container *ContainerData, workDir strin
 	subtInputIndex := 1
 	for index, subtitle := range container.Subtitle {
 		if subtitle.isImageTypeSubtitle() {
-			srtEncodedFile := filepath.Join(workDir, fmt.Sprintf("%d.srt", subtitle.Id))
-			_, err := os.Stat(srtEncodedFile)
-			if os.IsNotExist(err) {
-				continue
-			}
-
 			subtitleMap := fmt.Sprintf("-map %d -c:s:%d srt", subtInputIndex, index)
 			subtitleForced := ""
 			subtitleComment := ""
@@ -1008,7 +1002,8 @@ func (F *FFMPEGGenerator) setMetadata(container *ContainerData) {
 	F.Metadata = fmt.Sprintf("-metadata encodeParameters='%s'", container.ToJson())
 }
 func (F *FFMPEGGenerator) buildArguments(threads uint8, outputFilePath string) string {
-	coreParameters := fmt.Sprintf("-fflags +genpts -analyzeduration 2147483647 -probesize 2147483647 -hide_banner  -threads %d", threads)
+	//TODO not sure if it's good idea to have this -analyzeduration 2147483647 -probesize 2147483647
+	coreParameters := fmt.Sprintf("-fflags +genpts  -hide_banner  -threads %d", threads)
 	inputsParameters := ""
 	for _, input := range F.inputPaths {
 		inputsParameters = fmt.Sprintf("%s -i \"%s\"", inputsParameters, input)
@@ -1032,10 +1027,6 @@ func (F *FFMPEGGenerator) setInputFilters(container *ContainerData, sourceFilePa
 		for _, subt := range container.Subtitle {
 			if subt.isImageTypeSubtitle() {
 				srtEncodedFile := filepath.Join(workDir, fmt.Sprintf("%d.srt", subt.Id))
-				_, err := os.Stat(srtEncodedFile)
-				if os.IsNotExist(err) {
-					continue
-				}
 				F.inputPaths = append(F.inputPaths, srtEncodedFile)
 			}
 		}

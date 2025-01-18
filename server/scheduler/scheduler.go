@@ -586,6 +586,7 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`dow(n)?load code 500`, message) {
 		return true
 	}
+	//TODO al arreglar el tema del trailing descomentar
 	//if simpleRegex(`Trailing option\(s\) found in the command`, message) {
 	//	return true
 	//}

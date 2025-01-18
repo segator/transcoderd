@@ -43,13 +43,16 @@ type Updater struct {
 	assetName      string
 	tmpPath        string
 	noUpdates      bool
+	lastCheckTime  time.Time
+	lastRelease    *GitHubRelease
+	checkInterval  time.Duration
 }
 
 func PFlags() {
 	pflag.Bool("noUpdateMode", false, "DON'T USE THIS FLAG, INTERNAL USE")
 	pflag.Bool("noUpdates", false, "Application will not update itself")
 }
-func NewUpdater(currentVersionString string, assetName string, noUpdates bool, tmpPath string) (*Updater, error) {
+func NewUpdater(currentVersionString string, assetName string, noUpdates bool, tmpPath string, checkInterval time.Duration) (*Updater, error) {
 	currentVersion, err := semver.Parse(cleanVersion(currentVersionString))
 	if err != nil {
 		return nil, err
@@ -61,6 +64,7 @@ func NewUpdater(currentVersionString string, assetName string, noUpdates bool, t
 		assetName:      assetName,
 		tmpPath:        tmpPath,
 		noUpdates:      noUpdates,
+		checkInterval:  checkInterval,
 	}
 	return updater, nil
 }
@@ -109,10 +113,18 @@ func (U *Updater) runApplication(ctx context.Context) {
 }
 
 func (U *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
+	if time.Since(U.lastCheckTime) <= U.checkInterval {
+		if U.lastRelease == nil {
+			return nil, false, errors.New("no previous release information available")
+		}
+		return U.lastRelease, false, nil
+	}
 	latestRelease, err := GetGitHubLatestVersion()
 	if err != nil {
 		return nil, false, err
 	}
+	U.lastCheckTime = time.Now()
+	U.lastRelease = latestRelease
 
 	latestReleaseVersion, err := semver.Parse(cleanVersion(latestRelease.TagName))
 	if err != nil {

@@ -149,7 +149,7 @@ func allowedCodes(opts []Option, exitCode int) bool {
 
 func (C *Command) readerStreamProcessor(ctx context.Context, wg *sync.WaitGroup, reader io.ReadCloser, callbackFunc ReaderFunc) {
 	defer wg.Done()
-	buffer := make([]byte, 40)
+	buffer := make([]byte, 4096)
 loop:
 	for {
 		select {

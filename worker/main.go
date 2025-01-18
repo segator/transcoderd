@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
 	"transcoder/cmd"
 	"transcoder/server/web"
 	"transcoder/update"
@@ -22,10 +23,11 @@ import (
 )
 
 type CmdLineOpts struct {
-	WebConfig    web.WebServerConfig `mapstructure:"web"`
-	WorkerConfig task.Config         `mapstructure:"worker"`
-	NoUpdateMode bool                `mapstructure:"noUpdateMode"`
-	NoUpdates    bool                `mapstructure:"noUpdates"`
+	WebConfig           web.WebServerConfig `mapstructure:"web"`
+	WorkerConfig        task.Config         `mapstructure:"worker"`
+	NoUpdateMode        bool                `mapstructure:"noUpdateMode"`
+	NoUpdates           bool                `mapstructure:"noUpdates"`
+	UpdateCheckInterval time.Duration       `mapstructure:"updateCheckInterval"`
 }
 
 var (
@@ -45,10 +47,15 @@ func init() {
 	var verbose bool
 	pflag.BoolVar(&showVersion, "version", false, "Print version and exit")
 	pflag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
+	pflag.Duration("updateCheckInterval", time.Minute*15, "Check for updates every X duration")
 
 	pflag.String("worker.temporalPath", os.TempDir(), "Path used for temporal data")
 	pflag.String("worker.name", hostname, "WorkerConfig Name used for statistics")
-	pflag.Int("worker.threads", runtime.NumCPU(), "WorkerConfig Threads")
+	defaultThreads := runtime.NumCPU()
+	if defaultThreads > 16 {
+		defaultThreads = 16
+	}
+	pflag.Int("worker.threads", defaultThreads, "WorkerConfig Threads")
 	pflag.Int("worker.pgsConfig.parallelJobs", int(math.Ceil(float64(runtime.NumCPU())/4)), "WorkerConfig PGS Jobs in parallel")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
 	pflag.String("worker.pgsConfig.DLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")
@@ -137,7 +144,7 @@ func main() {
 		version.AppLogger().Warnf("Updates are disabled, %s won't check for updates", ApplicationName)
 	}
 
-	updater, err := update.NewUpdater(version.Version, ApplicationName, opts.NoUpdates, os.TempDir())
+	updater, err := update.NewUpdater(version.Version, ApplicationName, opts.NoUpdates, os.TempDir(), opts.UpdateCheckInterval)
 	if err != nil {
 		log.Panic(err)
 	}

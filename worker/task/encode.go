@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/avast/retry-go"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/ini.v1"
 	"gopkg.in/vansante/go-ffprobe.v2"
 	"hash"
 	"io"
@@ -30,7 +31,6 @@ import (
 	"transcoder/worker/serverclient"
 )
 
-const RESET_LINE = "\r\033[K"
 const MAX_PREFETCHED_JOBS = 1
 
 var ffmpegSpeedRegex = regexp.MustCompile(`speed=(\d*\.?\d+)x`)
@@ -153,44 +153,6 @@ func (E *EncodeWorker) resumeJobs() {
 	if err != nil {
 		panic(err)
 	}
-}
-func durToSec(dur string) (sec int) {
-	durAry := strings.Split(dur, ":")
-	if len(durAry) != 3 {
-		return
-	}
-	hr, _ := strconv.Atoi(durAry[0])
-	sec = hr * (60 * 60)
-	min, _ := strconv.Atoi(durAry[1])
-	sec += min * (60)
-	second, _ := strconv.Atoi(durAry[2])
-	sec += second
-	return
-}
-func getSpeed(res string) float64 {
-	rs := ffmpegSpeedRegex.FindStringSubmatch(res)
-	if len(rs) == 0 {
-		return -1
-	}
-	speed, err := strconv.ParseFloat(rs[1], 64)
-	if err != nil {
-		return -1
-	}
-	return speed
-
-}
-
-func getDuration(res string) int {
-	i := strings.Index(res, "time=")
-	if i >= 0 {
-		time := res[i+5:]
-		if len(time) > 8 {
-			time = time[0:8]
-			sec := durToSec(time)
-			return sec
-		}
-	}
-	return -1
 }
 
 func (J *EncodeWorker) AcceptJobs() bool {
@@ -419,47 +381,47 @@ func (j *EncodeWorker) clearData(data *ffprobe.ProbeData) (container *ContainerD
 	return container, nil
 }
 func (J *EncodeWorker) FFMPEG(ctx context.Context, job *model.WorkTaskEncode, videoContainer *ContainerData, ffmpegProgressChan chan<- FFMPEGProgress) error {
-	isClosed := false
-	defer func() {
-		//close(ffmpegProgressChan)
-		isClosed = true
-	}()
-
 	ffmpeg := &FFMPEGGenerator{Config: &J.workerConfig.EncodeConfig}
 	ffmpeg.setInputFilters(videoContainer, job.SourceFilePath, job.WorkDir)
 	ffmpeg.setVideoFilters(videoContainer)
 	ffmpeg.setAudioFilters(videoContainer)
 	ffmpeg.setSubtFilters(videoContainer, job.WorkDir)
-	ffmpeg.setMetadata(videoContainer)
 	ffmpegErrLog := ""
-	ffmpegOutLog := ""
-	sendObj := FFMPEGProgress{
-		duration: -1,
-		speed:    -1,
-	}
+
 	checkPercentageFFMPEG := func(buffer []byte, exit bool) {
-		stringedBuffer := string(buffer)
-		ffmpegErrLog += stringedBuffer
-
-		duration := getDuration(stringedBuffer)
-		if duration != -1 {
-			sendObj.duration = duration
-			sendObj.percent = float64(duration*100) / videoContainer.Video.Duration.Seconds()
-
-		}
-		speed := getSpeed(stringedBuffer)
-		if speed != -1 {
-			sendObj.speed = speed
-		}
-
-		if sendObj.speed != -1 && sendObj.duration != -1 && !isClosed {
-			ffmpegProgressChan <- sendObj
-			sendObj.duration = -1
-			sendObj.speed = -1
-		}
+		ffmpegErrLog += string(buffer)
 	}
+
 	stdoutFFMPEG := func(buffer []byte, exit bool) {
-		ffmpegOutLog += string(buffer)
+		cfg, err := ini.Load(buffer)
+		if err != nil {
+			return
+		}
+		s := cfg.Section("")
+		progress := s.Key("progress").String()
+		if progress == "continue" {
+			var outTimeSeconds int64
+			outTimeUs, err := s.Key("out_time_ms").Int64()
+			if err == nil {
+				outTimeSeconds = outTimeUs / 1000000
+			}
+			// If out_time_ms is not present, we can use frame as a fallback, even is not as precise
+			if outTimeSeconds == 0 {
+				frame, err := s.Key("frame").Int64()
+				if err != nil {
+					return
+				}
+				outTimeSeconds = frame / int64(videoContainer.Video.FrameRate)
+			}
+
+			ffmpegProgressChan <- FFMPEGProgress{
+				duration: int(outTimeSeconds),
+				percent:  float64(outTimeSeconds*100) / videoContainer.Video.Duration.Seconds(),
+			}
+		}
+		if exit {
+			close(ffmpegProgressChan)
+		}
 	}
 	sourceFileName := filepath.Base(job.SourceFilePath)
 	encodedFilePath := fmt.Sprintf("%s-encoded.%s", strings.TrimSuffix(sourceFileName, filepath.Ext(sourceFileName)), "mkv")
@@ -477,10 +439,10 @@ func (J *EncodeWorker) FFMPEG(ctx context.Context, job *model.WorkTaskEncode, vi
 	}
 	exitCode, err := ffmpegCommand.RunWithContext(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: stder:%s stdout:%s", err, ffmpegErrLog, ffmpegOutLog)
+		return fmt.Errorf("%w: stder:%s", err, ffmpegErrLog)
 	}
 	if exitCode != 0 {
-		return fmt.Errorf("exit code %d: stder:%s stdout:%s", exitCode, ffmpegErrLog, ffmpegOutLog)
+		return fmt.Errorf("exit code %d: stder:%s", exitCode, ffmpegErrLog)
 	}
 
 	return nil
@@ -883,42 +845,24 @@ func (J *EncodeWorker) encodeVideo(ctx context.Context, job *model.WorkTaskEncod
 	}
 	J.updateTaskStatus(job, model.FFMPEGSNotification, model.StartedNotificationStatus, "")
 	track.ResetMessage()
-	track.SetTotal(int64(videoContainer.Video.Duration.Seconds()) * int64(videoContainer.Video.FrameRate))
 	FFMPEGProgressChan := make(chan FFMPEGProgress)
-
-	go func() {
-		lastProgressEvent := float64(0)
-		lastDuration := 0
-	loop:
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case FFMPEGProgress, open := <-FFMPEGProgressChan:
-				if !open {
-					break loop
-				}
-				videoContainer.Video.Duration.Seconds()
-				encodeFramesIncrement := (FFMPEGProgress.duration - lastDuration) * videoContainer.Video.FrameRate
-				lastDuration = FFMPEGProgress.duration
-
-				track.Increment(encodeFramesIncrement)
-
-				if FFMPEGProgress.percent-lastProgressEvent > 10 {
-					J.updateTaskStatus(job, model.FFMPEGSNotification, model.StartedNotificationStatus, fmt.Sprintf("{\"progress\":\"%.2f\"}", track.PercentDone()))
-					lastProgressEvent = FFMPEGProgress.percent
-				}
-			}
-		}
-	}()
+	go J.FFMPEGProgressRoutine(ctx, job, track, FFMPEGProgressChan, videoContainer)
 	err = J.FFMPEG(ctx, job, videoContainer, FFMPEGProgressChan)
 	if err != nil {
-		//<-time.After(time.Minute*30)
 		J.updateTaskStatus(job, model.FFMPEGSNotification, model.FailedNotificationStatus, err.Error())
 		return err
 	}
 	<-time.After(time.Second * 1)
 
+	if err = J.verifyResultJob(ctx, job, sourceVideoParams, sourceVideoSize); err != nil {
+		return err
+	}
+
+	J.updateTaskStatus(job, model.FFMPEGSNotification, model.CompletedNotificationStatus, "")
+	return nil
+}
+
+func (J *EncodeWorker) verifyResultJob(ctx context.Context, job *model.WorkTaskEncode, sourceVideoParams *ffprobe.ProbeData, sourceVideoSize int64) error {
 	encodedVideoParams, encodedVideoSize, err := J.getVideoParameters(ctx, job.TargetFilePath)
 	if err != nil {
 		J.updateTaskStatus(job, model.FFMPEGSNotification, model.FailedNotificationStatus, err.Error())
@@ -936,8 +880,30 @@ func (J *EncodeWorker) encodeVideo(ctx context.Context, job *model.WorkTaskEncod
 		J.updateTaskStatus(job, model.FFMPEGSNotification, model.FailedNotificationStatus, err.Error())
 		return err
 	}
-	J.updateTaskStatus(job, model.FFMPEGSNotification, model.CompletedNotificationStatus, "")
 	return nil
+}
+
+func (J *EncodeWorker) FFMPEGProgressRoutine(ctx context.Context, job *model.WorkTaskEncode, track *TaskTracks, FFMPEGProgressChan chan FFMPEGProgress, videoContainer *ContainerData) {
+	track.SetTotal(int64(videoContainer.Video.Duration.Seconds()) * int64(videoContainer.Video.FrameRate))
+	lastProgressEvent := float64(0)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case progress, open := <-FFMPEGProgressChan:
+			if !open {
+				return
+			}
+
+			track.UpdateValue(int64(progress.duration * videoContainer.Video.FrameRate))
+
+			if progress.percent-lastProgressEvent > 10 {
+				J.updateTaskStatus(job, model.FFMPEGSNotification, model.StartedNotificationStatus, fmt.Sprintf("{\"progress\":\"%.2f\"}", track.PercentDone()))
+				lastProgressEvent = progress.percent
+			}
+		}
+	}
 }
 
 func (E *EncodeWorker) GetName() string {
@@ -998,12 +964,9 @@ func (F *FFMPEGGenerator) setSubtFilters(container *ContainerData, workDir strin
 
 	}
 }
-func (F *FFMPEGGenerator) setMetadata(container *ContainerData) {
-	F.Metadata = fmt.Sprintf("-metadata encodeParameters='%s'", container.ToJson())
-}
+
 func (F *FFMPEGGenerator) buildArguments(threads uint8, outputFilePath string) string {
-	//TODO not sure if it's good idea to have this -analyzeduration 2147483647 -probesize 2147483647
-	coreParameters := fmt.Sprintf("-fflags +genpts  -hide_banner  -threads %d", threads)
+	coreParameters := fmt.Sprintf("-fflags +genpts -nostats -progress pipe:1  -hide_banner  -threads %d -analyzeduration 2147483647 -probesize 2147483647", threads)
 	inputsParameters := ""
 	for _, input := range F.inputPaths {
 		inputsParameters = fmt.Sprintf("%s -i \"%s\"", inputsParameters, input)

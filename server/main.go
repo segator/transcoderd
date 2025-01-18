@@ -24,11 +24,12 @@ import (
 )
 
 type CmdLineOpts struct {
-	Database     repository.SQLServerConfig `mapstructure:"database"`
-	Web          web.WebServerConfig        `mapstructure:"web"`
-	Scheduler    scheduler.SchedulerConfig  `mapstructure:"scheduler"`
-	NoUpdateMode bool                       `mapstructure:"noUpdateMode"`
-	NoUpdates    bool                       `mapstructure:"noUpdates"`
+	Database            repository.SQLServerConfig `mapstructure:"database"`
+	Web                 web.WebServerConfig        `mapstructure:"web"`
+	Scheduler           scheduler.SchedulerConfig  `mapstructure:"scheduler"`
+	NoUpdateMode        bool                       `mapstructure:"noUpdateMode"`
+	NoUpdates           bool                       `mapstructure:"noUpdates"`
+	UpdateCheckInterval time.Duration              `mapstructure:"updateCheckInterval"`
 }
 
 var (
@@ -42,6 +43,8 @@ func init() {
 	var verbose bool
 	pflag.BoolVar(&showVersion, "version", false, "Print version and exit")
 	pflag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
+	pflag.Duration("updateCheckInterval", time.Minute*15, "Check for updates every X duration")
+
 	pflag.Duration("scheduler.scheduleTime", time.Minute*5, "Execute the scheduling loop every X seconds")
 	pflag.Duration("scheduler.jobTimeout", time.Hour*24, "Requeue jobs that are running for more than X minutes")
 	pflag.String("scheduler.sourcePath", "/data/current", "Download path")
@@ -137,7 +140,7 @@ func main() {
 		version.AppLogger().Warnf("Updates are disabled, %s won't check for updates", ApplicationName)
 	}
 
-	updater, err := update.NewUpdater(version.Version, ApplicationName, opts.NoUpdates, os.TempDir())
+	updater, err := update.NewUpdater(version.Version, ApplicationName, opts.NoUpdates, os.TempDir(), opts.UpdateCheckInterval)
 	if err != nil {
 		log.Panic(err)
 	}

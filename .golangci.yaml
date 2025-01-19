@@ -1,0 +1,11 @@
+run:
+  timeout: 5m
+  issues-exit-code: 1
+
+linters:
+  enable:
+    - errcheck
+    - gofmt
+    - govet
+    - gosimple
+    - gocritic

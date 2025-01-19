@@ -41,7 +41,7 @@ ENTRYPOINT ["/app/transcoderd-server"]
 FROM mcr.microsoft.com/dotnet/sdk:6.0 AS builder-pgs
 WORKDIR /src
 ARG tessdata_version=ced78752cc61322fb554c280d13360b35b8684e4
-ARG pgstosrt_version=9b0a8e3ca9500373b2e53e3ae5de11e5b9f4a5c8
+ARG pgstosrt_version=26a4ab214fbc18520d2999eb3d8baf8d5c84a724
 
 RUN apt-get -y update && \
   apt-get -y upgrade && \

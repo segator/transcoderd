@@ -3,10 +3,9 @@ package helper
 import (
 	"github.com/avast/retry-go"
 	log "github.com/sirupsen/logrus"
-	"io/ioutil"
+	"io"
 	"math/rand"
 	"net/http"
-	"os"
 	"path/filepath"
 	"time"
 )
@@ -14,8 +13,6 @@ import (
 var (
 	ValidVideoExtensions = []string{"mp4", "mpg", "m4a", "m4v", "f4v", "f4a", "m4b", "m4r", "f4b", "mov ", "ogg", "oga", "ogv", "ogx ", "wmv", "wma", "asf ", "webm", "avi", "flv", "vob ", "mkv"}
 	STUNServers          = []string{"https://api.ipify.org?format=text", "https://ifconfig.me", "https://ident.me/", "https://myexternalip.com/raw"}
-	updateURL            = "https://github.com/segator/transcoderd/releases/download/wip-master/%s"
-	workingDirectory     = filepath.Join(os.TempDir(), "transcoder")
 	ffmpegPath           = "ffmpeg"
 	mkvExtractPath       = "mkvextract"
 )
@@ -43,7 +40,7 @@ func GetPublicIP() (publicIP string) {
 			return err
 		}
 		defer resp.Body.Close()
-		publicIPBytes, err := ioutil.ReadAll(resp.Body)
+		publicIPBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return err
 		}

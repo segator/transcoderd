@@ -5,13 +5,13 @@ import (
 )
 
 type PGSConfig struct {
-	ParallelJobs      int    `mapstructure:"parallelJobs", envconfig:"WORKER_PGS_PARALLELJOBS"`
-	DLLPath           string `mapstructure:"DLLPath", envconfig:"WORKER_PGS_TO_SRT_DLL_PATH"`
-	TesseractDataPath string `mapstructure:"tessdataPath", envconfig:"WORKER_TESSERACT_DATA_PATH"`
-	DotnetPath        string `mapstructure:"dotnetPath", envconfig:"WORKER_DOTNET_PATH"`
-	TessVersion       int    `mapstructure:"tessVersion", envconfig:"WORKER_TESS_VERSION"`
-	LibleptName       string `mapstructure:"libleptName", envconfig:"WORKER_LIBLEPT_NAME"`
-	LibleptVersion    int    `mapstructure:"libleptVersion", envconfig:"WORKER_LIBLEPT_VERSION"`
+	ParallelJobs      int    `mapstructure:"parallelJobs",envconfig:"WORKER_PGS_PARALLELJOBS"`
+	DLLPath           string `mapstructure:"DLLPath",envconfig:"WORKER_PGS_TO_SRT_DLL_PATH"`
+	TesseractDataPath string `mapstructure:"tessdataPath",envconfig:"WORKER_TESSERACT_DATA_PATH"`
+	DotnetPath        string `mapstructure:"dotnetPath",envconfig:"WORKER_DOTNET_PATH"`
+	TessVersion       int    `mapstructure:"tessVersion",envconfig:"WORKER_TESS_VERSION"`
+	LibleptName       string `mapstructure:"libleptName",envconfig:"WORKER_LIBLEPT_NAME"`
+	LibleptVersion    int    `mapstructure:"libleptVersion",envconfig:"WORKER_LIBLEPT_VERSION"`
 }
 
 type FFMPEGConfig struct {

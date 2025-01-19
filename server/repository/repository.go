@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"embed"
-	_ "embed"
 	"fmt"
 	_ "github.com/lib/pq"
 	log "github.com/sirupsen/logrus"

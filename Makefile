@@ -20,6 +20,27 @@ help:	## show this help menu.
 	@@egrep -h "#[#]" $(MAKEFILE_LIST) | sed -e 's/\\$$//' | awk 'BEGIN {FS = "[:=].*?#[#] "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 
+.PHONY: fmt
+fmt:
+	go fmt  ./...
+
+
+# Install GolangCI-Lint
+install-lint:
+	@echo "Installing GolangCI-Lint $(GOLANGCI_LINT_VERSION)..."
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s $(GOLANGCI_LINT_VERSION)
+
+# Run GolangCI-Lint
+lint:
+	@echo "Running GolangCI-Lint..."
+	$(GOLANGCI_LINT_BIN) run --config=$(GOLANGCI_LINT_CONFIG)
+
+# Run GolangCI-Lint and fix issues automatically
+lint-fix:
+	@echo "Running GolangCI-Lint with --fix..."
+	$(GOLANGCI_LINT_BIN) run --fix --config=$(GOLANGCI_LINT_CONFIG)
+
+
 .PHONY: build
 build: buildgo-server buildgo-worker buildcontainer-server buildcontainer-worker  ## Build all artifacts
 

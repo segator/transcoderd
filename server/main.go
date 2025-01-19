@@ -98,8 +98,7 @@ func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Upd
 	scheduler.Run(wg, ctx)
 
 	//WebConfig Server
-	var webServer *web.Server
-	webServer = web.NewWebServer(opts.Web, scheduler, updater)
+	webServer := web.NewWebServer(opts.Web, scheduler, updater)
 	webServer.Run(wg, ctx)
 }
 

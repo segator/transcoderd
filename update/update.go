@@ -70,11 +70,11 @@ func NewUpdater(currentVersionString string, assetName string, noUpdates bool, t
 	return updater, nil
 }
 
-func (U *Updater) Run(wg *sync.WaitGroup, ctx context.Context) {
+func (u *Updater) Run(wg *sync.WaitGroup, ctx context.Context) {
 	wg.Add(1)
 	go func() {
 		for {
-			latestVersion, newUpdate, err := U.CheckForUpdate()
+			latestVersion, newUpdate, err := u.CheckForUpdate()
 			if err != nil {
 				log.Error(err)
 				select {
@@ -85,20 +85,20 @@ func (U *Updater) Run(wg *sync.WaitGroup, ctx context.Context) {
 				}
 			}
 			if newUpdate {
-				if err = U.update(latestVersion); err != nil {
+				if err = u.update(latestVersion); err != nil {
 					log.Error(err)
 					continue
 				}
 			}
-			U.runApplication(ctx)
+			u.runApplication(ctx)
 		}
 	}()
 }
 
-func (U *Updater) runApplication(ctx context.Context) {
+func (u *Updater) runApplication(ctx context.Context) {
 	arguments := os.Args[1:]
 	arguments = append(arguments, "--noUpdateMode")
-	ecode, err := command.NewCommand(U.binaryPath, arguments...).
+	ecode, err := command.NewCommand(u.binaryPath, arguments...).
 		SetStderrFunc(func(buffer []byte, exit bool) {
 			os.Stderr.Write(buffer)
 		}).
@@ -113,27 +113,27 @@ func (U *Updater) runApplication(ctx context.Context) {
 	}
 }
 
-func (U *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
-	if time.Since(U.lastCheckTime) <= *U.checkInterval {
-		return U.lastRelease, false, nil
+func (u *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
+	if time.Since(u.lastCheckTime) <= *u.checkInterval {
+		return u.lastRelease, false, nil
 	}
 	latestRelease, err := GetGitHubLatestVersion()
 	if err != nil {
 		return nil, false, err
 	}
-	U.lastCheckTime = time.Now()
-	U.lastRelease = latestRelease
+	u.lastCheckTime = time.Now()
+	u.lastRelease = latestRelease
 
 	latestReleaseVersion, err := semver.Parse(cleanVersion(latestRelease.TagName))
 	if err != nil {
 		return nil, false, err
 	}
 	l := log.WithFields(log.Fields{
-		"currentVersion": U.currentVersion.String(),
+		"currentVersion": u.currentVersion.String(),
 		"latestVersion":  latestReleaseVersion.String(),
 	})
-	if latestReleaseVersion.GT(U.currentVersion) {
-		if U.noUpdates {
+	if latestReleaseVersion.GT(u.currentVersion) {
+		if u.noUpdates {
 			l.Warn("Newer version available but updates are disabled")
 			return nil, false, nil
 		}
@@ -145,18 +145,18 @@ func (U *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
 	return nil, false, nil
 }
 
-func (U *Updater) update(githubRelease *GitHubRelease) error {
+func (u *Updater) update(githubRelease *GitHubRelease) error {
 	var assetToDownload *GitHubAsset
 	for _, asset := range githubRelease.Assets {
-		if asset.Name == U.assetName {
+		if asset.Name == u.assetName {
 			assetToDownload = &asset
 			break
 		}
 	}
 	if assetToDownload == nil {
-		return fmt.Errorf("no asset found with name %s for release %s", U.assetName, githubRelease.TagName)
+		return fmt.Errorf("no asset found with name %s for release %s", u.assetName, githubRelease.TagName)
 	}
-	tmpDownloadPath := filepath.Join(U.tmpPath, fmt.Sprintf("%s.new", U.assetName))
+	tmpDownloadPath := filepath.Join(u.tmpPath, fmt.Sprintf("%s.new", u.assetName))
 	latestReleaseFile, err := os.Create(tmpDownloadPath)
 	if err != nil {
 		return err

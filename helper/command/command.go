@@ -22,15 +22,10 @@ type Command struct {
 	Params     []string
 	Env        []string
 	WorkDir    string
-	StdoutFunc ReaderFunc
-	SterrFunc  ReaderFunc
+	stdoutFunc ReaderFunc
+	stderrFunc ReaderFunc
 }
 
-func NewPanicOption() Option {
-	return Option{
-		PanicOnError: true,
-	}
-}
 func NewAllowedCodesOption(codes ...int) Option {
 	return Option{
 		AllowedCodes: codes,
@@ -49,50 +44,50 @@ func NewCommand(command string, params ...string) *Command {
 	return cmd
 }
 
-func (C *Command) AddParam(param string) *Command {
-	C.Params = append(C.Params, param)
-	return C
+func (c *Command) AddParam(param string) *Command {
+	c.Params = append(c.Params, param)
+	return c
 }
 
-func (C *Command) SetWorkDir(workDir string) *Command {
-	C.WorkDir = workDir
-	return C
+func (c *Command) SetWorkDir(workDir string) *Command {
+	c.WorkDir = workDir
+	return c
 }
-func (C *Command) SetEnv(env []string) *Command {
-	C.Env = env
-	return C
-}
-
-func (C *Command) AddEnv(env string) *Command {
-	C.Env = append(C.Env, env)
-	return C
+func (c *Command) SetEnv(env []string) *Command {
+	c.Env = env
+	return c
 }
 
-func (C *Command) SetStdoutFunc(StdoutFunc ReaderFunc) *Command {
-	C.StdoutFunc = StdoutFunc
-	return C
+func (c *Command) AddEnv(env string) *Command {
+	c.Env = append(c.Env, env)
+	return c
 }
 
-func (C *Command) SetStderrFunc(StderrtFunc ReaderFunc) *Command {
-	C.SterrFunc = StderrtFunc
-	return C
-}
-func (C *Command) Run(opt ...Option) (exitCode int, err error) {
-	return C.RunWithContext(context.Background(), opt...)
+func (c *Command) SetStdoutFunc(StdoutFunc ReaderFunc) *Command {
+	c.stdoutFunc = StdoutFunc
+	return c
 }
 
-func (C *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode int, err error) {
+func (c *Command) SetStderrFunc(StderrtFunc ReaderFunc) *Command {
+	c.stderrFunc = StderrtFunc
+	return c
+}
+func (c *Command) Run(opt ...Option) (exitCode int, err error) {
+	return c.RunWithContext(context.Background(), opt...)
+}
+
+func (c *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode int, err error) {
 	wg := &sync.WaitGroup{}
 	defer wg.Wait()
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, C.Command, C.Params...)
+		cmd = exec.CommandContext(ctx, c.Command, c.Params...)
 	} else {
-		fullCommand := append([]string{C.Command}, C.Params...)
+		fullCommand := append([]string{c.Command}, c.Params...)
 		cmd = exec.CommandContext(ctx, "nice", append([]string{"-20"}, fullCommand...)...)
 	}
-	cmd.Env = C.Env
-	cmd.Dir = C.WorkDir
+	cmd.Env = c.Env
+	cmd.Dir = c.WorkDir
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return
@@ -106,8 +101,8 @@ func (C *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode i
 	}
 
 	wg.Add(2)
-	go C.readerStreamProcessor(ctx, wg, stdout, C.StdoutFunc)
-	go C.readerStreamProcessor(ctx, wg, stderr, C.SterrFunc)
+	go c.readerStreamProcessor(ctx, wg, stdout, c.stdoutFunc)
+	go c.readerStreamProcessor(ctx, wg, stderr, c.stderrFunc)
 
 	err = cmd.Wait()
 	if err != nil {
@@ -147,7 +142,7 @@ func allowedCodes(opts []Option, exitCode int) bool {
 	return exitCode == 0
 }
 
-func (C *Command) readerStreamProcessor(ctx context.Context, wg *sync.WaitGroup, reader io.ReadCloser, callbackFunc ReaderFunc) {
+func (c *Command) readerStreamProcessor(ctx context.Context, wg *sync.WaitGroup, reader io.ReadCloser, callbackFunc ReaderFunc) {
 	defer wg.Done()
 	buffer := make([]byte, 4096)
 loop:
@@ -172,8 +167,8 @@ loop:
 	}
 }
 
-func (C *Command) GetFullCommand() string {
-	return fmt.Sprintf("%s %s", C.Command, strings.Join(C.Params, " "))
+func (c *Command) GetFullCommand() string {
+	return fmt.Sprintf("%s %s", c.Command, strings.Join(c.Params, " "))
 }
 
 func GetWD() string {
@@ -205,7 +200,7 @@ func StringToSlice(command string) (output []string) {
 		} else if c == '\'' {
 			cutQuote = !cutQuote
 		}
-		inLineWord = inLineWord + string(c)
+		inLineWord += string(c)
 	}
 	output = append(output, inLineWord)
 	return output

@@ -2,15 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
-	"github.com/spf13/viper"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"syscall"
 	"time"
@@ -23,110 +19,36 @@ import (
 	"transcoder/version"
 )
 
-type CmdLineOpts struct {
-	Database            repository.SQLServerConfig `mapstructure:"database"`
-	Web                 web.WebServerConfig        `mapstructure:"web"`
-	Scheduler           scheduler.SchedulerConfig  `mapstructure:"scheduler"`
-	NoUpdateMode        bool                       `mapstructure:"noUpdateMode"`
-	NoUpdates           bool                       `mapstructure:"noUpdates"`
-	UpdateCheckInterval time.Duration              `mapstructure:"updateCheckInterval"`
-}
-
 var (
 	ApplicationName = "transcoderd-server"
-	showVersion     = false
-	opts            CmdLineOpts
+	opts            cmd.CommandLineConfig
 )
 
 func init() {
-	//Scheduler
-	var verbose bool
-	pflag.BoolVar(&showVersion, "version", false, "Print version and exit")
-	pflag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
-	pflag.Duration("updateCheckInterval", time.Minute*15, "Check for updates every X duration")
+	cmd.CommonFlags()
 
-	pflag.Duration("scheduler.scheduleTime", time.Minute*5, "Execute the scheduling loop every X seconds")
-	pflag.Duration("scheduler.jobTimeout", time.Hour*24, "Requeue jobs that are running for more than X minutes")
-	pflag.String("scheduler.sourcePath", "/data/current", "Download path")
-	pflag.Int64("scheduler.minFileSize", 1e+8, "Min File Size")
+	pflag.Duration("server.scheduler.scheduleTime", time.Minute*5, "Execute the scheduling loop every X seconds")
+	pflag.Duration("server.scheduler.jobTimeout", time.Hour*24, "Requeue jobs that are running for more than X minutes")
+	pflag.String("server.scheduler.sourcePath", "/data/current", "Download path")
+	pflag.Int64("server.scheduler.minFileSize", 1e+8, "Min File Size")
+	pflag.String("server.database.Driver", "postgres", "DB Driver")
+	pflag.String("server.database.Host", "localhost", "DB Host")
+	pflag.Int("server.database.port", 5432, "DB Port")
+	pflag.String("server.database.User", "postgres", "DB User")
+	pflag.String("server.database.Password", "postgres", "DB Password")
+	pflag.String("server.database.Scheme", "server", "DB Scheme")
 
-	//WebConfig Config
-
-	cmd.WebFlags()
-
-	//DB Config
-	pflag.String("database.Driver", "postgres", "DB Driver")
-	pflag.String("database.Host", "localhost", "DB Host")
-	pflag.Int("database.port", 5432, "DB Port")
-	pflag.String("database.User", "postgres", "DB User")
-	pflag.String("database.Password", "postgres", "DB Password")
-	pflag.String("database.Scheme", "server", "DB Scheme")
-	update.PFlags()
-	pflag.Usage = usage
-
-	//pflag.Parse()
-	//viper.SetConfigFile("config")
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath("/etc/transcoderd/")
-	viper.AddConfigPath("$HOME/.transcoderd/")
-	viper.AddConfigPath(".")
-	viper.AutomaticEnv()
-	viper.SetEnvPrefix("TR")
-	err := viper.ReadInConfig()
-	if err != nil {
-		switch err.(type) {
-		case viper.ConfigFileNotFoundError:
-			log.Warnf("No Config File Found")
-		default:
-			log.Panic(err)
-		}
-	}
-	pflag.Parse()
-	log.SetFormatter(&log.TextFormatter{
-		ForceColors:               true,
-		EnvironmentOverrideColors: true,
-	})
-	if verbose {
-		log.SetLevel(log.DebugLevel)
-	} else {
-		log.SetLevel(log.InfoLevel)
-	}
-	viper.BindPFlags(pflag.CommandLine)
-
-	urlAndDurationDecoder := viper.DecodeHook(func(source reflect.Type, target reflect.Type, data interface{}) (interface{}, error) {
-		if source.Kind() != reflect.String {
-			return data, nil
-		}
-		if target == reflect.TypeOf(url.URL{}) {
-			url, err := url.Parse(data.(string))
-			return url, err
-		} else if target == reflect.TypeOf(time.Duration(5)) {
-			return time.ParseDuration(data.(string))
-		}
-		return data, nil
-
-	})
-	err = viper.Unmarshal(&opts, urlAndDurationDecoder)
-	if err != nil {
-		log.Panic(err)
-	}
+	cmd.ViperConfig(&opts)
 
 	//Fix Paths
-	opts.Scheduler.SourcePath = filepath.Clean(opts.Scheduler.SourcePath)
-	helper.CheckPath(opts.Scheduler.SourcePath)
-}
-
-func usage() {
-	fmt.Fprintf(os.Stderr, "Usage: %s [OPTION]...\n", os.Args[0])
-	pflag.PrintDefaults()
-	os.Exit(0)
+	serverConfig := opts.Server
+	serverConfig.Scheduler.SourcePath = filepath.Clean(serverConfig.Scheduler.SourcePath)
+	helper.CheckPath(serverConfig.Scheduler.SourcePath)
 }
 
 func main() {
-	if showVersion {
-		version.LogVersion()
-		os.Exit(0)
-	}
+	opts.PrintVersion()
+
 	wg := &sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)
@@ -159,7 +81,7 @@ func main() {
 func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) {
 	//Repository persist
 	var repo repository.Repository
-	repo, err := repository.NewSQLRepository(opts.Database)
+	repo, err := repository.NewSQLRepository(opts.Server.Database)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -169,14 +91,14 @@ func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Upd
 	}
 
 	//Scheduler
-	scheduler, err := scheduler.NewScheduler(opts.Scheduler, repo)
+	scheduler, err := scheduler.NewScheduler(opts.Server.Scheduler, repo)
 	if err != nil {
 		log.Panic(err)
 	}
 	scheduler.Run(wg, ctx)
 
 	//WebConfig Server
-	var webServer *web.WebServer
+	var webServer *web.Server
 	webServer = web.NewWebServer(opts.Web, scheduler, updater)
 	webServer.Run(wg, ctx)
 }

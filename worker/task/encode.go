@@ -28,6 +28,7 @@ import (
 	"transcoder/helper"
 	"transcoder/helper/command"
 	"transcoder/model"
+	"transcoder/worker/config"
 	"transcoder/worker/serverclient"
 )
 
@@ -47,7 +48,7 @@ type EncodeWorker struct {
 	downloadChan chan *model.WorkTaskEncode
 	encodeChan   chan *model.WorkTaskEncode
 	uploadChan   chan *model.WorkTaskEncode
-	workerConfig Config
+	workerConfig *config.Config
 	tempPath     string
 	wg           sync.WaitGroup
 	mu           sync.RWMutex
@@ -56,7 +57,7 @@ type EncodeWorker struct {
 	client       *serverclient.ServerClient
 }
 
-func NewEncodeWorker(workerConfig Config, client *serverclient.ServerClient, printer *ConsoleWorkerPrinter) *EncodeWorker {
+func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerClient, printer *ConsoleWorkerPrinter) *EncodeWorker {
 	tempPath := filepath.Join(workerConfig.TemporalPath, fmt.Sprintf("worker-%s", workerConfig.Name))
 	encodeWorker := &EncodeWorker{
 		name:         workerConfig.Name,
@@ -80,15 +81,15 @@ func NewEncodeWorker(workerConfig Config, client *serverclient.ServerClient, pri
 
 func (E *EncodeWorker) Run(wg *sync.WaitGroup, ctx context.Context) {
 	serviceCtx, cancelServiceCtx := context.WithCancel(context.Background())
-	log.Info("Starting WorkerConfig Client...")
+	log.Info("Starting Worker Client...")
 	E.start(serviceCtx)
-	log.Info("Started WorkerConfig Client...")
+	log.Info("Started Worker Client...")
 	wg.Add(1)
 	go func() {
 		<-ctx.Done()
 		cancelServiceCtx()
 		E.stop()
-		log.Info("Stopping WorkerConfig Client...")
+		log.Info("Stopping Worker Client...")
 		wg.Done()
 	}()
 }
@@ -156,14 +157,14 @@ func (E *EncodeWorker) resumeJobs() {
 }
 
 func (J *EncodeWorker) AcceptJobs() bool {
-	now := time.Now()
 	if J.workerConfig.Paused {
 		return false
 	}
 	if J.workerConfig.HaveSettedPeriodTime() {
-		startAfter := time.Date(now.Year(), now.Month(), now.Day(), J.workerConfig.StartAfter.Hour, J.workerConfig.StartAfter.Minute, 0, 0, now.Location())
-		stopAfter := time.Date(now.Year(), now.Month(), now.Day(), J.workerConfig.StopAfter.Hour, J.workerConfig.StopAfter.Minute, 0, 0, now.Location())
-		return now.After(startAfter) && now.Before(stopAfter)
+		now := time.Now()
+		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		elapsedSinceMidnight := now.Sub(midnight)
+		return elapsedSinceMidnight >= *J.workerConfig.StartAfter && elapsedSinceMidnight <= *J.workerConfig.StopAfter
 	}
 	return J.PrefetchJobs() < MAX_PREFETCHED_JOBS
 }
@@ -381,7 +382,7 @@ func (j *EncodeWorker) clearData(data *ffprobe.ProbeData) (container *ContainerD
 	return container, nil
 }
 func (J *EncodeWorker) FFMPEG(ctx context.Context, job *model.WorkTaskEncode, videoContainer *ContainerData, ffmpegProgressChan chan<- FFMPEGProgress) error {
-	ffmpeg := &FFMPEGGenerator{Config: &J.workerConfig.EncodeConfig}
+	ffmpeg := &FFMPEGGenerator{Config: J.workerConfig.EncodeConfig}
 	ffmpeg.setInputFilters(videoContainer, job.SourceFilePath, job.WorkDir)
 	ffmpeg.setVideoFilters(videoContainer)
 	ffmpeg.setAudioFilters(videoContainer)
@@ -911,7 +912,7 @@ func (E *EncodeWorker) GetName() string {
 }
 
 type FFMPEGGenerator struct {
-	Config         *FFMPEGConfig
+	Config         *config.FFMPEGConfig
 	inputPaths     []string
 	VideoFilter    string
 	AudioFilter    []string

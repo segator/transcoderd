@@ -12,12 +12,10 @@ import (
 	"transcoder/worker/serverclient"
 
 	"time"
-	"transcoder/helper"
-	"transcoder/model"
 )
 
 type ServerCoordinator struct {
-	webServerConfig web.WebServerConfig
+	webServerConfig web.Config
 
 	printer      *ConsoleWorkerPrinter
 	serverClient *serverclient.ServerClient
@@ -67,20 +65,14 @@ func (Q *ServerCoordinator) connection() {
 }
 
 func (Q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
-	//Declare WorkerConfig Unique ServerCoordinator
+	//Declare Worker Unique ServerCoordinator
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(time.Second * 30):
-			pingEvent := model.TaskEvent{
-				EventType:  model.PingEvent,
-				WorkerName: Q.worker.GetName(),
-				EventTime:  time.Now(),
-				IP:         helper.GetPublicIP(),
-			}
-			if err := Q.serverClient.PublishEvent(pingEvent); err != nil {
+			if err := Q.serverClient.PublishPing(); err != nil {
 				Q.printer.Error("Error Publishing Ping Event: %v", err)
 			}
 		}
@@ -101,7 +93,7 @@ func (Q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 				}
 				if requireUpdate {
 					Q.printer.Log("New version available %s,exiting ...", release.TagName)
-					os.Exit(update.UPDATE_EXIT_CODE)
+					os.Exit(update.ExitCode)
 				}
 
 				taskJob, err := Q.serverClient.RequestJob(Q.worker.GetName())

@@ -10,16 +10,18 @@ import (
 	"io"
 	"net/http"
 	"time"
+	"transcoder/helper"
 	"transcoder/model"
 	"transcoder/server/web"
 )
 
 type ServerClient struct {
-	webServerConfig web.WebServerConfig
+	webServerConfig *web.Config
 	httpClient      *http.Client
+	workerName      string
 }
 
-func NewServerClient(webServerConfig web.WebServerConfig) *ServerClient {
+func NewServerClient(webServerConfig *web.Config, workerName string) *ServerClient {
 
 	client := retryablehttp.NewClient()
 	client.RetryMax = 999999999999
@@ -35,11 +37,13 @@ func NewServerClient(webServerConfig web.WebServerConfig) *ServerClient {
 
 	return &ServerClient{
 		webServerConfig: webServerConfig,
+		workerName:      workerName,
 		httpClient:      client.StandardClient(),
 	}
 }
 
 func (Q *ServerClient) PublishEvent(event model.TaskEvent) error {
+	event.WorkerName = Q.workerName
 	b, err := json.Marshal(event)
 	if err != nil {
 		return err
@@ -123,4 +127,14 @@ func (Q *ServerClient) request(method string, uri string, body io.Reader) (*http
 	req.Header.Set("Authorization", authHeader)
 
 	return req, nil
+}
+
+func (Q *ServerClient) PublishPing() error {
+	pingEvent := model.TaskEvent{
+		EventType:  model.PingEvent,
+		WorkerName: Q.workerName,
+		EventTime:  time.Now(),
+		IP:         helper.GetPublicIP(),
+	}
+	return Q.PublishEvent(pingEvent)
 }

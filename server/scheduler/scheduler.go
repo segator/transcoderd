@@ -44,7 +44,7 @@ type SchedulerConfig struct {
 }
 
 type RuntimeScheduler struct {
-	config          SchedulerConfig
+	config          *SchedulerConfig
 	repo            repository.Repository
 	checksumChan    chan PathChecksum
 	pathChecksumMap map[string]string
@@ -175,7 +175,7 @@ func (R *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 	return nil
 }
 
-func NewScheduler(config SchedulerConfig, repo repository.Repository) (*RuntimeScheduler, error) {
+func NewScheduler(config *SchedulerConfig, repo repository.Repository) (*RuntimeScheduler, error) {
 	runtimeScheduler := &RuntimeScheduler{
 		config:          config,
 		repo:            repo,

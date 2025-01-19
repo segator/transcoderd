@@ -12,12 +12,13 @@ import (
 	"time"
 	"transcoder/helper/command"
 	"transcoder/model"
+	"transcoder/worker/config"
 )
 
 var langMapping []PGSTesseractLanguage
 
 type PGSWorker struct {
-	workerConfig Config
+	workerConfig *config.Config
 }
 
 type PGSTesseractLanguage struct {
@@ -37,7 +38,7 @@ func init() {
 	langMapping = append(langMapping, PGSTesseractLanguage{"isl", []string{"ice"}})
 	langMapping = append(langMapping, PGSTesseractLanguage{"ces", []string{"cze"}})
 }
-func NewPGSWorker(workerConfig Config) *PGSWorker {
+func NewPGSWorker(workerConfig *config.Config) *PGSWorker {
 	encodeWorker := &PGSWorker{
 		workerConfig: workerConfig,
 	}

@@ -21,8 +21,8 @@ import (
 	"transcoder/update"
 )
 
-type WebServer struct {
-	WebServerConfig
+type Server struct {
+	config        *Config
 	scheduler     scheduler.Scheduler
 	srv           http.Server
 	ctx           context.Context
@@ -30,7 +30,7 @@ type WebServer struct {
 	updater       *update.Updater
 }
 
-func (W *WebServer) requestJob(writer http.ResponseWriter, request *http.Request) {
+func (W *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 	workerName := request.Header.Get("workerName")
 	if workerName == "" {
 		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), 403)
@@ -52,7 +52,7 @@ func (W *WebServer) requestJob(writer http.ResponseWriter, request *http.Request
 	writer.Write(b)
 }
 
-func (W *WebServer) handleWorkerEvent(writer http.ResponseWriter, request *http.Request) {
+func (W *Server) handleWorkerEvent(writer http.ResponseWriter, request *http.Request) {
 	taskEvent := &model.TaskEvent{}
 	err := json.NewDecoder(request.Body).Decode(taskEvent)
 	if webError(writer, err, 500) {
@@ -67,7 +67,7 @@ func (W *WebServer) handleWorkerEvent(writer http.ResponseWriter, request *http.
 	writer.WriteHeader(200)
 }
 
-func (W *WebServer) addJobs(writer http.ResponseWriter, request *http.Request) {
+func (W *Server) addJobs(writer http.ResponseWriter, request *http.Request) {
 	defer request.Body.Close()
 	jobRequest := &model.JobRequest{}
 	err := json.NewDecoder(request.Body).Decode(jobRequest)
@@ -98,7 +98,7 @@ func (W *WebServer) addJobs(writer http.ResponseWriter, request *http.Request) {
 	writer.Write(b)
 }
 
-func (W *WebServer) cancelJobs(writer http.ResponseWriter, request *http.Request) {
+func (W *Server) cancelJobs(writer http.ResponseWriter, request *http.Request) {
 	vars := mux.Vars(request)
 	jobId := vars["jobid"]
 	if jobId == "" {
@@ -111,7 +111,7 @@ func (W *WebServer) cancelJobs(writer http.ResponseWriter, request *http.Request
 	}
 }
 
-func (W *WebServer) upload(writer http.ResponseWriter, request *http.Request) {
+func (W *Server) upload(writer http.ResponseWriter, request *http.Request) {
 	workerName := request.Header.Get("workerName")
 	if workerName == "" {
 		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), 403)
@@ -174,7 +174,7 @@ loop:
 	writer.WriteHeader(201)
 }
 
-func (W *WebServer) download(writer http.ResponseWriter, request *http.Request) {
+func (W *Server) download(writer http.ResponseWriter, request *http.Request) {
 	workerName := request.Header.Get("workerName")
 	if workerName == "" {
 		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), 403)
@@ -216,7 +216,7 @@ loop:
 	}
 }
 
-func (W *WebServer) checksum(writer http.ResponseWriter, request *http.Request) {
+func (W *Server) checksum(writer http.ResponseWriter, request *http.Request) {
 	values := request.URL.Query()
 	uuid := values.Get("uuid")
 	if uuid == "" {
@@ -233,7 +233,7 @@ func (W *WebServer) checksum(writer http.ResponseWriter, request *http.Request) 
 	writer.Write([]byte(checksum))
 }
 
-type WebServerConfig struct {
+type Config struct {
 	Port   int    `mapstructure:"port", envconfig:"WEB_PORT"`
 	Token  string `mapstructure:"token", envconfig:"WEB_TOKEN"`
 	Domain string `mapstructure:"domain", envconfig:"WEB_DOMAIN"`
@@ -247,17 +247,17 @@ func (A *ActiveTracker) ActiveRequests() bool {
 	return atomic.LoadInt64(&A.activeRequests) > 0
 }
 
-func NewWebServer(config WebServerConfig, scheduler scheduler.Scheduler, updater *update.Updater) *WebServer {
+func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update.Updater) *Server {
 	rtr := mux.NewRouter()
 	at := &ActiveTracker{}
 	rtr.Use(at.ActiveRequestsMiddleware())
 	rtr.Use(LoggingMiddleware())
 
-	webServer := &WebServer{
-		WebServerConfig: config,
-		activeTracker:   at,
-		updater:         updater,
-		scheduler:       scheduler,
+	webServer := &Server{
+		config:        config,
+		activeTracker: at,
+		updater:       updater,
+		scheduler:     scheduler,
 		srv: http.Server{
 			Addr:    ":" + strconv.Itoa(config.Port),
 			Handler: rtr,
@@ -302,7 +302,7 @@ func LoggingMiddleware() mux.MiddlewareFunc {
 	}
 }
 
-func (W *WebServer) Run(wg *sync.WaitGroup, ctx context.Context) {
+func (W *Server) Run(wg *sync.WaitGroup, ctx context.Context) {
 	W.ctx = ctx
 	log.Info("Starting WebServer...")
 	W.start()
@@ -316,7 +316,7 @@ func (W *WebServer) Run(wg *sync.WaitGroup, ctx context.Context) {
 	}()
 }
 
-func (W *WebServer) start() {
+func (W *Server) start() {
 	// Web server
 	go func() {
 		err := W.srv.ListenAndServe()
@@ -339,7 +339,7 @@ func (W *WebServer) start() {
 					}
 					if updateRequired {
 						log.Warnf("New version available %s,exiting ...", release.TagName)
-						os.Exit(update.UPDATE_EXIT_CODE)
+						os.Exit(update.ExitCode)
 					}
 				}
 
@@ -348,13 +348,13 @@ func (W *WebServer) start() {
 	}()
 }
 
-func (W *WebServer) stop(ctx context.Context) {
+func (W *Server) stop(ctx context.Context) {
 	if err := W.srv.Shutdown(ctx); err != nil {
 		log.Panic(err)
 	}
 }
 
-func (S *WebServer) AuthFunc(handler http.HandlerFunc) http.HandlerFunc {
+func (W *Server) AuthFunc(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
@@ -369,7 +369,7 @@ func (S *WebServer) AuthFunc(handler http.HandlerFunc) http.HandlerFunc {
 
 		t := strings.TrimPrefix(authHeader, bearerPrefix)
 
-		if t != S.Token {
+		if t != W.config.Token {
 			writeUnauthorized(w)
 			return
 		}

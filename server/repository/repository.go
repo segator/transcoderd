@@ -134,7 +134,7 @@ type SQLServerConfig struct {
 	Driver   string `mapstructure:"driver", envconfig:"DB_DRIVER"`
 }
 
-func NewSQLRepository(config SQLServerConfig) (*SQLRepository, error) {
+func NewSQLRepository(config *SQLServerConfig) (*SQLRepository, error) {
 	connectionString := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", config.Host, config.Port, config.User, config.Password, config.Scheme)
 	db, err := sql.Open(config.Driver, connectionString)
 	if err != nil {

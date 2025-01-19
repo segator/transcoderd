@@ -24,7 +24,7 @@ const (
 	repoOwner         = "segator"
 	repoName          = "transcoderd"
 	latestReleasesURL = "https://api.github.com/repos/%s/%s/releases/latest"
-	UPDATE_EXIT_CODE  = 5
+	ExitCode          = 5
 )
 
 type GitHubRelease struct {
@@ -45,14 +45,15 @@ type Updater struct {
 	noUpdates      bool
 	lastCheckTime  time.Time
 	lastRelease    *GitHubRelease
-	checkInterval  time.Duration
+	checkInterval  *time.Duration
 }
 
 func PFlags() {
+	pflag.Duration("updateCheckInterval", time.Minute*15, "Check for updates every X duration")
 	pflag.Bool("noUpdateMode", false, "DON'T USE THIS FLAG, INTERNAL USE")
 	pflag.Bool("noUpdates", false, "Application will not update itself")
 }
-func NewUpdater(currentVersionString string, assetName string, noUpdates bool, tmpPath string, checkInterval time.Duration) (*Updater, error) {
+func NewUpdater(currentVersionString string, assetName string, noUpdates bool, tmpPath string, checkInterval *time.Duration) (*Updater, error) {
 	currentVersion, err := semver.Parse(cleanVersion(currentVersionString))
 	if err != nil {
 		return nil, err
@@ -103,20 +104,17 @@ func (U *Updater) runApplication(ctx context.Context) {
 		}).
 		SetStdoutFunc(func(buffer []byte, exit bool) {
 			os.Stdout.Write(buffer)
-		}).RunWithContext(ctx, command.NewAllowedCodesOption(UPDATE_EXIT_CODE))
+		}).RunWithContext(ctx, command.NewAllowedCodesOption(ExitCode))
 	if err != nil && !errors.Is(err, context.Canceled) {
 		panic(err)
 	}
-	if ecode != UPDATE_EXIT_CODE {
+	if ecode != ExitCode {
 		os.Exit(ecode)
 	}
 }
 
 func (U *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
-	if time.Since(U.lastCheckTime) <= U.checkInterval {
-		if U.lastRelease == nil {
-			return nil, false, errors.New("no previous release information available")
-		}
+	if time.Since(U.lastCheckTime) <= *U.checkInterval {
 		return U.lastRelease, false, nil
 	}
 	latestRelease, err := GetGitHubLatestVersion()

@@ -32,8 +32,8 @@ func CheckPath(path string) {
 	}
 }
 
-func GetPublicIP() (publicIP string) {
-	retry.Do(func() error {
+func GetPublicIP() (publicIP string, err error) {
+	err = retry.Do(func() error {
 		randomIndex := rand.Intn(len(STUNServers))
 		resp, err := http.Get(STUNServers[randomIndex])
 		if err != nil {
@@ -47,7 +47,10 @@ func GetPublicIP() (publicIP string) {
 		publicIP = string(publicIPBytes)
 		return nil
 	}, retry.Delay(time.Millisecond*100), retry.Attempts(360), retry.LastErrorOnly(true))
-	return publicIP
+	if err != nil {
+		return "", err
+	}
+	return publicIP, nil
 }
 
 func GetFFmpegPath() string {

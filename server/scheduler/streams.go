@@ -31,56 +31,68 @@ type DownloadJobStream struct {
 	FileName string
 }
 
-func (U *JobStream) hash(p []byte) (err error) {
-	if U.hasher == nil {
-		U.hasher = sha256.New()
+func (j *JobStream) hash(p []byte) (err error) {
+	if j.hasher == nil {
+		j.hasher = sha256.New()
 	}
-	if _, err := U.hasher.Write(p); err != nil {
+	if _, err := j.hasher.Write(p); err != nil {
 		return err
 	}
 	return nil
 }
-func (U *JobStream) GetHash() string {
-	return hex.EncodeToString(U.hasher.Sum(nil))
+func (j *JobStream) GetHash() string {
+	return hex.EncodeToString(j.hasher.Sum(nil))
 }
-func (U *UploadJobStream) Write(p []byte) (n int, err error) {
-	U.hash(p)
-	return U.file.Write(p)
+func (u *UploadJobStream) Write(p []byte) (n int, err error) {
+	err = u.hash(p)
+	if err != nil {
+		return 0, err
+	}
+	return u.file.Write(p)
 }
-func (D *DownloadJobStream) Read(p []byte) (n int, err error) {
-	readed, err := D.file.Read(p)
+func (d *DownloadJobStream) Read(p []byte) (n int, err error) {
+	readed, err := d.file.Read(p)
 	if err != nil {
 		return readed, err
 	}
-	D.hash(p[0:readed])
+	err = d.hash(p[0:readed])
+	if err != nil {
+		return 0, err
+	}
 	return readed, err
 }
 
-func (D *DownloadJobStream) Size() int64 {
-	return D.FileSize
+func (d *DownloadJobStream) Size() int64 {
+	return d.FileSize
 }
 
-func (D *DownloadJobStream) Name() string {
-	return D.FileName
+func (d *DownloadJobStream) Name() string {
+	return d.FileName
 }
 
-func (U *UploadJobStream) Close(pushChecksum bool) error {
-	U.file.Sync()
-	U.file.Close()
-	return os.Rename(U.temporalPath, U.path)
+func (u *UploadJobStream) Close(pushChecksum bool) error {
+	err := u.file.Sync()
+	if err != nil {
+		return err
+	}
+	u.file.Close()
+	return os.Rename(u.temporalPath, u.path)
 }
 
-func (U *JobStream) Close(pushChecksum bool) error {
-	U.file.Sync()
-	U.file.Close()
-	if U.hasher != nil && pushChecksum {
-		U.checksumPublisher <- PathChecksum{
-			path:     U.path,
-			checksum: U.GetHash(),
+func (j *JobStream) Close(pushChecksum bool) error {
+	err := j.file.Sync()
+	if err != nil {
+		return err
+	}
+	j.file.Close()
+	if j.hasher != nil && pushChecksum {
+		j.checksumPublisher <- PathChecksum{
+			path:     j.path,
+			checksum: j.GetHash(),
 		}
 	}
 	return nil
 }
-func (U *UploadJobStream) Clean() error {
-	return os.Remove(U.path)
+func (u *UploadJobStream) Clean() error {
+	return os.Remove(u.path)
 }

@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	x264ex = regexp.MustCompile(`(?i)(((x|h)264)|mpeg-4|mpeg-1|mpeg-2|mpeg|xvid|divx|vc-1|av1|vp8|vp9|wmv3|mp43)`)
+	x264ex = regexp.MustCompile(`(?i)((([xh])264)|mpeg-4|mpeg-1|mpeg-2|mpeg|xvid|divx|vc-1|av1|vp8|vp9|wmv3|mp43)`)
 	ac3ex  = regexp.MustCompile(`(?i)(ac3|eac3|pcm|flac|mp2|dts|mp3|truehd|wma|vorbis|opus|mpeg audio)`)
 )
 
@@ -52,10 +52,10 @@ type RuntimeScheduler struct {
 	handleEventMu   sync.Mutex
 }
 
-func (R *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*model.TaskEncode, error) {
-	R.jobRequestMu.Lock()
-	defer R.jobRequestMu.Unlock()
-	video, err := R.repo.RetrieveQueuedJob(ctx)
+func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*model.TaskEncode, error) {
+	r.jobRequestMu.Lock()
+	defer r.jobRequestMu.Unlock()
+	video, err := r.repo.RetrieveQueuedJob(ctx)
 	if err != nil {
 		if errors.As(err, &repository.ErrElementNotFound) {
 			return nil, NoJobsAvailable
@@ -67,7 +67,7 @@ func (R *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 	}
 	newEvent := video.AddEvent(model.NotificationEvent, model.JobNotification, model.AssignedNotificationStatus)
 	newEvent.WorkerName = workerName
-	if err = R.repo.AddNewTaskEvent(ctx, newEvent); err != nil {
+	if err = r.repo.AddNewTaskEvent(ctx, newEvent); err != nil {
 		return nil, err
 	}
 
@@ -83,23 +83,23 @@ func (R *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 	return task, nil
 }
 
-func (R *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, jobEvent *model.TaskEvent) error {
-	R.handleEventMu.Lock()
-	defer R.handleEventMu.Unlock()
-	if err := R.processEvent(ctx, jobEvent); err != nil {
+func (r *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, jobEvent *model.TaskEvent) error {
+	r.handleEventMu.Lock()
+	defer r.handleEventMu.Unlock()
+	if err := r.processEvent(ctx, jobEvent); err != nil {
 		return err
 	}
 
 	if jobEvent.IsCompleted() {
-		if err := R.completeJob(ctx, jobEvent); err != nil {
+		if err := r.completeJob(ctx, jobEvent); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (R *RuntimeScheduler) CancelJob(ctx context.Context, id string) error {
-	job, err := R.repo.GetJob(ctx, id)
+func (r *RuntimeScheduler) CancelJob(ctx context.Context, id string) error {
+	job, err := r.repo.GetJob(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func (R *RuntimeScheduler) CancelJob(ctx context.Context, id string) error {
 		return fmt.Errorf("job already canceled")
 	case status == model.AssignedNotificationStatus, status == model.StartedNotificationStatus:
 		newEvent := job.AddEventComplete(model.NotificationEvent, model.JobNotification, model.CanceledNotificationStatus, "Job canceled by user")
-		err = R.repo.AddNewTaskEvent(ctx, newEvent)
+		err = r.repo.AddNewTaskEvent(ctx, newEvent)
 		if err != nil {
 			return err
 		}
@@ -122,13 +122,13 @@ func (R *RuntimeScheduler) CancelJob(ctx context.Context, id string) error {
 	return fmt.Errorf("job %s is in unknown state", id)
 }
 
-func (R *RuntimeScheduler) processEvent(ctx context.Context, taskEvent *model.TaskEvent) error {
+func (r *RuntimeScheduler) processEvent(ctx context.Context, taskEvent *model.TaskEvent) error {
 	var err error
 	switch taskEvent.EventType {
 	case model.PingEvent:
-		err = R.repo.PingServerUpdate(ctx, taskEvent.WorkerName, taskEvent.IP)
+		err = r.repo.PingServerUpdate(ctx, taskEvent.WorkerName, taskEvent.IP)
 	case model.NotificationEvent:
-		err = R.repo.AddNewTaskEvent(ctx, taskEvent)
+		err = r.repo.AddNewTaskEvent(ctx, taskEvent)
 	default:
 		err = fmt.Errorf("unknown event type %s", taskEvent.EventType)
 	}
@@ -136,13 +136,13 @@ func (R *RuntimeScheduler) processEvent(ctx context.Context, taskEvent *model.Ta
 	return err
 }
 
-func (R *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.TaskEvent) error {
-	video, err := R.repo.GetJob(ctx, jobEvent.Id.String())
+func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.TaskEvent) error {
+	video, err := r.repo.GetJob(ctx, jobEvent.Id.String())
 	if err != nil {
 		return err
 	}
-	sourcePath := filepath.Join(R.config.SourcePath, video.SourcePath)
-	target := filepath.Join(R.config.SourcePath, video.TargetPath)
+	sourcePath := filepath.Join(r.config.SourcePath, video.SourcePath)
+	target := filepath.Join(r.config.SourcePath, video.TargetPath)
 	l := log.WithFields(log.Fields{
 		"job_id":      jobEvent.Id.String(),
 		"source_path": sourcePath,
@@ -155,7 +155,7 @@ func (R *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 	}
 	video.TargetSize = targetStat.Size()
 
-	err = R.repo.UpdateJob(ctx, video)
+	err = r.repo.UpdateJob(ctx, video)
 	if err != nil {
 		l.Warnf("target job can not be updated because %v", err)
 		return err
@@ -163,7 +163,7 @@ func (R *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 
 	l.Infof("Job completed")
 
-	if R.config.DeleteSourceOnComplete {
+	if r.config.DeleteSourceOnComplete {
 		l.Info("Job completed, removing source file")
 		err = os.Remove(sourcePath)
 		if err != nil {
@@ -186,32 +186,32 @@ func NewScheduler(config *SchedulerConfig, repo repository.Repository) (*Runtime
 	return runtimeScheduler, nil
 }
 
-func (R *RuntimeScheduler) Run(wg *sync.WaitGroup, ctx context.Context) {
+func (r *RuntimeScheduler) Run(wg *sync.WaitGroup, ctx context.Context) {
 	log.Info("Starting Scheduler...")
-	R.start(ctx)
+	r.start(ctx)
 	log.Info("Started Scheduler...")
 	wg.Add(1)
 	go func() {
 		<-ctx.Done()
 		log.Info("Stopping Scheduler...")
-		R.stop()
+		r.stop()
 		wg.Done()
 	}()
 }
 
-func (R *RuntimeScheduler) start(ctx context.Context) {
-	go R.scheduleRoutine(ctx)
+func (r *RuntimeScheduler) start(ctx context.Context) {
+	go r.scheduleRoutine(ctx)
 }
 
-func (R *RuntimeScheduler) scheduleRoutine(ctx context.Context) {
+func (r *RuntimeScheduler) scheduleRoutine(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case checksumPath := <-R.checksumChan:
-			R.pathChecksumMap[checksumPath.path] = checksumPath.checksum
-		case <-time.After(R.config.ScheduleTime):
-			if err := R.jobMaintenance(ctx); err != nil {
+		case checksumPath := <-r.checksumChan:
+			r.pathChecksumMap[checksumPath.path] = checksumPath.checksum
+		case <-time.After(r.config.ScheduleTime):
+			if err := r.jobMaintenance(ctx); err != nil {
 				log.Errorf("Error on job maintenance %s", err)
 			}
 
@@ -224,9 +224,9 @@ type JobRequestResult struct {
 	errors     []string
 }
 
-func (R *RuntimeScheduler) createNewJobRequestByJobRequestDirectory(ctx context.Context, parentJobRequest *model.JobRequest, searchJobRequestChan chan<- *JobRequestResult) {
+func (r *RuntimeScheduler) createNewJobRequestByJobRequestDirectory(ctx context.Context, parentJobRequest *model.JobRequest, searchJobRequestChan chan<- *JobRequestResult) {
 	defer close(searchJobRequestChan)
-	filepath.Walk(filepath.Join(R.config.SourcePath, parentJobRequest.SourcePath), func(pathFile string, f os.FileInfo, err error) error {
+	err := filepath.Walk(filepath.Join(r.config.SourcePath, parentJobRequest.SourcePath), func(pathFile string, f os.FileInfo, err error) error {
 		var jobRequestErrors []string
 		select {
 		case <-ctx.Done():
@@ -235,15 +235,15 @@ func (R *RuntimeScheduler) createNewJobRequestByJobRequestDirectory(ctx context.
 			if f.IsDir() {
 				return nil
 			}
-			if f.Size() < R.config.MinFileSize {
-				jobRequestErrors = append(jobRequestErrors, fmt.Sprintf("%s File Size bigger than %d", pathFile, R.config.MinFileSize))
+			if f.Size() < r.config.MinFileSize {
+				jobRequestErrors = append(jobRequestErrors, fmt.Sprintf("%s File Size bigger than %d", pathFile, r.config.MinFileSize))
 			}
 			extension := filepath.Ext(f.Name())[1:]
 			if !helper.ValidExtension(extension) {
 				jobRequestErrors = append(jobRequestErrors, fmt.Sprintf("%s Invalid Extension %s", pathFile, extension))
 			}
 
-			relativePathSource, err := filepath.Rel(R.config.SourcePath, filepath.FromSlash(pathFile))
+			relativePathSource, err := filepath.Rel(r.config.SourcePath, filepath.FromSlash(pathFile))
 			if err != nil {
 				jobRequestErrors = append(jobRequestErrors, err.Error())
 			}
@@ -268,6 +268,10 @@ func (R *RuntimeScheduler) createNewJobRequestByJobRequestDirectory(ctx context.
 		}
 		return nil
 	})
+	if err != nil {
+		log.Errorf("error on search for new Jobs %s", err)
+		return
+	}
 }
 
 type ScheduleJobRequestResult struct {
@@ -276,8 +280,8 @@ type ScheduleJobRequestResult struct {
 	SkippedFiles     []*model.JobRequestError `json:"skipped"`
 }
 
-func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *model.JobRequest) (job *model.Job, err error) {
-	err = R.repo.WithTransaction(ctx, func(ctx context.Context, tx repository.Repository) error {
+func (r *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *model.JobRequest) (job *model.Job, err error) {
+	err = r.repo.WithTransaction(ctx, func(ctx context.Context, tx repository.Repository) error {
 		job, err = tx.GetJobByPath(ctx, jobRequest.SourcePath)
 		if err != nil {
 			return err
@@ -336,21 +340,21 @@ func (R *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 	return job, err
 }
 
-func (R *RuntimeScheduler) ScheduleJobRequests(ctx context.Context, jobRequest *model.JobRequest) (result *ScheduleJobRequestResult, returnError error) {
+func (r *RuntimeScheduler) ScheduleJobRequests(ctx context.Context, jobRequest *model.JobRequest) (result *ScheduleJobRequestResult, returnError error) {
 	result = &ScheduleJobRequestResult{}
 	searchJobRequestChan := make(chan *JobRequestResult, 10)
-	_, returnError = os.Stat(filepath.Join(R.config.SourcePath, jobRequest.SourcePath))
+	_, returnError = os.Stat(filepath.Join(r.config.SourcePath, jobRequest.SourcePath))
 	if os.IsNotExist(returnError) {
 		return nil, returnError
 	}
 
-	go R.createNewJobRequestByJobRequestDirectory(ctx, jobRequest, searchJobRequestChan)
+	go r.createNewJobRequestByJobRequestDirectory(ctx, jobRequest, searchJobRequestChan)
 
 	for jobRequestResponse := range searchJobRequestChan {
 		var err error
 		var video *model.Job
 		if jobRequestResponse.errors == nil {
-			video, err = R.scheduleJobRequest(ctx, jobRequestResponse.jobRequest)
+			video, err = r.scheduleJobRequest(ctx, jobRequestResponse.jobRequest)
 			if err == nil {
 				video.Events = nil
 			}
@@ -377,8 +381,8 @@ func (R *RuntimeScheduler) ScheduleJobRequests(ctx context.Context, jobRequest *
 	return result, returnError
 }
 
-func (R *RuntimeScheduler) isValidStremeableJob(ctx context.Context, uuid string, workerName string) (*model.Job, error) {
-	video, err := R.repo.GetJob(ctx, uuid)
+func (r *RuntimeScheduler) isValidStremeableJob(ctx context.Context, uuid string, workerName string) (*model.Job, error) {
+	video, err := r.repo.GetJob(ctx, uuid)
 	if err != nil {
 		return nil, err
 	}
@@ -391,12 +395,12 @@ func (R *RuntimeScheduler) isValidStremeableJob(ctx context.Context, uuid string
 	}
 	return video, nil
 }
-func (R *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string, workerName string) (*DownloadJobStream, error) {
-	video, err := R.isValidStremeableJob(ctx, uuid, workerName)
+func (r *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string, workerName string) (*DownloadJobStream, error) {
+	video, err := r.isValidStremeableJob(ctx, uuid, workerName)
 	if err != nil {
 		return nil, err
 	}
-	filePath := filepath.Join(R.config.SourcePath, video.SourcePath)
+	filePath := filepath.Join(r.config.SourcePath, video.SourcePath)
 	downloadFile, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -414,7 +418,7 @@ func (R *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string
 			video:             video,
 			file:              downloadFile,
 			path:              filePath,
-			checksumPublisher: R.checksumChan,
+			checksumPublisher: r.checksumChan,
 		},
 		FileSize: dfStat.Size(),
 		FileName: dfStat.Name(),
@@ -422,13 +426,13 @@ func (R *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string
 
 }
 
-func (R *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, workerName string) (*UploadJobStream, error) {
-	video, err := R.isValidStremeableJob(ctx, uuid, workerName)
+func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, workerName string) (*UploadJobStream, error) {
+	video, err := r.isValidStremeableJob(ctx, uuid, workerName)
 	if err != nil {
 		return nil, err
 	}
 
-	filePath := filepath.Join(R.config.SourcePath, video.TargetPath)
+	filePath := filepath.Join(r.config.SourcePath, video.TargetPath)
 	err = os.MkdirAll(filepath.Dir(filePath), os.ModePerm)
 	if err != nil {
 		return nil, err
@@ -445,46 +449,46 @@ func (R *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 	}, nil
 }
 
-func (R *RuntimeScheduler) GetChecksum(ctx context.Context, uuid string) (string, error) {
-	video, err := R.repo.GetJob(ctx, uuid)
+func (r *RuntimeScheduler) GetChecksum(ctx context.Context, uuid string) (string, error) {
+	video, err := r.repo.GetJob(ctx, uuid)
 	if err != nil {
 		return "", err
 	}
-	filePath := filepath.Join(R.config.SourcePath, video.SourcePath)
-	checksum := R.pathChecksumMap[filePath]
+	filePath := filepath.Join(r.config.SourcePath, video.SourcePath)
+	checksum := r.pathChecksumMap[filePath]
 	if checksum == "" {
 		return "", fmt.Errorf("%w: Checksum not found for %s", ErrorJobNotFound, filePath)
 	}
 	return checksum, nil
 }
 
-func (R *RuntimeScheduler) stop() {
+func (r *RuntimeScheduler) stop() {
 
 }
 
-func (R *RuntimeScheduler) jobMaintenance(ctx context.Context) error {
-	if err := R.queuedJobMaintenance(ctx); err != nil {
+func (r *RuntimeScheduler) jobMaintenance(ctx context.Context) error {
+	if err := r.queuedJobMaintenance(ctx); err != nil {
 		return err
 	}
-	if err := R.failedJobMaintenance(ctx); err != nil {
+	if err := r.failedJobMaintenance(ctx); err != nil {
 		return err
 	}
-	return R.assignedJobMaintenance(ctx)
+	return r.assignedJobMaintenance(ctx)
 
 }
 
-func (R *RuntimeScheduler) queuedJobMaintenance(ctx context.Context) error {
-	queuedJobs, err := R.repo.GetJobsByStatus(ctx, model.QueuedNotificationStatus)
+func (r *RuntimeScheduler) queuedJobMaintenance(ctx context.Context) error {
+	queuedJobs, err := r.repo.GetJobsByStatus(ctx, model.QueuedNotificationStatus)
 	if err != nil {
 		return err
 	}
 	for _, job := range queuedJobs {
-		sourcePath := filepath.Join(R.config.SourcePath, job.SourcePath)
+		sourcePath := filepath.Join(r.config.SourcePath, job.SourcePath)
 		// Check if source file exists
 		_, err = os.Stat(sourcePath)
 		if os.IsNotExist(err) {
 			newEvent := job.AddEventComplete(model.NotificationEvent, model.JobNotification, model.FailedNotificationStatus, "job source file not found")
-			if err = R.repo.AddNewTaskEvent(ctx, newEvent); err != nil {
+			if err = r.repo.AddNewTaskEvent(ctx, newEvent); err != nil {
 				return err
 			}
 			continue
@@ -493,8 +497,8 @@ func (R *RuntimeScheduler) queuedJobMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (R *RuntimeScheduler) failedJobMaintenance(ctx context.Context) error {
-	failedJobs, err := R.repo.GetJobsByStatus(ctx, model.FailedNotificationStatus)
+func (r *RuntimeScheduler) failedJobMaintenance(ctx context.Context) error {
+	failedJobs, err := r.repo.GetJobsByStatus(ctx, model.FailedNotificationStatus)
 	if err != nil {
 		return err
 	}
@@ -505,7 +509,7 @@ func (R *RuntimeScheduler) failedJobMaintenance(ctx context.Context) error {
 				TargetPath:  failedJob.TargetPath,
 				ForceFailed: true,
 			}
-			_, err = R.scheduleJobRequest(ctx, jobRequest)
+			_, err = r.scheduleJobRequest(ctx, jobRequest)
 			if err != nil {
 				return err
 			}
@@ -514,15 +518,15 @@ func (R *RuntimeScheduler) failedJobMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (R *RuntimeScheduler) assignedJobMaintenance(ctx context.Context) error {
-	taskEvents, err := R.repo.GetTimeoutJobs(ctx, R.config.JobTimeout)
+func (r *RuntimeScheduler) assignedJobMaintenance(ctx context.Context) error {
+	taskEvents, err := r.repo.GetTimeoutJobs(ctx, r.config.JobTimeout)
 	if err != nil {
 		return err
 	}
 	for _, taskEvent := range taskEvents {
 		if taskEvent.IsAssigned() {
 			log.Infof("Rescheduling %s after job timeout", taskEvent.Id.String())
-			job, err := R.repo.GetJob(ctx, taskEvent.Id.String())
+			job, err := r.repo.GetJob(ctx, taskEvent.Id.String())
 			if err != nil {
 				return err
 			}
@@ -531,7 +535,7 @@ func (R *RuntimeScheduler) assignedJobMaintenance(ctx context.Context) error {
 				TargetPath:    job.TargetPath,
 				ForceAssigned: true,
 			}
-			_, err = R.scheduleJobRequest(ctx, jobRequest)
+			_, err = r.scheduleJobRequest(ctx, jobRequest)
 			if err != nil {
 				return err
 			}

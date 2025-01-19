@@ -30,13 +30,13 @@ type Server struct {
 	updater       *update.Updater
 }
 
-func (W *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
+func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 	workerName := request.Header.Get("workerName")
 	if workerName == "" {
 		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), 403)
 		return
 	}
-	job, err := W.scheduler.RequestJob(W.ctx, workerName)
+	job, err := s.scheduler.RequestJob(s.ctx, workerName)
 	if errors.Is(err, scheduler.NoJobsAvailable) {
 		webError(writer, err, 204)
 		return
@@ -49,17 +49,20 @@ func (W *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writer.WriteHeader(200)
-	writer.Write(b)
+	_, err = writer.Write(b)
+	if err != nil {
+		log.Errorf("Error writing response %v", err)
+	}
 }
 
-func (W *Server) handleWorkerEvent(writer http.ResponseWriter, request *http.Request) {
+func (s *Server) handleWorkerEvent(writer http.ResponseWriter, request *http.Request) {
 	taskEvent := &model.TaskEvent{}
 	err := json.NewDecoder(request.Body).Decode(taskEvent)
 	if webError(writer, err, 500) {
 		return
 	}
 
-	err = W.scheduler.HandleWorkerEvent(W.ctx, taskEvent)
+	err = s.scheduler.HandleWorkerEvent(s.ctx, taskEvent)
 	if webError(writer, err, 500) {
 		return
 	}
@@ -67,7 +70,7 @@ func (W *Server) handleWorkerEvent(writer http.ResponseWriter, request *http.Req
 	writer.WriteHeader(200)
 }
 
-func (W *Server) addJobs(writer http.ResponseWriter, request *http.Request) {
+func (s *Server) addJobs(writer http.ResponseWriter, request *http.Request) {
 	defer request.Body.Close()
 	jobRequest := &model.JobRequest{}
 	err := json.NewDecoder(request.Body).Decode(jobRequest)
@@ -80,7 +83,7 @@ func (W *Server) addJobs(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	scheduleJobResults, err := W.scheduler.ScheduleJobRequests(W.ctx, jobRequest)
+	scheduleJobResults, err := s.scheduler.ScheduleJobRequests(s.ctx, jobRequest)
 	if webError(writer, err, 500) {
 		return
 	}
@@ -95,23 +98,26 @@ func (W *Server) addJobs(writer http.ResponseWriter, request *http.Request) {
 		}
 	}
 	writer.WriteHeader(200)
-	writer.Write(b)
+	_, err = writer.Write(b)
+	if err != nil {
+		log.Errorf("Error writing response %v", err)
+	}
 }
 
-func (W *Server) cancelJobs(writer http.ResponseWriter, request *http.Request) {
+func (s *Server) cancelJobs(writer http.ResponseWriter, request *http.Request) {
 	vars := mux.Vars(request)
 	jobId := vars["jobid"]
 	if jobId == "" {
 		webError(writer, fmt.Errorf("jobId is mandatory"), 400)
 		return
 	}
-	err := W.scheduler.CancelJob(W.ctx, jobId)
+	err := s.scheduler.CancelJob(s.ctx, jobId)
 	if webError(writer, err, 500) {
 		return
 	}
 }
 
-func (W *Server) upload(writer http.ResponseWriter, request *http.Request) {
+func (s *Server) upload(writer http.ResponseWriter, request *http.Request) {
 	workerName := request.Header.Get("workerName")
 	if workerName == "" {
 		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), 403)
@@ -122,7 +128,7 @@ func (W *Server) upload(writer http.ResponseWriter, request *http.Request) {
 	if uuid == "" {
 		webError(writer, fmt.Errorf("UUID get parameter not found"), 404)
 	}
-	uploadStream, err := W.scheduler.GetUploadJobWriter(request.Context(), uuid, workerName)
+	uploadStream, err := s.scheduler.GetUploadJobWriter(request.Context(), uuid, workerName)
 	if errors.Is(err, scheduler.ErrorStreamNotAllowed) {
 		webError(writer, err, 403)
 		return
@@ -152,7 +158,10 @@ loop:
 		default:
 			readedBytes, err := reader.Read(b)
 			readed += uint64(readedBytes)
-			uploadStream.Write(b[0:readedBytes])
+			_, err = uploadStream.Write(b[0:readedBytes])
+			if err != nil {
+				log.Errorf("Error writing to stream %v", err)
+			}
 			//TODO check error here?
 			if err == io.EOF {
 				break loop
@@ -174,7 +183,7 @@ loop:
 	writer.WriteHeader(201)
 }
 
-func (W *Server) download(writer http.ResponseWriter, request *http.Request) {
+func (s *Server) download(writer http.ResponseWriter, request *http.Request) {
 	workerName := request.Header.Get("workerName")
 	if workerName == "" {
 		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), 403)
@@ -185,7 +194,7 @@ func (W *Server) download(writer http.ResponseWriter, request *http.Request) {
 	if uuid == "" {
 		webError(writer, fmt.Errorf("UUID get parameter not found"), 404)
 	}
-	downloadStream, err := W.scheduler.GetDownloadJobWriter(request.Context(), uuid, workerName)
+	downloadStream, err := s.scheduler.GetDownloadJobWriter(request.Context(), uuid, workerName)
 	if errors.Is(err, scheduler.ErrorStreamNotAllowed) {
 		webError(writer, err, 403)
 		return
@@ -208,7 +217,10 @@ loop:
 			return
 		default:
 			readedBytes, err := downloadStream.Read(b)
-			writer.Write(b[0:readedBytes])
+			_, err = writer.Write(b[0:readedBytes])
+			if err != nil {
+				log.Error(err)
+			}
 			if err == io.EOF {
 				break loop
 			}
@@ -216,35 +228,38 @@ loop:
 	}
 }
 
-func (W *Server) checksum(writer http.ResponseWriter, request *http.Request) {
+func (s *Server) checksum(writer http.ResponseWriter, request *http.Request) {
 	values := request.URL.Query()
 	uuid := values.Get("uuid")
 	if uuid == "" {
 		webError(writer, fmt.Errorf("UUID get parameter not found"), 404)
 		return
 	}
-	checksum, err := W.scheduler.GetChecksum(request.Context(), uuid)
+	checksum, err := s.scheduler.GetChecksum(request.Context(), uuid)
 	if webError(writer, err, 404) {
 		return
 	}
 	writer.Header().Set("Content-Length", strconv.Itoa(len(checksum)))
 	writer.Header().Set("Content-Type", "text/plain")
 	writer.WriteHeader(200)
-	writer.Write([]byte(checksum))
+	_, err = writer.Write([]byte(checksum))
+	if err != nil {
+		log.Errorf("Error writing response %v", err)
+	}
 }
 
 type Config struct {
-	Port   int    `mapstructure:"port", envconfig:"WEB_PORT"`
-	Token  string `mapstructure:"token", envconfig:"WEB_TOKEN"`
-	Domain string `mapstructure:"domain", envconfig:"WEB_DOMAIN"`
+	Port   int    `mapstructure:"port",envconfig:"WEB_PORT"`
+	Token  string `mapstructure:"token",envconfig:"WEB_TOKEN"`
+	Domain string `mapstructure:"domain",envconfig:"WEB_DOMAIN"`
 }
 
 type ActiveTracker struct {
 	activeRequests int64
 }
 
-func (A *ActiveTracker) ActiveRequests() bool {
-	return atomic.LoadInt64(&A.activeRequests) > 0
+func (a *ActiveTracker) ActiveRequests() bool {
+	return atomic.LoadInt64(&a.activeRequests) > 0
 }
 
 func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update.Updater) *Server {
@@ -273,11 +288,11 @@ func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update
 	return webServer
 }
 
-func (A *ActiveTracker) ActiveRequestsMiddleware() mux.MiddlewareFunc {
+func (a *ActiveTracker) ActiveRequestsMiddleware() mux.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			atomic.AddInt64(&A.activeRequests, 1)
-			defer atomic.AddInt64(&A.activeRequests, -1)
+			atomic.AddInt64(&a.activeRequests, 1)
+			defer atomic.AddInt64(&a.activeRequests, -1)
 			next.ServeHTTP(w, req)
 		})
 	}
@@ -302,24 +317,24 @@ func LoggingMiddleware() mux.MiddlewareFunc {
 	}
 }
 
-func (W *Server) Run(wg *sync.WaitGroup, ctx context.Context) {
-	W.ctx = ctx
+func (s *Server) Run(wg *sync.WaitGroup, ctx context.Context) {
+	s.ctx = ctx
 	log.Info("Starting WebServer...")
-	W.start()
+	s.start()
 	log.Info("Started WebServer...")
 	wg.Add(1)
 	go func() {
 		<-ctx.Done()
 		log.Info("Stopping WebServer...")
-		W.stop(ctx)
+		s.stop(ctx)
 		wg.Done()
 	}()
 }
 
-func (W *Server) start() {
+func (s *Server) start() {
 	// Web server
 	go func() {
-		err := W.srv.ListenAndServe()
+		err := s.srv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Panic(err)
 		}
@@ -331,8 +346,8 @@ func (W *Server) start() {
 			select {
 			case <-time.After(time.Minute * 5):
 				log.Debug("Checking for updates")
-				if !W.activeTracker.ActiveRequests() {
-					release, updateRequired, err := W.updater.CheckForUpdate()
+				if !s.activeTracker.ActiveRequests() {
+					release, updateRequired, err := s.updater.CheckForUpdate()
 					if err != nil {
 						log.Error(err)
 						continue
@@ -348,13 +363,13 @@ func (W *Server) start() {
 	}()
 }
 
-func (W *Server) stop(ctx context.Context) {
-	if err := W.srv.Shutdown(ctx); err != nil {
+func (s *Server) stop(ctx context.Context) {
+	if err := s.srv.Shutdown(ctx); err != nil {
 		log.Panic(err)
 	}
 }
 
-func (W *Server) AuthFunc(handler http.HandlerFunc) http.HandlerFunc {
+func (s *Server) AuthFunc(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
@@ -369,7 +384,7 @@ func (W *Server) AuthFunc(handler http.HandlerFunc) http.HandlerFunc {
 
 		t := strings.TrimPrefix(authHeader, bearerPrefix)
 
-		if t != W.config.Token {
+		if t != s.config.Token {
 			writeUnauthorized(w)
 			return
 		}
@@ -378,7 +393,10 @@ func (W *Server) AuthFunc(handler http.HandlerFunc) http.HandlerFunc {
 }
 func writeUnauthorized(w http.ResponseWriter) {
 	w.WriteHeader(401)
-	w.Write([]byte("Unauthorised.\n"))
+	_, err := w.Write([]byte("Unauthorised.\n"))
+	if err != nil {
+		log.Errorf("Error writing response %v", err)
+	}
 }
 
 func webError(writer http.ResponseWriter, err error, code int) bool {

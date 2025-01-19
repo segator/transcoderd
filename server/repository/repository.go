@@ -16,7 +16,7 @@ var (
 )
 
 type Repository interface {
-	getConnection(ctx context.Context) (SQLDBOperations, error)
+	getConnection() (SQLDBOperations, error)
 	Initialize(ctx context.Context) error
 	PingServerUpdate(ctx context.Context, name string, ip string) error
 	GetTimeoutJobs(ctx context.Context, timeout time.Duration) ([]*model.TaskEvent, error)
@@ -80,39 +80,39 @@ type SQLDatabase struct {
 	db *sql.DB
 }
 
-func (S *SQLDatabase) Exec(query string, args ...interface{}) (sql.Result, error) {
+func (s *SQLDatabase) Exec(query string, args ...interface{}) (sql.Result, error) {
 	log.Debugf("Exec query: %s, args: %v", query, args)
-	return S.db.Exec(query, args...)
+	return s.db.Exec(query, args...)
 }
 
-func (S *SQLDatabase) Prepare(query string) (*sql.Stmt, error) {
+func (s *SQLDatabase) Prepare(query string) (*sql.Stmt, error) {
 	log.Debugf("Prepare: %s", query)
-	return S.db.Prepare(query)
+	return s.db.Prepare(query)
 }
 
-func (S *SQLDatabase) Query(query string, args ...interface{}) (*sql.Rows, error) {
+func (s *SQLDatabase) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	log.Debugf("Query: %s, args: %v", query, args)
-	return S.db.Query(query, args...)
+	return s.db.Query(query, args...)
 }
 
-func (S *SQLDatabase) QueryRow(query string, args ...interface{}) *sql.Row {
+func (s *SQLDatabase) QueryRow(query string, args ...interface{}) *sql.Row {
 	log.Debugf("QueryRow: %s, args: %v", query, args)
-	return S.db.QueryRow(query, args...)
+	return s.db.QueryRow(query, args...)
 }
 
-func (S *SQLDatabase) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+func (s *SQLDatabase) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
 	log.Debugf("QueryContext: %s, args: %v", query, args)
-	return S.db.QueryContext(ctx, query, args...)
+	return s.db.QueryContext(ctx, query, args...)
 }
 
-func (S *SQLDatabase) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+func (s *SQLDatabase) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
 	log.Debugf("ExecContext: %s, args: %v", query, args)
-	return S.db.ExecContext(ctx, query, args...)
+	return s.db.ExecContext(ctx, query, args...)
 }
 
-func (S *SQLDatabase) BeginTx(ctx context.Context, s *sql.TxOptions) (*sql.Tx, error) {
+func (s *SQLDatabase) BeginTx(ctx context.Context, txOpt *sql.TxOptions) (*sql.Tx, error) {
 	log.Debugf("BeginTx")
-	tx, err := S.db.BeginTx(ctx, s)
+	tx, err := s.db.BeginTx(ctx, txOpt)
 	if err != nil {
 		return nil, err
 	}
@@ -125,12 +125,12 @@ type SQLRepository struct {
 }
 
 type SQLServerConfig struct {
-	Host     string `mapstructure:"host", envconfig:"DB_HOST"`
-	Port     int    `mapstructure:"port", envconfig:"DB_PORT"`
-	User     string `mapstructure:"user", envconfig:"DB_USER"`
-	Password string `mapstructure:"password", envconfig:"DB_PASSWORD"`
-	Scheme   string `mapstructure:"scheme", envconfig:"DB_SCHEME"`
-	Driver   string `mapstructure:"driver", envconfig:"DB_DRIVER"`
+	Host     string `mapstructure:"host",envconfig:"DB_HOST"`
+	Port     int    `mapstructure:"port",envconfig:"DB_PORT"`
+	User     string `mapstructure:"user",envconfig:"DB_USER"`
+	Password string `mapstructure:"password",envconfig:"DB_PASSWORD"`
+	Scheme   string `mapstructure:"scheme",envconfig:"DB_SCHEME"`
+	Driver   string `mapstructure:"driver",envconfig:"DB_DRIVER"`
 }
 
 func NewSQLRepository(config *SQLServerConfig) (*SQLRepository, error) {
@@ -155,17 +155,17 @@ func NewSQLRepository(config *SQLServerConfig) (*SQLRepository, error) {
 
 }
 
-func (S *SQLRepository) Initialize(ctx context.Context) error {
-	return S.prepareDatabase(ctx)
+func (s *SQLRepository) Initialize(ctx context.Context) error {
+	return s.prepareDatabase(ctx)
 }
 
 //go:embed resources/database/*.sql
 var databaseSchemas embed.FS
 
-func (S *SQLRepository) prepareDatabase(ctx context.Context) error {
+func (s *SQLRepository) prepareDatabase(ctx context.Context) error {
 	var currentVersion int
-	txErr := S.WithTransaction(ctx, func(ctx context.Context, tx Repository) error {
-		con, err := tx.getConnection(ctx)
+	txErr := s.WithTransaction(ctx, func(ctx context.Context, tx Repository) error {
+		con, err := tx.getConnection()
 		if err != nil {
 			return err
 		}
@@ -208,8 +208,8 @@ func (S *SQLRepository) prepareDatabase(ctx context.Context) error {
 			continue
 		}
 		log.Infof("upgrade db Schema from %d --> %d", currentVersion, version)
-		txErr = S.WithTransaction(ctx, func(ctx context.Context, tx Repository) error {
-			con, err := tx.getConnection(ctx)
+		txErr = s.WithTransaction(ctx, func(ctx context.Context, tx Repository) error {
+			con, err := tx.getConnection()
 			if err != nil {
 				return err
 			}
@@ -239,22 +239,21 @@ func (S *SQLRepository) prepareDatabase(ctx context.Context) error {
 	return nil
 }
 
-func (S *SQLRepository) getConnection(ctx context.Context) (SQLDBOperations, error) {
-	//return S.db.Conn(ctx)
-	if S.tx != nil {
-		return S.tx, nil
+func (s *SQLRepository) getConnection() (SQLDBOperations, error) {
+	if s.tx != nil {
+		return s.tx, nil
 	}
-	return S.db, nil
+	return s.db, nil
 }
-func (S *SQLRepository) GetWorker(ctx context.Context, name string) (worker *model.Worker, err error) {
-	db, err := S.getConnection(ctx)
+func (s *SQLRepository) GetWorker(ctx context.Context, name string) (worker *model.Worker, err error) {
+	db, err := s.getConnection()
 	if err != nil {
 		return nil, err
 	}
-	worker, err = S.getWorker(ctx, db, name)
+	worker, err = s.getWorker(ctx, db, name)
 	return worker, err
 }
-func (S *SQLRepository) getWorker(ctx context.Context, db SQLDBOperations, name string) (*model.Worker, error) {
+func (s *SQLRepository) getWorker(ctx context.Context, db SQLDBOperations, name string) (*model.Worker, error) {
 	rows, err := db.QueryContext(ctx, "select * from workers where name=$1", name)
 	if err != nil {
 		return nil, err
@@ -263,7 +262,10 @@ func (S *SQLRepository) getWorker(ctx context.Context, db SQLDBOperations, name 
 	worker := model.Worker{}
 	found := false
 	if rows.Next() {
-		rows.Scan(&worker.Name, &worker.Ip, &worker.QueueName, &worker.LastSeen)
+		err := rows.Scan(&worker.Name, &worker.Ip, &worker.QueueName, &worker.LastSeen)
+		if err != nil {
+			return nil, err
+		}
 		found = true
 	}
 
@@ -273,32 +275,32 @@ func (S *SQLRepository) getWorker(ctx context.Context, db SQLDBOperations, name 
 	return &worker, err
 }
 
-func (S *SQLRepository) GetJob(ctx context.Context, uuid string) (video *model.Job, returnError error) {
-	db, err := S.getConnection(ctx)
+func (s *SQLRepository) GetJob(ctx context.Context, uuid string) (video *model.Job, returnError error) {
+	db, err := s.getConnection()
 	if err != nil {
 		return nil, err
 	}
-	video, err = S.getJob(ctx, db, uuid)
+	video, err = s.getJob(ctx, db, uuid)
 	return video, err
 }
 
-func (S *SQLRepository) RetrieveQueuedJob(ctx context.Context) (video *model.Job, err error) {
-	conn, err := S.getConnection(ctx)
+func (s *SQLRepository) RetrieveQueuedJob(ctx context.Context) (video *model.Job, err error) {
+	conn, err := s.getConnection()
 	if err != nil {
 		return nil, err
 	}
-	return S.queuedJob(ctx, conn)
+	return s.queuedJob(ctx, conn)
 }
 
-func (S *SQLRepository) GetJobsByStatus(ctx context.Context, status model.NotificationStatus) (jobs []*model.Job, returnError error) {
-	conn, err := S.getConnection(ctx)
+func (s *SQLRepository) GetJobsByStatus(ctx context.Context, status model.NotificationStatus) (jobs []*model.Job, returnError error) {
+	conn, err := s.getConnection()
 	if err != nil {
 		return nil, err
 	}
-	return S.getJobsByStatus(ctx, conn, status)
+	return s.getJobsByStatus(ctx, conn, status)
 }
 
-func (S *SQLRepository) getJobsByStatus(ctx context.Context, tx SQLDBOperations, statusFilter model.NotificationStatus) ([]*model.Job, error) {
+func (s *SQLRepository) getJobsByStatus(ctx context.Context, tx SQLDBOperations, statusFilter model.NotificationStatus) ([]*model.Job, error) {
 	rows, err := tx.QueryContext(ctx, "SELECT v.id, v.source_path,v.source_size, v.target_path,v.target_size,vs.event_time, vs.status, vs.notification_type, vs.message FROM jobs v INNER JOIN job_status vs ON v.id = vs.job_id WHERE vs.status = $1;", statusFilter)
 	if err != nil {
 		return nil, err
@@ -307,7 +309,10 @@ func (S *SQLRepository) getJobsByStatus(ctx context.Context, tx SQLDBOperations,
 
 	for rows.Next() {
 		job := model.Job{}
-		rows.Scan(&job.Id, &job.SourcePath, &job.SourceSize, &job.TargetPath, &job.TargetSize, &job.LastUpdate, &job.Status, &job.StatusPhase, &job.StatusMessage)
+		err := rows.Scan(&job.Id, &job.SourcePath, &job.SourceSize, &job.TargetPath, &job.TargetSize, &job.LastUpdate, &job.Status, &job.StatusPhase, &job.StatusMessage)
+		if err != nil {
+			return nil, err
+		}
 		jobs = append(jobs, &job)
 	}
 	err = rows.Close()
@@ -315,7 +320,7 @@ func (S *SQLRepository) getJobsByStatus(ctx context.Context, tx SQLDBOperations,
 		return nil, err
 	}
 	for _, job := range jobs {
-		taskEvents, err := S.getTaskEvents(ctx, tx, job.Id.String())
+		taskEvents, err := s.getTaskEvents(ctx, tx, job.Id.String())
 		if err != nil {
 			return nil, err
 		}
@@ -325,19 +330,19 @@ func (S *SQLRepository) getJobsByStatus(ctx context.Context, tx SQLDBOperations,
 	return jobs, nil
 }
 
-func (S *SQLRepository) GetTimeoutJobs(ctx context.Context, timeout time.Duration) (taskEvent []*model.TaskEvent, returnError error) {
-	conn, err := S.getConnection(ctx)
+func (s *SQLRepository) GetTimeoutJobs(ctx context.Context, timeout time.Duration) (taskEvent []*model.TaskEvent, returnError error) {
+	conn, err := s.getConnection()
 	if err != nil {
 		return nil, err
 	}
-	taskEvent, err = S.getTimeoutJobs(ctx, conn, timeout)
+	taskEvent, err = s.getTimeoutJobs(ctx, conn, timeout)
 	if err != nil {
 		return nil, err
 	}
 	return taskEvent, nil
 }
 
-func (S *SQLRepository) getJob(ctx context.Context, tx SQLDBOperations, uuid string) (*model.Job, error) {
+func (s *SQLRepository) getJob(ctx context.Context, tx SQLDBOperations, uuid string) (*model.Job, error) {
 	rows, err := tx.QueryContext(ctx, "SELECT id, source_path, source_size, target_path, target_size FROM jobs WHERE id=$1", uuid)
 	if err != nil {
 		return nil, err
@@ -345,7 +350,10 @@ func (S *SQLRepository) getJob(ctx context.Context, tx SQLDBOperations, uuid str
 	job := model.Job{}
 	found := false
 	if rows.Next() {
-		rows.Scan(&job.Id, &job.SourcePath, &job.SourceSize, &job.TargetPath, &job.TargetSize)
+		err := rows.Scan(&job.Id, &job.SourcePath, &job.SourceSize, &job.TargetPath, &job.TargetSize)
+		if err != nil {
+			return nil, err
+		}
 		found = true
 	}
 	rows.Close()
@@ -353,12 +361,12 @@ func (S *SQLRepository) getJob(ctx context.Context, tx SQLDBOperations, uuid str
 		return nil, fmt.Errorf("%w, %s", ErrElementNotFound, uuid)
 	}
 
-	taskEvents, err := S.getTaskEvents(ctx, tx, job.Id.String())
+	taskEvents, err := s.getTaskEvents(ctx, tx, job.Id.String())
 	if err != nil {
 		return nil, err
 	}
 	job.Events = taskEvents
-	lastUpdate, status, statusPhase, statusMessage, _ := S.getJobStatus(ctx, tx, job.Id.String())
+	lastUpdate, status, statusPhase, statusMessage, _ := s.getJobStatus(ctx, tx, job.Id.String())
 
 	if lastUpdate != nil {
 		job.LastUpdate = lastUpdate
@@ -370,16 +378,16 @@ func (S *SQLRepository) getJob(ctx context.Context, tx SQLDBOperations, uuid str
 	return &job, nil
 }
 
-func (S *SQLRepository) GetJobs(ctx context.Context) (jobs *[]model.Job, returnError error) {
-	db, err := S.getConnection(ctx)
+func (s *SQLRepository) GetJobs(ctx context.Context) (jobs *[]model.Job, returnError error) {
+	db, err := s.getConnection()
 	if err != nil {
 		return nil, err
 	}
-	jobs, err = S.getJobs(ctx, db)
+	jobs, err = s.getJobs(ctx, db)
 	return jobs, err
 }
 
-func (S *SQLRepository) getJobs(ctx context.Context, tx SQLDBOperations) (*[]model.Job, error) {
+func (s *SQLRepository) getJobs(ctx context.Context, tx SQLDBOperations) (*[]model.Job, error) {
 	query := fmt.Sprintf(`
     SELECT v.id, v.source_path,v.source_size, v.target_path,v.target_size, vs.event_time, vs.status, vs.notification_type, vs.message
     FROM jobs v
@@ -394,14 +402,17 @@ func (S *SQLRepository) getJobs(ctx context.Context, tx SQLDBOperations) (*[]mod
 	jobs := []model.Job{}
 	for rows.Next() {
 		job := model.Job{}
-		rows.Scan(&job.Id, &job.SourcePath, &job.SourceSize, &job.TargetPath, &job.TargetSize, &job.LastUpdate, &job.Status, &job.StatusPhase, &job.StatusMessage)
+		err := rows.Scan(&job.Id, &job.SourcePath, &job.SourceSize, &job.TargetPath, &job.TargetSize, &job.LastUpdate, &job.Status, &job.StatusPhase, &job.StatusMessage)
+		if err != nil {
+			return nil, err
+		}
 		jobs = append(jobs, job)
 	}
 
 	return &jobs, nil
 }
 
-func (S *SQLRepository) getTaskEvents(ctx context.Context, tx SQLDBOperations, uuid string) ([]*model.TaskEvent, error) {
+func (s *SQLRepository) getTaskEvents(ctx context.Context, tx SQLDBOperations, uuid string) ([]*model.TaskEvent, error) {
 	rows, err := tx.QueryContext(ctx, "select * from job_events where job_id=$1 order by event_time asc", uuid)
 	if err != nil {
 		return nil, err
@@ -410,31 +421,37 @@ func (S *SQLRepository) getTaskEvents(ctx context.Context, tx SQLDBOperations, u
 	var taskEvents []*model.TaskEvent
 	for rows.Next() {
 		event := model.TaskEvent{}
-		rows.Scan(&event.Id, &event.EventID, &event.WorkerName, &event.EventTime, &event.EventType, &event.NotificationType, &event.Status, &event.Message)
+		err := rows.Scan(&event.Id, &event.EventID, &event.WorkerName, &event.EventTime, &event.EventType, &event.NotificationType, &event.Status, &event.Message)
+		if err != nil {
+			return nil, err
+		}
 		taskEvents = append(taskEvents, &event)
 	}
 	return taskEvents, nil
 }
 
-func (S *SQLRepository) getJobStatus(ctx context.Context, tx SQLDBOperations, uuid string) (*time.Time, string, model.NotificationType, string, error) {
-	var last_update time.Time
+func (s *SQLRepository) getJobStatus(ctx context.Context, tx SQLDBOperations, uuid string) (*time.Time, string, model.NotificationType, string, error) {
+	var lastUpdate time.Time
 	var status string
 	var statusPhase model.NotificationType
 	var message string
 
 	rows, err := tx.QueryContext(ctx, "SELECT event_time, status, notification_type, message FROM job_status WHERE job_id=$1", uuid)
 	if err != nil {
-		return &last_update, status, statusPhase, message, err
+		return &lastUpdate, status, statusPhase, message, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		rows.Scan(&last_update, &status, &statusPhase, &message)
+		err := rows.Scan(&lastUpdate, &status, &statusPhase, &message)
+		if err != nil {
+			return nil, "", "", "", err
+		}
 	}
-	return &last_update, status, statusPhase, message, nil
+	return &lastUpdate, status, statusPhase, message, nil
 }
 
-func (S *SQLRepository) getJobByPath(ctx context.Context, tx SQLDBOperations, path string) (*model.Job, error) {
+func (s *SQLRepository) getJobByPath(ctx context.Context, tx SQLDBOperations, path string) (*model.Job, error) {
 	rows, err := tx.QueryContext(ctx, "select * from jobs where source_path=$1", path)
 	if err != nil {
 		return nil, err
@@ -442,7 +459,10 @@ func (S *SQLRepository) getJobByPath(ctx context.Context, tx SQLDBOperations, pa
 	job := model.Job{}
 	found := false
 	if rows.Next() {
-		rows.Scan(&job.Id, &job.SourcePath, &job.TargetPath, &job.SourceSize, &job.TargetSize)
+		err := rows.Scan(&job.Id, &job.SourcePath, &job.TargetPath, &job.SourceSize, &job.TargetSize)
+		if err != nil {
+			return nil, err
+		}
 		found = true
 	}
 	rows.Close()
@@ -450,12 +470,12 @@ func (S *SQLRepository) getJobByPath(ctx context.Context, tx SQLDBOperations, pa
 		return nil, nil
 	}
 
-	taskEvents, err := S.getTaskEvents(ctx, tx, job.Id.String())
+	taskEvents, err := s.getTaskEvents(ctx, tx, job.Id.String())
 	if err != nil {
 		return nil, err
 	}
 	job.Events = taskEvents
-	lastUpdate, status, statusPhase, statusMessage, _ := S.getJobStatus(ctx, tx, job.Id.String())
+	lastUpdate, status, statusPhase, statusMessage, _ := s.getJobStatus(ctx, tx, job.Id.String())
 
 	if lastUpdate != nil {
 		job.LastUpdate = lastUpdate
@@ -466,16 +486,16 @@ func (S *SQLRepository) getJobByPath(ctx context.Context, tx SQLDBOperations, pa
 	return &job, nil
 }
 
-func (S *SQLRepository) GetJobByPath(ctx context.Context, path string) (video *model.Job, returnError error) {
-	conn, err := S.getConnection(ctx)
+func (s *SQLRepository) GetJobByPath(ctx context.Context, path string) (video *model.Job, returnError error) {
+	conn, err := s.getConnection()
 	if err != nil {
 		return nil, err
 	}
-	return S.getJobByPath(ctx, conn, path)
+	return s.getJobByPath(ctx, conn, path)
 }
 
-func (S *SQLRepository) PingServerUpdate(ctx context.Context, name string, ip string) (returnError error) {
-	conn, err := S.getConnection(ctx)
+func (s *SQLRepository) PingServerUpdate(ctx context.Context, name string, ip string) (returnError error) {
+	conn, err := s.getConnection()
 	if err != nil {
 		return err
 	}
@@ -483,16 +503,16 @@ func (S *SQLRepository) PingServerUpdate(ctx context.Context, name string, ip st
 	return err
 }
 
-func (S *SQLRepository) AddNewTaskEvent(ctx context.Context, event *model.TaskEvent) (returnError error) {
-	conn, err := S.getConnection(ctx)
+func (s *SQLRepository) AddNewTaskEvent(ctx context.Context, event *model.TaskEvent) (returnError error) {
+	conn, err := s.getConnection()
 	if err != nil {
 		return err
 	}
-	return S.addNewTaskEvent(ctx, conn, event)
+	return s.addNewTaskEvent(ctx, conn, event)
 
 }
 
-func (S *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations, event *model.TaskEvent) error {
+func (s *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations, event *model.TaskEvent) error {
 	rows, err := tx.QueryContext(ctx, "select max(job_event_id) from job_events where job_id=$1", event.Id.String())
 	if err != nil {
 		return err
@@ -500,7 +520,10 @@ func (S *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations,
 
 	videoEventID := -1
 	if rows.Next() {
-		rows.Scan(&videoEventID)
+		err := rows.Scan(&videoEventID)
+		if err != nil {
+			return err
+		}
 	}
 	rows.Close()
 
@@ -512,34 +535,34 @@ func (S *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations,
 		" VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", event.Id.String(), event.EventID, event.WorkerName, time.Now(), event.EventType, event.NotificationType, event.Status, event.Message)
 	return err
 }
-func (S *SQLRepository) AddJob(ctx context.Context, job *model.Job) error {
-	conn, err := S.getConnection(ctx)
+func (s *SQLRepository) AddJob(ctx context.Context, job *model.Job) error {
+	conn, err := s.getConnection()
 	if err != nil {
 		return err
 	}
-	return S.addJob(ctx, conn, job)
+	return s.addJob(ctx, conn, job)
 }
 
-func (S *SQLRepository) addJob(ctx context.Context, tx SQLDBOperations, job *model.Job) error {
+func (s *SQLRepository) addJob(ctx context.Context, tx SQLDBOperations, job *model.Job) error {
 	_, err := tx.ExecContext(ctx, "INSERT INTO jobs (id, source_path,target_path,source_size,target_size)"+
 		" VALUES ($1,$2,$3,$4,$5)", job.Id.String(), job.SourcePath, job.TargetPath, job.SourceSize, job.TargetSize)
 	return err
 }
 
-func (S *SQLRepository) UpdateJob(ctx context.Context, job *model.Job) error {
-	conn, err := S.getConnection(ctx)
+func (s *SQLRepository) UpdateJob(ctx context.Context, job *model.Job) error {
+	conn, err := s.getConnection()
 	if err != nil {
 		return err
 	}
-	return S.updateJob(ctx, conn, job)
+	return s.updateJob(ctx, conn, job)
 }
 
-func (S *SQLRepository) updateJob(ctx context.Context, tx SQLDBOperations, job *model.Job) error {
+func (s *SQLRepository) updateJob(ctx context.Context, tx SQLDBOperations, job *model.Job) error {
 	_, err := tx.ExecContext(ctx, "UPDATE jobs SET source_path=$1, target_path=$2, source_size=$3, target_size=$4 WHERE id=$5", job.SourcePath, job.TargetPath, job.SourceSize, job.TargetSize, job.Id.String())
 	return err
 }
 
-func (S *SQLRepository) getTimeoutJobs(ctx context.Context, tx SQLDBOperations, timeout time.Duration) ([]*model.TaskEvent, error) {
+func (s *SQLRepository) getTimeoutJobs(ctx context.Context, tx SQLDBOperations, timeout time.Duration) ([]*model.TaskEvent, error) {
 	timeoutDate := time.Now().Add(-timeout)
 	timeoutDate.Format(time.RFC3339)
 
@@ -555,14 +578,17 @@ func (S *SQLRepository) getTimeoutJobs(ctx context.Context, tx SQLDBOperations, 
 	var taskEvents []*model.TaskEvent
 	for rows.Next() {
 		event := model.TaskEvent{}
-		rows.Scan(&event.Id, &event.EventID, &event.WorkerName, &event.EventTime, &event.EventType, &event.NotificationType, &event.Status, &event.Message)
+		err := rows.Scan(&event.Id, &event.EventID, &event.WorkerName, &event.EventTime, &event.EventType, &event.NotificationType, &event.Status, &event.Message)
+		if err != nil {
+			return nil, err
+		}
 		taskEvents = append(taskEvents, &event)
 	}
 	return taskEvents, nil
 }
 
-func (S *SQLRepository) WithTransaction(ctx context.Context, transactionFunc func(ctx context.Context, tx Repository) error) error {
-	sqlTx, err := S.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault})
+func (s *SQLRepository) WithTransaction(ctx context.Context, transactionFunc func(ctx context.Context, tx Repository) error) error {
+	sqlTx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault})
 	if err != nil {
 		return err
 	}
@@ -590,7 +616,7 @@ func (S *SQLRepository) WithTransaction(ctx context.Context, transactionFunc fun
 	return transactionFunc(ctx, &txRepository)
 }
 
-func (S *SQLRepository) queuedJob(ctx context.Context, tx SQLDBOperations) (*model.Job, error) {
+func (s *SQLRepository) queuedJob(ctx context.Context, tx SQLDBOperations) (*model.Job, error) {
 	rows, err := tx.QueryContext(ctx, "select job_id, job_event_id from job_status where notification_type='Job' and status='queued' order by event_time asc limit 1")
 
 	//2020-05-17 20:50:41.428531 +00:00
@@ -600,8 +626,11 @@ func (S *SQLRepository) queuedJob(ctx context.Context, tx SQLDBOperations) (*mod
 	defer rows.Close()
 	if rows.Next() {
 		event := model.TaskEvent{}
-		rows.Scan(&event.Id, &event.EventID)
-		return S.getJob(ctx, tx, event.Id.String())
+		err := rows.Scan(&event.Id, &event.EventID)
+		if err != nil {
+			return nil, err
+		}
+		return s.getJob(ctx, tx, event.Id.String())
 	}
 
 	return nil, fmt.Errorf("%w, %s", ErrElementNotFound, "No jobs found")

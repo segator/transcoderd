@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/segator/transcoderd/compare/v2.0.0...v2.0.1) (2025-01-20)
+
+
+### 🐛 Bug Fixes
+
+* bad error handling ([ac9938d](https://github.com/segator/transcoderd/commit/ac9938dce9ecbfad651a7a22d3ebc20066018baf))
+
 ## [2.0.0](https://github.com/segator/transcoderd/compare/v1.8.0...v2.0.0) (2025-01-20)
 
 

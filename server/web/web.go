@@ -166,18 +166,22 @@ loop:
 		default:
 			readedBytes, err := reader.Read(b)
 			if err != nil {
-				log.Errorf("Errorf reading from reader: %v", err)
+				if err == io.EOF {
+					break loop
+				}
+				log.Errorf("Errorreading from reader: %v", err)
+				http.Error(writer, "Error during upload", http.StatusInternalServerError)
 				return
 			}
 
 			readed += uint64(readedBytes)
 			_, err = uploadStream.Write(b[0:readedBytes])
 			if err != nil {
-				log.Errorf("Errorf writing to stream %v", err)
-			}
-			// TODO check error here?
-			if err == io.EOF {
-				break loop
+				if err == io.EOF {
+					break loop
+				}
+				log.Errorf("Error writing: %v", err)
+				http.Error(writer, "Error during upload", http.StatusInternalServerError)
 			}
 		}
 	}

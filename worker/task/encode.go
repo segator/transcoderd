@@ -881,8 +881,8 @@ func (e *EncodeWorker) verifyResultJob(ctx context.Context, job *model.WorkTaskE
 	diffDuration := encodedVideoParams.Format.DurationSeconds - sourceVideoParams.Format.DurationSeconds
 	if diffDuration > 60 || diffDuration < -60 {
 		err = fmt.Errorf("source File duration %f is diferent than encoded %f", sourceVideoParams.Format.DurationSeconds, encodedVideoParams.Format.DurationSeconds)
-		//e.updateTaskStatus(job, model.FFMPEGSNotification, model.FailedNotificationStatus, err.Error())
-		//return err
+		e.updateTaskStatus(job, model.FFMPEGSNotification, model.FailedNotificationStatus, err.Error())
+		return err
 	}
 	if encodedVideoSize > sourceVideoSize {
 		err = fmt.Errorf("source File size %d bytes is less than encoded %d bytes", sourceVideoSize, encodedVideoSize)

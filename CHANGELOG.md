@@ -1,5 +1,53 @@
 # Changelog
 
+## [2.0.0](https://github.com/segator/transcoderd/compare/v1.8.0...v2.0.0) (2025-01-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* centralize cli configuration, breaking change for config files and env vars
+
+### 🎉 Features
+
+* support Czech tesseract language ([7081843](https://github.com/segator/transcoderd/commit/7081843a244a90ad9fec2c8d599fdc1fa8a5ad2c))
+* support greek teseract language ([d352cfa](https://github.com/segator/transcoderd/commit/d352cfaa179b0bed32185ed73f070f2b924547d0))
+* support iceland teseract language ([d352cfa](https://github.com/segator/transcoderd/commit/d352cfaa179b0bed32185ed73f070f2b924547d0))
+
+
+### 🐛 Bug Fixes
+
+* allow grace time for update check as Github bans too many requests, by default 15min ([550f3a9](https://github.com/segator/transcoderd/commit/550f3a9dc67ebe9b6f05cef4b009443216863139))
+* better cleaner for subtitle names if pgs ([f0c28b7](https://github.com/segator/transcoderd/commit/f0c28b7146b01879e2e78b9f0e6dfaf9b0316768))
+* better error logs on PGS errors ([f0c28b7](https://github.com/segator/transcoderd/commit/f0c28b7146b01879e2e78b9f0e6dfaf9b0316768))
+* bump pgstosrt due this bugfix https://github.com/Tentacule/PgsToSrt/issues/51 ([a9c05a6](https://github.com/segator/transcoderd/commit/a9c05a6de4b726b63d62a4d8953bfb1ceb2fcc80))
+* change encode progress bar to support duration and frames as fallback for those cases ffmpeg can not calculate the timestamps ([550f3a9](https://github.com/segator/transcoderd/commit/550f3a9dc67ebe9b6f05cef4b009443216863139))
+* error parsing time.duration parameters ([16056da](https://github.com/segator/transcoderd/commit/16056daaa7338c96aee7c9679b29cd418625b07b))
+* if a PGS fails, make fail all job ([66b6002](https://github.com/segator/transcoderd/commit/66b600251f946da79ac7f48a2701046286ad5e8a))
+* increased process buffer for performance ([550f3a9](https://github.com/segator/transcoderd/commit/550f3a9dc67ebe9b6f05cef4b009443216863139))
+* PGS tasks now output stderr for extra debug info ([66b6002](https://github.com/segator/transcoderd/commit/66b600251f946da79ac7f48a2701046286ad5e8a))
+* Upgrade db logs version to version was not correctly showing the current version if more than 1 db scheme upgrade was needed ([66b6002](https://github.com/segator/transcoderd/commit/66b600251f946da79ac7f48a2701046286ad5e8a))
+* Wait for stdout/err command hook executed before leaving command exec ([66b6002](https://github.com/segator/transcoderd/commit/66b600251f946da79ac7f48a2701046286ad5e8a))
+
+
+### 🤖 Continuous Integration
+
+* enable linter ([52c39b2](https://github.com/segator/transcoderd/commit/52c39b27698b1c5436835231bda5da20b303a2a9))
+
+
+### 🔧 Miscellaneous Chores
+
+* format code ([c547847](https://github.com/segator/transcoderd/commit/c54784739b7bab03bd29bed1aad0031c4999e6f2))
+* lint fixes ([7912861](https://github.com/segator/transcoderd/commit/791286155400fa8fd41fb49d8e1ad978f8e6c0f7))
+* lint fixes ([f89adf5](https://github.com/segator/transcoderd/commit/f89adf554b1c1a084fd5195c41f94b12db41cf31))
+* lint fixes ([f22ce8d](https://github.com/segator/transcoderd/commit/f22ce8d71429bd09078a994ceb74b3a0b9db2aa4))
+* lint fixes ([81a875f](https://github.com/segator/transcoderd/commit/81a875fc70ba82dcfb26c7e0bc78e04daf7b2595))
+* lint fixes ([09495ba](https://github.com/segator/transcoderd/commit/09495ba2d1f47d580ea235424c4e16206ca717b6))
+
+
+### ♻️ Code Refactoring
+
+* centralize cli configuration, breaking change for config files and env vars ([16056da](https://github.com/segator/transcoderd/commit/16056daaa7338c96aee7c9679b29cd418625b07b))
+
 ## [1.8.0](https://github.com/segator/transcoderd/compare/v1.7.0...v1.8.0) (2025-01-17)
 
 

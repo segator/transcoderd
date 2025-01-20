@@ -7,5 +7,5 @@ import (
 
 type Config struct {
 	Database  *repository.SQLServerConfig `mapstructure:"database"`
-	Scheduler *scheduler.SchedulerConfig  `mapstructure:"scheduler"`
+	Scheduler *scheduler.Config           `mapstructure:"scheduler"`
 }

@@ -34,17 +34,16 @@ type Scheduler interface {
 	CancelJob(ctx context.Context, id string) error
 }
 
-type SchedulerConfig struct {
+type Config struct {
 	ScheduleTime           time.Duration `mapstructure:"scheduleTime"`
 	JobTimeout             time.Duration `mapstructure:"jobTimeout"`
 	SourcePath             string        `mapstructure:"sourcePath"`
 	DeleteSourceOnComplete bool          `mapstructure:"deleteOnComplete"`
 	MinFileSize            int64         `mapstructure:"minFileSize"`
-	checksums              map[string][]byte
 }
 
 type RuntimeScheduler struct {
-	config          *SchedulerConfig
+	config          *Config
 	repo            repository.Repository
 	checksumChan    chan PathChecksum
 	pathChecksumMap map[string]string
@@ -57,7 +56,7 @@ func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 	defer r.jobRequestMu.Unlock()
 	video, err := r.repo.RetrieveQueuedJob(ctx)
 	if err != nil {
-		if errors.As(err, &repository.ErrElementNotFound) {
+		if errors.Is(err, repository.ErrElementNotFound) {
 			return nil, NoJobsAvailable
 		}
 		return nil, err
@@ -175,7 +174,7 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 	return nil
 }
 
-func NewScheduler(config *SchedulerConfig, repo repository.Repository) (*RuntimeScheduler, error) {
+func NewScheduler(config *Config, repo repository.Repository) (*RuntimeScheduler, error) {
 	runtimeScheduler := &RuntimeScheduler{
 		config:          config,
 		repo:            repo,

@@ -3,7 +3,6 @@ package task
 import (
 	"context"
 	"errors"
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"os"
 	"sync"
@@ -23,12 +22,6 @@ type ServerCoordinator struct {
 	updater      *update.Updater
 }
 
-type JobWorker struct {
-	jobID        uuid.UUID
-	active       bool
-	encodeWorker *EncodeWorker
-}
-
 func NewServerCoordinator(serverClient *serverclient.ServerClient, worker *EncodeWorker, updater *update.Updater, printer *ConsoleWorkerPrinter) *ServerCoordinator {
 	coordinator := &ServerCoordinator{
 		serverClient: serverClient,
@@ -39,32 +32,32 @@ func NewServerCoordinator(serverClient *serverclient.ServerClient, worker *Encod
 	return coordinator
 }
 
-func (Q *ServerCoordinator) Run(wg *sync.WaitGroup, ctx context.Context) {
+func (q *ServerCoordinator) Run(wg *sync.WaitGroup, ctx context.Context) {
 	log.Info("starting server coordinator")
-	Q.start(ctx)
+	q.start(ctx)
 	log.Info("started server coordinator")
 	wg.Add(1)
 	go func() {
 		<-ctx.Done()
 		log.Info("stopping server coordinator")
-		Q.stop()
+		q.stop()
 		wg.Done()
 	}()
 }
 
-func (Q *ServerCoordinator) start(ctx context.Context) {
-	go Q.heartbeatRoutine(ctx)
-	go Q.requestTaskRoutine(ctx)
+func (q *ServerCoordinator) start(ctx context.Context) {
+	go q.heartbeatRoutine(ctx)
+	go q.requestTaskRoutine(ctx)
 }
-func (Q *ServerCoordinator) stop() {
+func (q *ServerCoordinator) stop() {
 	log.Info("waiting for jobs to cancel")
 }
 
-func (Q *ServerCoordinator) connection() {
+func (q *ServerCoordinator) connection() {
 
 }
 
-func (Q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
+func (q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
 	//Declare Worker Unique ServerCoordinator
 
 	for {
@@ -72,40 +65,40 @@ func (Q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(time.Second * 30):
-			if err := Q.serverClient.PublishPing(); err != nil {
-				Q.printer.Error("Error Publishing Ping Event: %v", err)
+			if err := q.serverClient.PublishPing(); err != nil {
+				q.printer.Error("Error Publishing Ping Event: %v", err)
 			}
 		}
 	}
 }
 
-func (Q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
+func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(time.Second * 5):
-			if Q.worker.AcceptJobs() {
-				release, requireUpdate, err := Q.updater.CheckForUpdate()
+			if q.worker.AcceptJobs() {
+				release, requireUpdate, err := q.updater.CheckForUpdate()
 				if err != nil {
-					Q.printer.Error("Error Checking For Update: %v", err)
+					q.printer.Error("Error Checking For Update: %v", err)
 					continue
 				}
 				if requireUpdate {
-					Q.printer.Log("New version available %s,exiting ...", release.TagName)
+					q.printer.Log("New version available %s,exiting ...", release.TagName)
 					os.Exit(update.ExitCode)
 				}
 
-				taskJob, err := Q.serverClient.RequestJob(Q.worker.GetName())
+				taskJob, err := q.serverClient.RequestJob(q.worker.GetName())
 				if err != nil {
 					if !errors.Is(err, serverclient.NoJobAvailable) {
-						Q.printer.Error("Error Requesting Job: %v", err)
+						q.printer.Error("Error Requesting Job: %v", err)
 					}
 					continue
 				}
 
-				if err := Q.worker.Execute(taskJob); err != nil {
-					Q.printer.Error("Error Preparing Job Execution: %v", err)
+				if err := q.worker.Execute(taskJob); err != nil {
+					q.printer.Error("Error Preparing Job Execution: %v", err)
 				}
 			}
 		}

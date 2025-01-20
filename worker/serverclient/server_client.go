@@ -42,24 +42,24 @@ func NewServerClient(webServerConfig *web.Config, workerName string) *ServerClie
 	}
 }
 
-func (Q *ServerClient) PublishEvent(event model.TaskEvent) error {
-	event.WorkerName = Q.workerName
+func (s *ServerClient) PublishEvent(event model.TaskEvent) error {
+	event.WorkerName = s.workerName
 	b, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
-	req, err := Q.request("POST", "/api/v1/event", bytes.NewBuffer(b))
+	req, err := s.request("POST", "/api/v1/event", bytes.NewBuffer(b))
 	if err != nil {
 		fmt.Printf("Error creating request: %v\n", err)
 		return err
 	}
 
-	resp, err := Q.httpClient.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
 	if resp.StatusCode != 200 {
-		return errors.New(fmt.Sprintf("Error publishing event: %s", resp.Status))
+		return fmt.Errorf("error publishing event: %s", resp.Status)
 	}
 	defer resp.Body.Close()
 
@@ -68,13 +68,13 @@ func (Q *ServerClient) PublishEvent(event model.TaskEvent) error {
 
 var NoJobAvailable = errors.New("no job available")
 
-func (Q *ServerClient) RequestJob(workerName string) (*model.TaskEncode, error) {
-	req, err := Q.request("GET", "/api/v1/job/request", nil)
-	req.Header.Set("workerName", workerName)
+func (s *ServerClient) RequestJob(workerName string) (*model.TaskEncode, error) {
+	req, err := s.request("GET", "/api/v1/job/request", nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := Q.httpClient.Do(req)
+	req.Header.Set("workerName", workerName)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (Q *ServerClient) RequestJob(workerName string) (*model.TaskEncode, error) 
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(fmt.Sprintf("Error requesting job: %s", resp.Status))
+		return nil, fmt.Errorf("error requesting job: %s", resp.Status)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -99,42 +99,46 @@ func (Q *ServerClient) RequestJob(workerName string) (*model.TaskEncode, error) 
 	return job, nil
 }
 
-func (Q *ServerClient) GetDownloadURL(id uuid.UUID) string {
-	return fmt.Sprintf("%s?uuid=%s", Q.GetURL("/api/v1/download"), id.String())
+func (s *ServerClient) GetDownloadURL(id uuid.UUID) string {
+	return fmt.Sprintf("%s?uuid=%s", s.GetURL("/api/v1/download"), id.String())
 }
 
-func (Q *ServerClient) GetChecksumURL(id uuid.UUID) string {
-	return fmt.Sprintf("%s?uuid=%s", Q.GetURL("/api/v1/checksum"), id.String())
+func (s *ServerClient) GetChecksumURL(id uuid.UUID) string {
+	return fmt.Sprintf("%s?uuid=%s", s.GetURL("/api/v1/checksum"), id.String())
 }
 
-func (Q *ServerClient) GetUploadURL(id uuid.UUID) string {
-	return fmt.Sprintf("%s?uuid=%s", Q.GetURL("/api/v1/upload"), id.String())
+func (s *ServerClient) GetUploadURL(id uuid.UUID) string {
+	return fmt.Sprintf("%s?uuid=%s", s.GetURL("/api/v1/upload"), id.String())
 }
 
-func (Q *ServerClient) GetURL(uri string) string {
-	return fmt.Sprintf("%s%s", Q.webServerConfig.Domain, uri)
+func (s *ServerClient) GetURL(uri string) string {
+	return fmt.Sprintf("%s%s", s.webServerConfig.Domain, uri)
 }
 
-func (Q *ServerClient) request(method string, uri string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, Q.GetURL(uri), body)
+func (s *ServerClient) request(method string, uri string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, s.GetURL(uri), body)
 	if err != nil {
 		fmt.Printf("Error creating request: %v\n", err)
 		return nil, err
 	}
 
-	authHeader := fmt.Sprintf("Bearer %s", Q.webServerConfig.Token)
+	authHeader := fmt.Sprintf("Bearer %s", s.webServerConfig.Token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", authHeader)
 
 	return req, nil
 }
 
-func (Q *ServerClient) PublishPing() error {
+func (s *ServerClient) PublishPing() error {
+	publicIp, err := helper.GetPublicIP()
+	if err != nil {
+		return err
+	}
 	pingEvent := model.TaskEvent{
 		EventType:  model.PingEvent,
-		WorkerName: Q.workerName,
+		WorkerName: s.workerName,
 		EventTime:  time.Now(),
-		IP:         helper.GetPublicIP(),
+		IP:         publicIp,
 	}
-	return Q.PublishEvent(pingEvent)
+	return s.PublishEvent(pingEvent)
 }

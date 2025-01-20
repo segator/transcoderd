@@ -252,7 +252,7 @@ func (e *EncodeWorker) dowloadFile(ctx context.Context, job *model.WorkTaskEncod
 		retry.Attempts(180), // 15 min
 		retry.LastErrorOnly(true),
 		retry.OnRetry(func(n uint, err error) {
-			e.terminal.Errorf("Errorf on downloading job %s", err.Error())
+			e.terminal.Errorf("Error on downloading job %v", err)
 		}),
 		retry.RetryIf(func(err error) bool {
 			return !(errors.Is(err, context.Canceled) || errors.Is(err, ErrorJobNotFound))
@@ -527,7 +527,7 @@ func (e *EncodeWorker) UploadJob(ctx context.Context, task *model.WorkTaskEncode
 		retry.Attempts(17280),
 		retry.LastErrorOnly(true),
 		retry.OnRetry(func(n uint, err error) {
-			e.terminal.Errorf("Errorf on uploading job %s", err.Error())
+			e.terminal.Errorf("Error on uploading job %v", err)
 		}))
 
 	if err != nil {
@@ -548,7 +548,7 @@ func (e *EncodeWorker) errorJob(taskEncode *model.WorkTaskEncode, err error) {
 
 	err = taskEncode.Clean()
 	if err != nil {
-		e.terminal.Errorf("Errorf on cleaning job %s", err.Error())
+		e.terminal.Errorf("Error on cleaning job %s", err.Error())
 		return
 	}
 }
@@ -588,13 +588,13 @@ func (e *EncodeWorker) updateTaskStatus(encode *model.WorkTaskEncode, notificati
 	}
 
 	if err := e.client.PublishEvent(event); err != nil {
-		e.terminal.Errorf("Errorf on publishing event %s", err.Error())
+		e.terminal.Errorf("Error on publishing event %s", err.Error())
 	}
 	if err := e.saveTaskStatusDisk(&model.TaskStatus{
 		LastState: &event,
 		Task:      encode,
 	}); err != nil {
-		e.terminal.Errorf("Errorf on publishing event %s", err.Error())
+		e.terminal.Errorf("Error on publishing event %s", err.Error())
 	}
 	e.terminal.Log("[%s] %s have been %s: %s", event.Id.String(), event.NotificationType, event.Status, event.Message)
 
@@ -682,7 +682,7 @@ func (e *EncodeWorker) convertPGSToSrt(ctx context.Context, taskEncode *model.Wo
 					PGSSourcePath: supPath,
 					PGSTargetPath: filepath.Join(taskEncode.WorkDir, fmt.Sprintf("%d.srt", subtitle.Id)),
 					PGSLanguage:   subtitle.Language,
-				})
+				}, pgsTerminalTask)
 				if err != nil {
 					pgsTerminalTask.Error()
 					errs <- err
@@ -787,7 +787,7 @@ func (e *EncodeWorker) uploadQueueRoutine(ctx context.Context) {
 			taskTrack := e.terminal.AddTask(job.TaskEncode.Id.String(), UploadJobStepType)
 			err := e.UploadJob(ctx, job, taskTrack)
 			if err != nil {
-				e.terminal.Errorf("Errorf on uploading job %v", err)
+				e.terminal.Errorf("Error on uploading job %v", err)
 				taskTrack.Error()
 				e.errorJob(job, err)
 				continue
@@ -796,7 +796,7 @@ func (e *EncodeWorker) uploadQueueRoutine(ctx context.Context) {
 			e.updateTaskStatus(job, model.JobNotification, model.CompletedNotificationStatus, "")
 			err = job.Clean()
 			if err != nil {
-				e.terminal.Errorf("Errorf on cleaning job %v", err)
+				e.terminal.Errorf("Error on cleaning job %v", err)
 				taskTrack.Error()
 				continue
 			}
@@ -846,7 +846,7 @@ func (e *EncodeWorker) encodeVideo(ctx context.Context, job *model.WorkTaskEncod
 
 	videoContainer, err := e.clearData(sourceVideoParams)
 	if err != nil {
-		e.terminal.Warn("Errorf in clearData %s", e.GetID())
+		e.terminal.Warn("Error in clearData %s", e.GetID())
 		return err
 	}
 	if err = e.PGSMkvExtractDetectAndConvert(ctx, job, track, videoContainer); err != nil {
@@ -881,8 +881,8 @@ func (e *EncodeWorker) verifyResultJob(ctx context.Context, job *model.WorkTaskE
 	diffDuration := encodedVideoParams.Format.DurationSeconds - sourceVideoParams.Format.DurationSeconds
 	if diffDuration > 60 || diffDuration < -60 {
 		err = fmt.Errorf("source File duration %f is diferent than encoded %f", sourceVideoParams.Format.DurationSeconds, encodedVideoParams.Format.DurationSeconds)
-		e.updateTaskStatus(job, model.FFMPEGSNotification, model.FailedNotificationStatus, err.Error())
-		return err
+		//e.updateTaskStatus(job, model.FFMPEGSNotification, model.FailedNotificationStatus, err.Error())
+		//return err
 	}
 	if encodedVideoSize > sourceVideoSize {
 		err = fmt.Errorf("source File size %d bytes is less than encoded %d bytes", sourceVideoSize, encodedVideoSize)

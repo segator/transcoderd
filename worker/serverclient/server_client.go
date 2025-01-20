@@ -50,7 +50,7 @@ func (s *ServerClient) PublishEvent(event model.TaskEvent) error {
 	}
 	req, err := s.request("POST", "/api/v1/event", bytes.NewBuffer(b))
 	if err != nil {
-		fmt.Printf("Errorf creating request: %v\n", err)
+		fmt.Printf("Error creating request: %v\n", err)
 		return err
 	}
 
@@ -118,7 +118,7 @@ func (s *ServerClient) GetURL(uri string) string {
 func (s *ServerClient) request(method string, uri string, body io.Reader) (*http.Request, error) {
 	req, err := http.NewRequest(method, s.GetURL(uri), body)
 	if err != nil {
-		fmt.Printf("Errorf creating request: %v\n", err)
+		fmt.Printf("Error creating request: %v\n", err)
 		return nil, err
 	}
 

@@ -59,7 +59,7 @@ func (q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
 			return
 		case <-time.After(time.Second * 30):
 			if err := q.serverClient.PublishPing(); err != nil {
-				q.printer.Errorf("Errorf Publishing Ping Event: %v", err)
+				q.printer.Errorf("Error Publishing Ping Event: %v", err)
 			}
 		}
 	}
@@ -74,7 +74,7 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 			if q.worker.AcceptJobs() {
 				release, requireUpdate, err := q.updater.CheckForUpdate()
 				if err != nil {
-					q.printer.Errorf("Errorf Checking For Update: %v", err)
+					q.printer.Errorf("Error Checking For Update: %v", err)
 					continue
 				}
 				if requireUpdate {
@@ -85,13 +85,13 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 				taskJob, err := q.serverClient.RequestJob(q.worker.GetName())
 				if err != nil {
 					if !errors.Is(err, serverclient.NoJobAvailable) {
-						q.printer.Errorf("Errorf Requesting Job: %v", err)
+						q.printer.Errorf("Error Requesting Job: %v", err)
 					}
 					continue
 				}
 
 				if err := q.worker.Execute(taskJob); err != nil {
-					q.printer.Errorf("Errorf Preparing Job Execution: %v", err)
+					q.printer.Errorf("Error Preparing Job Execution: %v", err)
 				}
 			}
 		}

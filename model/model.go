@@ -234,6 +234,7 @@ type JobRequest struct {
 	SourcePath     string `json:"sourcePath"`
 	ForceCompleted bool   `json:"forceCompleted"`
 	ForceFailed    bool   `json:"forceFailed"`
+	ForceCanceled  bool   `json:"forceCanceled"`
 	ForceAssigned  bool   `json:"forceAssigned"`
 	SourceSize     int64
 	TargetPath     string

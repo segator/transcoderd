@@ -211,7 +211,7 @@ func (r *RuntimeScheduler) scheduleRoutine(ctx context.Context) {
 			r.pathChecksumMap[checksumPath.path] = checksumPath.checksum
 		case <-time.After(r.config.ScheduleTime):
 			if err := r.jobMaintenance(ctx); err != nil {
-				log.Errorf("Errorf on job maintenance %s", err)
+				log.Errorf("Error on job maintenance %s", err)
 			}
 
 		}
@@ -280,63 +280,61 @@ type ScheduleJobRequestResult struct {
 }
 
 func (r *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *model.JobRequest) (job *model.Job, err error) {
+	l := log.WithFields(log.Fields{
+		"source_path": jobRequest.SourcePath,
+	})
 	err = r.repo.WithTransaction(ctx, func(ctx context.Context, tx repository.Repository) error {
 		job, err = tx.GetJobByPath(ctx, jobRequest.SourcePath)
 		if err != nil {
 			return err
 		}
 
-		l := log.WithFields(log.Fields{
-			"source_path": jobRequest.SourcePath,
-		})
-
 		var eventsToAdd []*model.TaskEvent
 		if job == nil {
-			newUUID, _ := uuid.NewUUID()
-			job = &model.Job{
-				SourcePath: jobRequest.SourcePath,
-				SourceSize: jobRequest.SourceSize,
-				TargetPath: jobRequest.TargetPath,
-				Id:         newUUID,
-			}
-			l.WithField("job_id", job.Id.String()).Info("Creating new job")
-			err = tx.AddJob(ctx, job)
+			job, err = r.newJob(ctx, tx, jobRequest)
 			if err != nil {
 				return err
 			}
-			startEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
-			eventsToAdd = append(eventsToAdd, startEvent)
+			eventsToAdd = job.Events
 		} else {
 			// If job exist we check if we can retry the job
-			lastEvent := job.Events.GetLatestPerNotificationType(model.JobNotification)
-			status := job.Events.GetStatus()
-			if jobRequest.ForceAssigned && (status == model.AssignedNotificationStatus || status == model.StartedNotificationStatus) {
-				cancelEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.CanceledNotificationStatus)
-				eventsToAdd = append(eventsToAdd, cancelEvent)
-
-			}
-			if (jobRequest.ForceCompleted && status == model.CompletedNotificationStatus) ||
-				(jobRequest.ForceFailed && (status == model.FailedNotificationStatus || status == model.CanceledNotificationStatus)) ||
-				(jobRequest.ForceAssigned && (status == model.StartedNotificationStatus || status == model.AssignedNotificationStatus)) {
-				requeueEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
-				eventsToAdd = append(eventsToAdd, requeueEvent)
-			} else if !(jobRequest.ForceAssigned && status == model.QueuedNotificationStatus) {
-				return fmt.Errorf("%s (%s) job is in %s state by %s, can not be rescheduled", job.Id.String(), jobRequest.SourcePath, lastEvent.Status, lastEvent.WorkerName)
+			eventsToAdd, err = r.updateTerminatedJobByRequest(job, jobRequest)
+			if err != nil {
+				return err
 			}
 		}
-		if len(eventsToAdd) > 0 {
-			for _, taskEvent := range eventsToAdd {
-				err = tx.AddNewTaskEvent(ctx, taskEvent)
-				if err != nil {
-					return err
-				}
-				l.WithField("job_id", job.Id.String()).Infof("job is now %s", taskEvent.Status)
+
+		for _, taskEvent := range eventsToAdd {
+			err = tx.AddNewTaskEvent(ctx, taskEvent)
+			if err != nil {
+				return err
 			}
+			l.WithField("job_id", job.Id.String()).Infof("job is now %s", taskEvent.Status)
 		}
 
 		return nil
 	})
 	return job, err
+}
+
+func (r *RuntimeScheduler) newJob(ctx context.Context, tx repository.Repository, jobRequest *model.JobRequest) (*model.Job, error) {
+	l := log.WithFields(log.Fields{
+		"source_path": jobRequest.SourcePath,
+	})
+	newUUID, _ := uuid.NewUUID()
+	job := &model.Job{
+		SourcePath: jobRequest.SourcePath,
+		SourceSize: jobRequest.SourceSize,
+		TargetPath: jobRequest.TargetPath,
+		Id:         newUUID,
+	}
+	l.WithField("job_id", job.Id.String()).Info("Creating new job")
+	err := tx.AddJob(ctx, job)
+	if err != nil {
+		return nil, err
+	}
+	job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
+	return job, nil
 }
 
 func (r *RuntimeScheduler) ScheduleJobRequests(ctx context.Context, jobRequest *model.JobRequest) (result *ScheduleJobRequestResult, returnError error) {
@@ -544,6 +542,27 @@ func (r *RuntimeScheduler) assignedJobMaintenance(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (r *RuntimeScheduler) updateTerminatedJobByRequest(job *model.Job, jobRequest *model.JobRequest) ([]*model.TaskEvent, error) {
+	var eventsToAdd []*model.TaskEvent
+	lastEvent := job.Events.GetLatestPerNotificationType(model.JobNotification)
+	status := lastEvent.Status
+
+	switch {
+	case jobRequest.ForceAssigned && (status == model.AssignedNotificationStatus || status == model.StartedNotificationStatus):
+		eventsToAdd = append(eventsToAdd, job.AddEvent(model.NotificationEvent, model.JobNotification, model.CanceledNotificationStatus))
+		eventsToAdd = append(eventsToAdd, job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus))
+
+	case jobRequest.ForceCompleted && status == model.CompletedNotificationStatus,
+		jobRequest.ForceFailed && status == model.FailedNotificationStatus,
+		jobRequest.ForceCanceled && status == model.CanceledNotificationStatus:
+		requeueEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
+		eventsToAdd = append(eventsToAdd, requeueEvent)
+	default:
+		return nil, fmt.Errorf("%s (%s) job is in %s state by %s, can not be rescheduled", job.Id.String(), jobRequest.SourcePath, lastEvent.Status, lastEvent.WorkerName)
+	}
+	return eventsToAdd, nil
 }
 
 func simpleRegex(pattern string, string string) bool {

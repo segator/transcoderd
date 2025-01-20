@@ -513,7 +513,7 @@ func (s *SQLRepository) AddNewTaskEvent(ctx context.Context, event *model.TaskEv
 }
 
 func (s *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations, event *model.TaskEvent) error {
-	rows, err := tx.QueryContext(ctx, "select max(job_event_id) from job_events where job_id=$1", event.Id.String())
+	rows, err := tx.QueryContext(ctx, "select COALESCE(max(job_event_id),-1) from job_events where job_id=$1", event.Id.String())
 	if err != nil {
 		return err
 	}

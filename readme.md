@@ -26,19 +26,18 @@ You can have as many workers you want, locally or remote in multiple machines.
 
 Replace it by your own values, remember to create manually the DB scheme and PG user.
 ```yaml
-database:
-  host: 192.168.1.55
-  user: db_user
-  password: db_pass
-  scheme: encode
-
+server:
+    database:
+      host: 192.168.1.55
+      user: db_user
+      password: db_pass
+      scheme: encode    
+    scheduler:
+      sourcePath: /mnt/media
+      deleteOnComplete: false # if true, the original file will be deleted after job is completed
+      minFileSize: 100 # minimum file size to be considered for encoding
 web:
   token: my_secret_token # replace it by your own secret
-
-scheduler:
-  sourcePath: /mnt/media
-  deleteOnComplete: false # if true, the original file will be deleted after job is completed
-  minFileSize: 100 # minimum file size to be considered for encoding
 ```
 
 ### Run

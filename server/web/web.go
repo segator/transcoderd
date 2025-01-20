@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 	"transcoder/model"
 	"transcoder/server/scheduler"
@@ -52,7 +51,7 @@ func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 	writer.WriteHeader(200)
 	_, err = writer.Write(b)
 	if err != nil {
-		log.Errorf("Errorf writing response %v", err)
+		log.Errorf("Error writing response %v", err)
 	}
 }
 
@@ -101,7 +100,7 @@ func (s *Server) addJobs(writer http.ResponseWriter, request *http.Request) {
 	writer.WriteHeader(200)
 	_, err = writer.Write(b)
 	if err != nil {
-		log.Errorf("Errorf writing response %v", err)
+		log.Errorf("Error writing response %v", err)
 	}
 }
 
@@ -164,24 +163,18 @@ loop:
 		case <-request.Context().Done():
 			return
 		default:
-			readedBytes, err := reader.Read(b)
-			if err != nil {
-				if err == io.EOF {
-					break loop
-				}
-				log.Errorf("Errorreading from reader: %v", err)
-				http.Error(writer, "Error during upload", http.StatusInternalServerError)
-				return
-			}
-
+			readedBytes, readErr := reader.Read(b)
 			readed += uint64(readedBytes)
-			_, err = uploadStream.Write(b[0:readedBytes])
-			if err != nil {
-				if err == io.EOF {
-					break loop
-				}
-				log.Errorf("Error writing: %v", err)
-				http.Error(writer, "Error during upload", http.StatusInternalServerError)
+			_, writeErr := uploadStream.Write(b[0:readedBytes])
+			if writeErr != nil {
+				break loop
+			}
+			if errors.Is(readErr, io.EOF) {
+				break loop
+			}
+			if readErr != nil {
+				log.Errorf("Error reading from download stream: %v", readErr)
+				return
 			}
 		}
 	}
@@ -238,28 +231,16 @@ loop:
 		case <-request.Context().Done():
 			return
 		default:
-			readedBytes, err := downloadStream.Read(b)
-			if err != nil {
-				if err == io.EOF {
-					break loop
-				}
-				log.Errorf("Error reading from download stream: %v", err)
-				// Send an appropriate HTTP error code or terminate gracefully.
-				http.Error(writer, "Error during download", http.StatusInternalServerError)
-				return
+			readedBytes, readErr := downloadStream.Read(b)
+			_, writeErr := writer.Write(b[0:readedBytes])
+			if writeErr != nil {
+				break loop
 			}
-			_, err = writer.Write(b[0:readedBytes])
-			if err != nil {
-				if err == io.EOF {
-					break loop
-				}
-				log.Errorf("Error writing to response: %v", err)
-				// Gracefully terminate if the client cannot receive data.
-				if errors.Is(err, syscall.EPIPE) { // Broken pipe error
-					log.Warn("Client disconnected during download")
-				} else {
-					http.Error(writer, "Error during download", http.StatusInternalServerError)
-				}
+			if errors.Is(readErr, io.EOF) {
+				break loop
+			}
+			if readErr != nil {
+				log.Errorf("Error reading from download stream: %v", readErr)
 				return
 			}
 
@@ -283,7 +264,7 @@ func (s *Server) checksum(writer http.ResponseWriter, request *http.Request) {
 	writer.WriteHeader(200)
 	_, err = writer.Write([]byte(checksum))
 	if err != nil {
-		log.Errorf("Errorf writing response %v", err)
+		log.Errorf("Error writing response %v", err)
 	}
 }
 
@@ -436,7 +417,7 @@ func writeUnauthorized(w http.ResponseWriter) {
 	w.WriteHeader(401)
 	_, err := w.Write([]byte("Unauthorised.\n"))
 	if err != nil {
-		log.Errorf("Errorf writing response %v", err)
+		log.Errorf("Error writing response %v", err)
 	}
 }
 

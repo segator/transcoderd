@@ -7,6 +7,7 @@ import (
 	"github.com/asticode/go-astisub"
 	log "github.com/sirupsen/logrus"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -45,7 +46,7 @@ func NewPGSWorker(workerConfig *config.Config) *PGSWorker {
 	return encodeWorker
 }
 
-func (p *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS) (err error) {
+func (p *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS, taskTrack *TaskTracks) (err error) {
 	log.Debugf("Converting PGS To Srt for Job stream %d", taskPGS.PGSID)
 	inputFilePath := taskPGS.PGSSourcePath
 	outputFilePath := taskPGS.PGSTargetPath
@@ -62,8 +63,28 @@ func (p *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS) (err 
 		"--tesseractlanguage", language,
 		"--tesseractdata", pgsConfig.TesseractDataPath)
 	outLog := ""
+	startRegex := regexp.MustCompile(`Starting OCR for (\d+) items`)
+	progressRegex := regexp.MustCompile(`Processed item (\d+)`)
 	PGSToSrtCommand.SetStdoutFunc(func(buffer []byte, exit bool) {
-		outLog += string(buffer)
+		str := string(buffer)
+		outLog += str
+		progressMatch := progressRegex.FindStringSubmatch(str)
+		if len(progressMatch) > 0 {
+			p, err := strconv.Atoi(progressMatch[len(progressMatch)-1])
+			if err != nil {
+				return
+			}
+			taskTrack.UpdateValue(int64(p))
+		}
+		startMatch := startRegex.FindStringSubmatch(str)
+		if len(startMatch) > 0 {
+			t, err := strconv.Atoi(startMatch[1])
+			if err != nil {
+				return
+			}
+			taskTrack.SetTotal(int64(t))
+		}
+
 	})
 	errLog := ""
 	PGSToSrtCommand.SetStderrFunc(func(buffer []byte, exit bool) {

@@ -40,7 +40,7 @@ func init() {
 
 	cmd.ViperConfig(&opts)
 
-	//Fix Paths
+	// Fix Paths
 	serverConfig := opts.Server
 	serverConfig.Scheduler.SourcePath = filepath.Clean(serverConfig.Scheduler.SourcePath)
 	helper.CheckPath(serverConfig.Scheduler.SourcePath)
@@ -79,7 +79,7 @@ func main() {
 }
 
 func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) {
-	//Repository persist
+	// Repository persist
 	var repo repository.Repository
 	repo, err := repository.NewSQLRepository(opts.Server.Database)
 	if err != nil {
@@ -90,15 +90,15 @@ func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Upd
 		log.Panic(err)
 	}
 
-	//Scheduler
-	scheduler, err := scheduler.NewScheduler(opts.Server.Scheduler, repo)
+	// Scheduler
+	sch, err := scheduler.NewScheduler(opts.Server.Scheduler, repo)
 	if err != nil {
 		log.Panic(err)
 	}
-	scheduler.Run(wg, ctx)
+	sch.Run(wg, ctx)
 
-	//WebConfig Server
-	webServer := web.NewWebServer(opts.Web, scheduler, updater)
+	// WebConfig Server
+	webServer := web.NewWebServer(opts.Web, sch, updater)
 	webServer.Run(wg, ctx)
 }
 

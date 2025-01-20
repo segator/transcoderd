@@ -45,13 +45,13 @@ func NewPGSWorker(workerConfig *config.Config) *PGSWorker {
 	return encodeWorker
 }
 
-func (P *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS) (err error) {
+func (p *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS) (err error) {
 	log.Debugf("Converting PGS To Srt for Job stream %d", taskPGS.PGSID)
 	inputFilePath := taskPGS.PGSSourcePath
 	outputFilePath := taskPGS.PGSTargetPath
 
 	language := calculateTesseractLanguage(taskPGS.PGSLanguage)
-	pgsConfig := P.workerConfig.PGSConfig
+	pgsConfig := p.workerConfig.PGSConfig
 
 	PGSToSrtCommand := command.NewCommand(pgsConfig.DotnetPath, pgsConfig.DLLPath,
 		"--tesseractversion", strconv.Itoa(pgsConfig.TessVersion),

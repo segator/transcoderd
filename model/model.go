@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"time"
 	"transcoder/helper/max"
@@ -102,8 +103,8 @@ type TaskPGSResponse struct {
 	Queue string    `json:"queue"`
 }
 
-func (V TaskEncode) getUUID() uuid.UUID {
-	return V.Id
+func (t TaskEncode) getUUID() uuid.UUID {
+	return t.Id
 }
 
 type TaskEvent struct {
@@ -196,24 +197,24 @@ func (e TaskEvent) IsUploading() bool {
 	return false
 }
 
-func (W *WorkTaskEncode) Clean() error {
-	//log.Warnf("[%s] Cleaning up Task Workspace", W.TaskEncode.Id.String())
-	err := os.RemoveAll(W.WorkDir)
+func (w *WorkTaskEncode) Clean() error {
+	log.Debugf("[%s] Cleaning up Task Workspace", w.TaskEncode.Id.String())
+	err := os.RemoveAll(w.WorkDir)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (t *TaskEvents) GetLatest() *TaskEvent {
-	if len(*t) == 0 {
+func (t TaskEvents) GetLatest() *TaskEvent {
+	if len(t) == 0 {
 		return nil
 	}
 	return max.Max(t).(*TaskEvent)
 }
-func (t *TaskEvents) GetLatestPerNotificationType(notificationType NotificationType) (returnEvent *TaskEvent) {
+func (t TaskEvents) GetLatestPerNotificationType(notificationType NotificationType) (returnEvent *TaskEvent) {
 	eventID := -1
-	for _, event := range *t {
+	for _, event := range t {
 		if event.NotificationType == notificationType && event.EventID > eventID {
 			eventID = event.EventID
 			returnEvent = event
@@ -221,7 +222,7 @@ func (t *TaskEvents) GetLatestPerNotificationType(notificationType NotificationT
 	}
 	return returnEvent
 }
-func (t *TaskEvents) GetStatus() NotificationStatus {
+func (t TaskEvents) GetStatus() NotificationStatus {
 	return t.GetLatestPerNotificationType(JobNotification).Status
 }
 
@@ -238,25 +239,25 @@ type JobRequest struct {
 	TargetPath     string
 }
 
-func (a TaskEvents) Len() int {
-	return len(a)
+func (t TaskEvents) Len() int {
+	return len(t)
 }
-func (a TaskEvents) Less(i, j int) bool {
-	return a[i].EventID < a[j].EventID
+func (t TaskEvents) Less(i, j int) bool {
+	return t[i].EventID < t[j].EventID
 }
-func (a TaskEvents) Swap(i, j int) {
-	a[i], a[j] = a[j], a[i]
+func (t TaskEvents) Swap(i, j int) {
+	t[i], t[j] = t[j], t[i]
 }
-func (a TaskEvents) GetByEventId(i int) (*TaskEvent, error) {
-	for _, event := range a {
+func (t TaskEvents) GetByEventId(i int) (*TaskEvent, error) {
+	for _, event := range t {
 		if event.EventID == i {
 			return event, nil
 		}
 	}
 	return nil, fmt.Errorf("event not found")
 }
-func (a TaskEvents) GetLastElement(i int) interface{} {
-	return a[i]
+func (t TaskEvents) GetLastElement(i int) interface{} {
+	return t[i]
 }
 func (v *Job) AddEvent(eventType EventType, notificationType NotificationType, notificationStatus NotificationStatus) (newEvent *TaskEvent) {
 	return v.AddEventComplete(eventType, notificationType, notificationStatus, "")

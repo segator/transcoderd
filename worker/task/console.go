@@ -41,8 +41,8 @@ func NewConsoleWorkerPrinter() *ConsoleWorkerPrinter {
 	pw := progress.NewWriter()
 	pw.SetAutoStop(false)
 	pw.SetTrackerLength(40)
-	pw.SetMessageWidth(50)
-	//pw.SetNumTrackersExpected(15)
+	pw.SetMessageLength(50)
+	// pw.SetNumTrackersExpected(15)
 	pw.SetSortBy(progress.SortByPercent)
 	pw.SetStyle(progress.StyleDefault)
 	pw.SetTrackerPosition(progress.PositionRight)
@@ -66,16 +66,16 @@ func NewConsoleWorkerPrinter() *ConsoleWorkerPrinter {
 		pw: pw,
 	}
 }
-func (C *ConsoleWorkerPrinter) Stop() {
-	C.pw.Stop()
+func (c *ConsoleWorkerPrinter) Stop() {
+	c.pw.Stop()
 }
-func (C *ConsoleWorkerPrinter) Render() {
-	C.pw.Render()
+func (c *ConsoleWorkerPrinter) Render() {
+	c.pw.Render()
 }
 
-func (C *ConsoleWorkerPrinter) AddTask(id string, stepType JobStepType) *TaskTracks {
-	C.mu.Lock()
-	defer C.mu.Unlock()
+func (c *ConsoleWorkerPrinter) AddTask(id string, stepType JobStepType) *TaskTracks {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	var unit progress.Units
 	var printer text.Color
@@ -83,11 +83,9 @@ func (C *ConsoleWorkerPrinter) AddTask(id string, stepType JobStepType) *TaskTra
 	case DownloadJobStepType:
 		unit = progress.UnitsBytes
 		printer = text.FgWhite
-		break
 	case UploadJobStepType:
 		unit = progress.UnitsBytes
 		printer = text.FgGreen
-		break
 	case PGSJobStepType:
 		unit = progress.UnitsBytes
 		printer = text.FgWhite
@@ -107,7 +105,6 @@ func (C *ConsoleWorkerPrinter) AddTask(id string, stepType JobStepType) *TaskTra
 			},
 		}
 		printer = text.FgBlue
-		break
 	}
 	tracker := &progress.Tracker{
 		Message: printer.Sprintf("[%s] %s", id, stepType),
@@ -121,64 +118,64 @@ func (C *ConsoleWorkerPrinter) AddTask(id string, stepType JobStepType) *TaskTra
 		printer:         &printer,
 	}
 
-	C.pw.AppendTracker(tracker)
+	c.pw.AppendTracker(tracker)
 	return taskTrack
 }
 
-func (C *ConsoleWorkerPrinter) Log(msg string, a ...interface{}) {
-	C.pw.Log(msg, a...)
+func (c *ConsoleWorkerPrinter) Log(msg string, a ...interface{}) {
+	c.pw.Log(msg, a...)
 }
 
-func (C *ConsoleWorkerPrinter) Warn(msg string, a ...interface{}) {
-	C.pw.Log(text.FgHiYellow.Sprintf(msg, a...))
+func (c *ConsoleWorkerPrinter) Warn(msg string, a ...interface{}) {
+	c.pw.Log(text.FgHiYellow.Sprintf(msg, a...))
 }
 
-func (C *ConsoleWorkerPrinter) Cmd(msg string, a ...interface{}) {
-	C.pw.Log(text.FgHiCyan.Sprintf(msg, a...))
+func (c *ConsoleWorkerPrinter) Cmd(msg string, a ...interface{}) {
+	c.pw.Log(text.FgHiCyan.Sprintf(msg, a...))
 }
 
-func (C *ConsoleWorkerPrinter) Error(msg string, a ...interface{}) {
-	C.pw.Log(text.FgHiRed.Sprintf(msg, a...))
+func (c *ConsoleWorkerPrinter) Errorf(msg string, a ...interface{}) {
+	c.pw.Log(text.FgHiRed.Sprintf(msg, a...))
 }
 
-func (C *TaskTracks) SetTotal(total int64) {
-	C.progressTracker.UpdateTotal(total)
+func (t *TaskTracks) SetTotal(total int64) {
+	t.progressTracker.UpdateTotal(total)
 }
 
-func (C *TaskTracks) ETA() time.Duration {
-	return C.progressTracker.ETA()
+func (t *TaskTracks) ETA() time.Duration {
+	return t.progressTracker.ETA()
 }
 
-func (C *TaskTracks) PercentDone() float64 {
-	return C.progressTracker.PercentDone()
+func (t *TaskTracks) PercentDone() float64 {
+	return t.progressTracker.PercentDone()
 }
 
-func (C *TaskTracks) UpdateValue(value int64) {
-	C.progressTracker.SetValue(value)
+func (t *TaskTracks) UpdateValue(value int64) {
+	t.progressTracker.SetValue(value)
 }
 
-func (C *TaskTracks) Increment64(increment int64) {
-	C.progressTracker.Increment(increment)
+func (t *TaskTracks) Increment64(increment int64) {
+	t.progressTracker.Increment(increment)
 }
-func (C *TaskTracks) Increment(increment int) {
-	C.progressTracker.Increment(int64(increment))
-}
-
-func (C *TaskTracks) Message(msg string) {
-	C.progressTracker.UpdateMessage(C.printer.Sprintf("[%s] %s", C.id, msg))
+func (t *TaskTracks) Increment(increment int) {
+	t.progressTracker.Increment(int64(increment))
 }
 
-func (C *TaskTracks) ResetMessage() {
-	C.progressTracker.UpdateMessage(C.printer.Sprintf("[%s] %s", C.id, C.stepType))
+func (t *TaskTracks) Message(msg string) {
+	t.progressTracker.UpdateMessage(t.printer.Sprintf("[%s] %s", t.id, msg))
 }
 
-func (C *TaskTracks) Done() {
-	C.progressTracker.SetValue(C.progressTracker.Total)
-	C.progressTracker.MarkAsDone()
+func (t *TaskTracks) ResetMessage() {
+	t.progressTracker.UpdateMessage(t.printer.Sprintf("[%s] %s", t.id, t.stepType))
 }
 
-func (C *TaskTracks) Error() {
-	C.progressTracker.MarkAsErrored()
+func (t *TaskTracks) Done() {
+	t.progressTracker.SetValue(t.progressTracker.Total)
+	t.progressTracker.MarkAsDone()
+}
+
+func (t *TaskTracks) Error() {
+	t.progressTracker.MarkAsErrored()
 }
 
 func formatNumber(value int64, notations map[int64]string) string {

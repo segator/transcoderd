@@ -211,7 +211,7 @@ func (r *RuntimeScheduler) scheduleRoutine(ctx context.Context) {
 			r.pathChecksumMap[checksumPath.path] = checksumPath.checksum
 		case <-time.After(r.config.ScheduleTime):
 			if err := r.jobMaintenance(ctx); err != nil {
-				log.Errorf("Error on job maintenance %s", err)
+				log.Errorf("Errorf on job maintenance %s", err)
 			}
 
 		}
@@ -252,7 +252,7 @@ func (r *RuntimeScheduler) createNewJobRequestByJobRequestDirectory(ctx context.
 				ext := filepath.Ext(relativePathTarget)
 				relativePathTarget = strings.Replace(relativePathTarget, ext, "_encoded.mkv", 1)
 			}
-			pathFile = filepath.ToSlash(pathFile)
+
 			searchJobRequestChan <- &JobRequestResult{
 				jobRequest: &model.JobRequest{
 					SourcePath:     relativePathSource,
@@ -307,7 +307,7 @@ func (r *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 			startEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
 			eventsToAdd = append(eventsToAdd, startEvent)
 		} else {
-			//If job exist we check if we can retry the job
+			// If job exist we check if we can retry the job
 			lastEvent := job.Events.GetLatestPerNotificationType(model.JobNotification)
 			status := job.Events.GetStatus()
 			if jobRequest.ForceAssigned && (status == model.AssignedNotificationStatus || status == model.StartedNotificationStatus) {
@@ -321,7 +321,7 @@ func (r *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 				requeueEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
 				eventsToAdd = append(eventsToAdd, requeueEvent)
 			} else if !(jobRequest.ForceAssigned && status == model.QueuedNotificationStatus) {
-				return errors.New(fmt.Sprintf("%s (%s) job is in %s state by %s, can not be rescheduled", job.Id.String(), jobRequest.SourcePath, lastEvent.Status, lastEvent.WorkerName))
+				return fmt.Errorf("%s (%s) job is in %s state by %s, can not be rescheduled", job.Id.String(), jobRequest.SourcePath, lastEvent.Status, lastEvent.WorkerName)
 			}
 		}
 		if len(eventsToAdd) > 0 {
@@ -438,6 +438,9 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 	}
 	temporalPath := filePath + ".upload"
 	uploadFile, err := os.OpenFile(temporalPath, os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
 	return &UploadJobStream{
 		&JobStream{
 			video:        video,
@@ -577,29 +580,29 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`error on process PGS.*no such file or directory`, message) {
 		return true
 	}
-	//if simpleRegex(`At least one output file must be specified`, message) {
+	// if simpleRegex(`At least one output file must be specified`, message) {
 	//	return true
 	//}
 	if simpleRegex(`MKVExtract unexpected error`, message) {
 		return true
 	}
-	//if simpleRegex(`core dumped`, message) {
+	// if simpleRegex(`core dumped`, message) {
 	//	return true
 	//}
 	if simpleRegex(`dow(n)?load code 500`, message) {
 		return true
 	}
-	//TODO al arreglar el tema del trailing descomentar
-	//if simpleRegex(`Trailing option\(s\) found in the command`, message) {
+	// TODO al arreglar el tema del trailing descomentar
+	// if simpleRegex(`Trailing option\(s\) found in the command`, message) {
 	//	return true
 	//}
-	//if simpleRegex(`signal: killed`, message) {
+	// if simpleRegex(`signal: killed`, message) {
 	//	return true
 	//}
-	//if simpleRegex(`signal: aborted`, message) {
+	// if simpleRegex(`signal: aborted`, message) {
 	//	return true
 	//}
-	//if simpleRegex(`error getting data`, message) {
+	// if simpleRegex(`error getting data`, message) {
 	//	return true
 	//}
 	if message == "exit status 1: stder: stdout:" {
@@ -626,10 +629,10 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`connection refused`, message) {
 		return true
 	}
-	//if simpleRegex(`srt: Invalid data found when processing input`, message) {
+	// if simpleRegex(`srt: Invalid data found when processing input`, message) {
 	//	return true
 	//}
-	//if simpleRegex(`segmentation fault`, message) {
+	// if simpleRegex(`segmentation fault`, message) {
 	//	return true
 	//}
 	if simpleRegex(`Subtitle: mov_text`, message) {
@@ -638,7 +641,7 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`unsupported AVCodecID S_TEXT/WEBVTT`, message) {
 		return false
 	}
-	if simpleRegex(`Error while decoding stream`, message) {
+	if simpleRegex(`Errorf while decoding stream`, message) {
 		return false
 	}
 	if simpleRegex(`Data: bin_data`, message) {

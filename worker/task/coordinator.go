@@ -6,7 +6,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"os"
 	"sync"
-	"transcoder/server/web"
 	"transcoder/update"
 	"transcoder/worker/serverclient"
 
@@ -14,8 +13,6 @@ import (
 )
 
 type ServerCoordinator struct {
-	webServerConfig web.Config
-
 	printer      *ConsoleWorkerPrinter
 	serverClient *serverclient.ServerClient
 	worker       *EncodeWorker
@@ -53,12 +50,8 @@ func (q *ServerCoordinator) stop() {
 	log.Info("waiting for jobs to cancel")
 }
 
-func (q *ServerCoordinator) connection() {
-
-}
-
 func (q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
-	//Declare Worker Unique ServerCoordinator
+	// Declare Worker Unique ServerCoordinator
 
 	for {
 		select {
@@ -66,7 +59,7 @@ func (q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
 			return
 		case <-time.After(time.Second * 30):
 			if err := q.serverClient.PublishPing(); err != nil {
-				q.printer.Error("Error Publishing Ping Event: %v", err)
+				q.printer.Errorf("Errorf Publishing Ping Event: %v", err)
 			}
 		}
 	}
@@ -81,7 +74,7 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 			if q.worker.AcceptJobs() {
 				release, requireUpdate, err := q.updater.CheckForUpdate()
 				if err != nil {
-					q.printer.Error("Error Checking For Update: %v", err)
+					q.printer.Errorf("Errorf Checking For Update: %v", err)
 					continue
 				}
 				if requireUpdate {
@@ -92,13 +85,13 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 				taskJob, err := q.serverClient.RequestJob(q.worker.GetName())
 				if err != nil {
 					if !errors.Is(err, serverclient.NoJobAvailable) {
-						q.printer.Error("Error Requesting Job: %v", err)
+						q.printer.Errorf("Errorf Requesting Job: %v", err)
 					}
 					continue
 				}
 
 				if err := q.worker.Execute(taskJob); err != nil {
-					q.printer.Error("Error Preparing Job Execution: %v", err)
+					q.printer.Errorf("Errorf Preparing Job Execution: %v", err)
 				}
 			}
 		}

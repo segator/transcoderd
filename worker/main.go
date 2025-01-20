@@ -64,8 +64,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	wg.Add(1)
 	go func() {
-		wg.Add(1)
 		shutdownHandler(sigs, cancel)
 		wg.Done()
 	}()
@@ -110,11 +110,8 @@ func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Upd
 }
 
 func shutdownHandler(sigs chan os.Signal, cancel context.CancelFunc) {
-	select {
-	case <-sigs:
-		cancel()
-		log.Info("Termination Signal Detected...")
-	}
-
+	<-sigs
+	cancel()
+	log.Info("Termination Signal Detected...")
 	signal.Stop(sigs)
 }

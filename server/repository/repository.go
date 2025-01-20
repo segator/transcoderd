@@ -45,35 +45,35 @@ type SQLTransaction struct {
 	tx *sql.Tx
 }
 
-func (S *SQLTransaction) Exec(query string, args ...interface{}) (sql.Result, error) {
+func (s *SQLTransaction) Exec(query string, args ...interface{}) (sql.Result, error) {
 	log.Debugf("Exec: %s, args: %v", query, args)
-	return S.tx.Exec(query, args...)
+	return s.tx.Exec(query, args...)
 
 }
 
-func (S *SQLTransaction) Prepare(query string) (*sql.Stmt, error) {
+func (s *SQLTransaction) Prepare(query string) (*sql.Stmt, error) {
 	log.Debugf("Prepare: %s", query)
-	return S.tx.Prepare(query)
+	return s.tx.Prepare(query)
 }
 
-func (S *SQLTransaction) Query(query string, args ...interface{}) (*sql.Rows, error) {
+func (s *SQLTransaction) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	log.Debugf("Query: %s, args: %v", query, args)
-	return S.tx.Query(query, args...)
+	return s.tx.Query(query, args...)
 }
 
-func (S *SQLTransaction) QueryRow(query string, args ...interface{}) *sql.Row {
+func (s *SQLTransaction) QueryRow(query string, args ...interface{}) *sql.Row {
 	log.Debugf("QueryRow: %s, args: %v", query, args)
-	return S.tx.QueryRow(query, args...)
+	return s.tx.QueryRow(query, args...)
 }
 
-func (S *SQLTransaction) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+func (s *SQLTransaction) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
 	log.Debugf("QueryContext: %s, args: %v", query, args)
-	return S.tx.QueryContext(ctx, query, args...)
+	return s.tx.QueryContext(ctx, query, args...)
 }
 
-func (S *SQLTransaction) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+func (s *SQLTransaction) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
 	log.Debugf("ExecContext: %s, args: %v", query, args)
-	return S.tx.ExecContext(ctx, query, args...)
+	return s.tx.ExecContext(ctx, query, args...)
 }
 
 type SQLDatabase struct {
@@ -125,12 +125,12 @@ type SQLRepository struct {
 }
 
 type SQLServerConfig struct {
-	Host     string `mapstructure:"host",envconfig:"DB_HOST"`
-	Port     int    `mapstructure:"port",envconfig:"DB_PORT"`
-	User     string `mapstructure:"user",envconfig:"DB_USER"`
-	Password string `mapstructure:"password",envconfig:"DB_PASSWORD"`
-	Scheme   string `mapstructure:"scheme",envconfig:"DB_SCHEME"`
-	Driver   string `mapstructure:"driver",envconfig:"DB_DRIVER"`
+	Host     string `mapstructure:"host" envconfig:"DB_HOST"`
+	Port     int    `mapstructure:"port" envconfig:"DB_PORT"`
+	User     string `mapstructure:"user" envconfig:"DB_USER"`
+	Password string `mapstructure:"password" envconfig:"DB_PASSWORD"`
+	Scheme   string `mapstructure:"scheme" envconfig:"DB_SCHEME"`
+	Driver   string `mapstructure:"driver" envconfig:"DB_DRIVER"`
 }
 
 func NewSQLRepository(config *SQLServerConfig) (*SQLRepository, error) {
@@ -142,13 +142,15 @@ func NewSQLRepository(config *SQLServerConfig) (*SQLRepository, error) {
 	db.SetMaxOpenConns(5)
 	db.SetConnMaxLifetime(0)
 	db.SetMaxIdleConns(5)
+	if log.IsLevelEnabled(log.DebugLevel) {
+		go func() {
+			for {
+				fmt.Printf("In use %d not use %d  open %d wait %d\n", db.Stats().Idle, db.Stats().InUse, db.Stats().OpenConnections, db.Stats().WaitCount)
+				time.Sleep(time.Second * 5)
+			}
+		}()
+	}
 
-	//go func() {
-	//	for {
-	//		fmt.Printf("In use %d not use %d  open %d wait %d\n", db.Stats().Idle, db.Stats().InUse, db.Stats().OpenConnections, db.Stats().WaitCount)
-	//		time.Sleep(time.Second * 5)
-	//	}
-	//}()
 	return &SQLRepository{
 		db: &SQLDatabase{db},
 	}, nil
@@ -388,11 +390,9 @@ func (s *SQLRepository) GetJobs(ctx context.Context) (jobs *[]model.Job, returnE
 }
 
 func (s *SQLRepository) getJobs(ctx context.Context, tx SQLDBOperations) (*[]model.Job, error) {
-	query := fmt.Sprintf(`
-    SELECT v.id, v.source_path,v.source_size, v.target_path,v.target_size, vs.event_time, vs.status, vs.notification_type, vs.message
+	query := `SELECT v.id, v.source_path,v.source_size, v.target_path,v.target_size, vs.event_time, vs.status, vs.notification_type, vs.message
     FROM jobs v
-    INNER JOIN job_status vs ON v.id = vs.job_id
-`)
+    INNER JOIN job_status vs ON v.id = vs.job_id`
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -564,13 +564,11 @@ func (s *SQLRepository) updateJob(ctx context.Context, tx SQLDBOperations, job *
 
 func (s *SQLRepository) getTimeoutJobs(ctx context.Context, tx SQLDBOperations, timeout time.Duration) ([]*model.TaskEvent, error) {
 	timeoutDate := time.Now().Add(-timeout)
-	timeoutDate.Format(time.RFC3339)
 
 	rows, err := tx.QueryContext(ctx, "select v.* from job_events v right join "+
 		"(select job_id,max(job_event_id) as job_event_id  from job_events where notification_type='Job'  group by job_id) as m "+
 		"on m.job_id=v.job_id and m.job_event_id=v.job_event_id where status in ('assigned','started') and v.event_time < $1::timestamptz", timeoutDate)
 
-	//2020-05-17 20:50:41.428531 +00:00
 	if err != nil {
 		return nil, err
 	}
@@ -619,7 +617,6 @@ func (s *SQLRepository) WithTransaction(ctx context.Context, transactionFunc fun
 func (s *SQLRepository) queuedJob(ctx context.Context, tx SQLDBOperations) (*model.Job, error) {
 	rows, err := tx.QueryContext(ctx, "select job_id, job_event_id from job_status where notification_type='Job' and status='queued' order by event_time asc limit 1")
 
-	//2020-05-17 20:50:41.428531 +00:00
 	if err != nil {
 		return nil, err
 	}

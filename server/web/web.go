@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"transcoder/model"
 	"transcoder/server/scheduler"
@@ -51,7 +52,7 @@ func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 	writer.WriteHeader(200)
 	_, err = writer.Write(b)
 	if err != nil {
-		log.Errorf("Error writing response %v", err)
+		log.Errorf("Errorf writing response %v", err)
 	}
 }
 
@@ -100,7 +101,7 @@ func (s *Server) addJobs(writer http.ResponseWriter, request *http.Request) {
 	writer.WriteHeader(200)
 	_, err = writer.Write(b)
 	if err != nil {
-		log.Errorf("Error writing response %v", err)
+		log.Errorf("Errorf writing response %v", err)
 	}
 }
 
@@ -129,18 +130,25 @@ func (s *Server) upload(writer http.ResponseWriter, request *http.Request) {
 		webError(writer, fmt.Errorf("UUID get parameter not found"), 404)
 	}
 	uploadStream, err := s.scheduler.GetUploadJobWriter(request.Context(), uuid, workerName)
-	if errors.Is(err, scheduler.ErrorStreamNotAllowed) {
+	switch {
+	case errors.Is(err, scheduler.ErrorStreamNotAllowed):
 		webError(writer, err, 403)
 		return
-	} else if errors.Is(err, scheduler.ErrorJobNotFound) {
+	case errors.Is(err, scheduler.ErrorJobNotFound):
 		webError(writer, err, 404)
 		return
-	} else if webError(writer, err, 500) {
+	case webError(writer, err, 500):
 		return
 	}
-	defer uploadStream.Close(false)
+	defer func(uploadStream *scheduler.UploadJobStream, pushChecksum bool) {
+		_ = uploadStream.Close(pushChecksum)
+	}(uploadStream, false)
 
 	size, err := strconv.ParseUint(request.Header.Get("Content-Length"), 10, 64)
+	if err != nil {
+		webError(writer, fmt.Errorf("invalid size %v", err), 400)
+		return
+	}
 	checksum := request.Header.Get("checksum")
 	if checksum == "" {
 		webError(writer, fmt.Errorf("checksum is mandatory in the headers"), 403)
@@ -157,25 +165,34 @@ loop:
 			return
 		default:
 			readedBytes, err := reader.Read(b)
+			if err != nil {
+				log.Errorf("Errorf reading from reader: %v", err)
+				return
+			}
+
 			readed += uint64(readedBytes)
 			_, err = uploadStream.Write(b[0:readedBytes])
 			if err != nil {
-				log.Errorf("Error writing to stream %v", err)
+				log.Errorf("Errorf writing to stream %v", err)
 			}
-			//TODO check error here?
+			// TODO check error here?
 			if err == io.EOF {
 				break loop
 			}
 		}
 	}
 	if size != readed {
-		defer uploadStream.Clean()
+		defer func(uploadStream *scheduler.UploadJobStream) {
+			_ = uploadStream.Clean()
+		}(uploadStream)
 		webError(writer, fmt.Errorf("invalid size, expected %d, received %d", size, readed), 400)
 		return
 	}
 	checksumUpload := uploadStream.GetHash()
 	if checksumUpload != checksum {
-		defer uploadStream.Clean()
+		defer func(uploadStream *scheduler.UploadJobStream) {
+			_ = uploadStream.Clean()
+		}(uploadStream)
 		webError(writer, fmt.Errorf("invalid checksum, received %s, calculated %s", checksum, checksumUpload), 400)
 		return
 	}
@@ -195,13 +212,14 @@ func (s *Server) download(writer http.ResponseWriter, request *http.Request) {
 		webError(writer, fmt.Errorf("UUID get parameter not found"), 404)
 	}
 	downloadStream, err := s.scheduler.GetDownloadJobWriter(request.Context(), uuid, workerName)
-	if errors.Is(err, scheduler.ErrorStreamNotAllowed) {
+	switch {
+	case errors.Is(err, scheduler.ErrorStreamNotAllowed):
 		webError(writer, err, 403)
 		return
-	} else if errors.Is(err, scheduler.ErrorJobNotFound) {
+	case errors.Is(err, scheduler.ErrorJobNotFound):
 		webError(writer, err, 404)
 		return
-	} else if webError(writer, err, 500) {
+	case webError(writer, err, 500):
 		return
 	}
 	defer downloadStream.Close(true)
@@ -217,13 +235,30 @@ loop:
 			return
 		default:
 			readedBytes, err := downloadStream.Read(b)
+			if err != nil {
+				if err == io.EOF {
+					break loop
+				}
+				log.Errorf("Error reading from download stream: %v", err)
+				// Send an appropriate HTTP error code or terminate gracefully.
+				http.Error(writer, "Error during download", http.StatusInternalServerError)
+				return
+			}
 			_, err = writer.Write(b[0:readedBytes])
 			if err != nil {
-				log.Error(err)
+				if err == io.EOF {
+					break loop
+				}
+				log.Errorf("Error writing to response: %v", err)
+				// Gracefully terminate if the client cannot receive data.
+				if errors.Is(err, syscall.EPIPE) { // Broken pipe error
+					log.Warn("Client disconnected during download")
+				} else {
+					http.Error(writer, "Error during download", http.StatusInternalServerError)
+				}
+				return
 			}
-			if err == io.EOF {
-				break loop
-			}
+
 		}
 	}
 }
@@ -244,14 +279,14 @@ func (s *Server) checksum(writer http.ResponseWriter, request *http.Request) {
 	writer.WriteHeader(200)
 	_, err = writer.Write([]byte(checksum))
 	if err != nil {
-		log.Errorf("Error writing response %v", err)
+		log.Errorf("Errorf writing response %v", err)
 	}
 }
 
 type Config struct {
-	Port   int    `mapstructure:"port",envconfig:"WEB_PORT"`
-	Token  string `mapstructure:"token",envconfig:"WEB_TOKEN"`
-	Domain string `mapstructure:"domain",envconfig:"WEB_DOMAIN"`
+	Port   int    `mapstructure:"port" envconfig:"WEB_PORT"`
+	Token  string `mapstructure:"token" envconfig:"WEB_TOKEN"`
+	Domain string `mapstructure:"domain" envconfig:"WEB_DOMAIN"`
 }
 
 type ActiveTracker struct {
@@ -344,6 +379,8 @@ func (s *Server) start() {
 	go func() {
 		for {
 			select {
+			case <-s.ctx.Done():
+				return
 			case <-time.After(time.Minute * 5):
 				log.Debug("Checking for updates")
 				if !s.activeTracker.ActiveRequests() {
@@ -395,7 +432,7 @@ func writeUnauthorized(w http.ResponseWriter) {
 	w.WriteHeader(401)
 	_, err := w.Write([]byte("Unauthorised.\n"))
 	if err != nil {
-		log.Errorf("Error writing response %v", err)
+		log.Errorf("Errorf writing response %v", err)
 	}
 }
 

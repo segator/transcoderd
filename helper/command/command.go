@@ -63,13 +63,13 @@ func (c *Command) AddEnv(env string) *Command {
 	return c
 }
 
-func (c *Command) SetStdoutFunc(StdoutFunc ReaderFunc) *Command {
-	c.stdoutFunc = StdoutFunc
+func (c *Command) SetStdoutFunc(stdoutFunc ReaderFunc) *Command {
+	c.stdoutFunc = stdoutFunc
 	return c
 }
 
-func (c *Command) SetStderrFunc(StderrtFunc ReaderFunc) *Command {
-	c.stderrFunc = StderrtFunc
+func (c *Command) SetStderrFunc(stderrFunc ReaderFunc) *Command {
+	c.stderrFunc = stderrFunc
 	return c
 }
 func (c *Command) Run(opt ...Option) (exitCode int, err error) {
@@ -184,7 +184,8 @@ func StringToSlice(command string) (output []string) {
 	cutQuote := true
 	inLineWord := ""
 	for _, c := range command {
-		if c == ' ' && cutDoubleQuote && cutQuote {
+		switch {
+		case c == ' ' && cutDoubleQuote && cutQuote:
 			if len(inLineWord) > 0 {
 				if inLineWord[0] == '\'' {
 					inLineWord = strings.Trim(inLineWord, "'")
@@ -195,9 +196,9 @@ func StringToSlice(command string) (output []string) {
 				inLineWord = ""
 			}
 			continue
-		} else if c == '"' {
+		case c == '"':
 			cutDoubleQuote = !cutDoubleQuote
-		} else if c == '\'' {
+		case c == '\'':
 			cutQuote = !cutQuote
 		}
 		inLineWord += string(c)

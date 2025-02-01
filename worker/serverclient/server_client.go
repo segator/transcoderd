@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	retryablehttp "github.com/hashicorp/go-retryablehttp"
 	"io"
 	"net/http"
@@ -16,9 +15,10 @@ import (
 )
 
 type ServerClient struct {
-	webServerConfig *web.Config
-	httpClient      *http.Client
-	workerName      string
+	webServerConfig     *web.Config
+	retriableHttpClient *http.Client
+	workerName          string
+	httpClient          *http.Client
 }
 
 func NewServerClient(webServerConfig *web.Config, workerName string) *ServerClient {
@@ -36,14 +36,14 @@ func NewServerClient(webServerConfig *web.Config, workerName string) *ServerClie
 	// }
 
 	return &ServerClient{
-		webServerConfig: webServerConfig,
-		workerName:      workerName,
-		httpClient:      client.StandardClient(),
+		webServerConfig:     webServerConfig,
+		workerName:          workerName,
+		retriableHttpClient: client.StandardClient(),
+		httpClient:          &http.Client{},
 	}
 }
 
-func (s *ServerClient) PublishEvent(event model.TaskEvent) error {
-	event.WorkerName = s.workerName
+func (s *ServerClient) publishEvent(event *model.EnvelopEvent) error {
 	b, err := json.Marshal(event)
 	if err != nil {
 		return err
@@ -53,8 +53,12 @@ func (s *ServerClient) PublishEvent(event model.TaskEvent) error {
 		fmt.Printf("Error creating request: %v\n", err)
 		return err
 	}
-
-	resp, err := s.httpClient.Do(req)
+	var resp *http.Response
+	if event.EventType == model.PingEvent || event.EventType == model.ProgressEvent {
+		resp, err = s.httpClient.Do(req)
+	} else {
+		resp, err = s.retriableHttpClient.Do(req)
+	}
 	if err != nil {
 		return err
 	}
@@ -68,13 +72,13 @@ func (s *ServerClient) PublishEvent(event model.TaskEvent) error {
 
 var NoJobAvailable = errors.New("no job available")
 
-func (s *ServerClient) RequestJob(workerName string) (*model.TaskEncode, error) {
+func (s *ServerClient) RequestJob() (*model.RequestJobResponse, error) {
 	req, err := s.request("GET", "/api/v1/job/request", nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("workerName", workerName)
-	resp, err := s.httpClient.Do(req)
+	req.Header.Set("workerName", s.workerName)
+	resp, err := s.retriableHttpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +95,7 @@ func (s *ServerClient) RequestJob(workerName string) (*model.TaskEncode, error) 
 	if err != nil {
 		return nil, err
 	}
-	job := &model.TaskEncode{}
+	job := &model.RequestJobResponse{}
 	err = json.Unmarshal(body, job)
 	if err != nil {
 		return nil, err
@@ -99,20 +103,12 @@ func (s *ServerClient) RequestJob(workerName string) (*model.TaskEncode, error) 
 	return job, nil
 }
 
-func (s *ServerClient) GetDownloadURL(id uuid.UUID) string {
-	return fmt.Sprintf("%s?uuid=%s", s.GetURL("/api/v1/download"), id.String())
-}
-
-func (s *ServerClient) GetChecksumURL(id uuid.UUID) string {
-	return fmt.Sprintf("%s?uuid=%s", s.GetURL("/api/v1/checksum"), id.String())
-}
-
-func (s *ServerClient) GetUploadURL(id uuid.UUID) string {
-	return fmt.Sprintf("%s?uuid=%s", s.GetURL("/api/v1/upload"), id.String())
-}
-
 func (s *ServerClient) GetURL(uri string) string {
 	return fmt.Sprintf("%s%s", s.webServerConfig.Domain, uri)
+}
+
+func (s *ServerClient) GetBaseDomain() string {
+	return s.webServerConfig.Domain
 }
 
 func (s *ServerClient) request(method string, uri string, body io.Reader) (*http.Request, error) {
@@ -129,16 +125,53 @@ func (s *ServerClient) request(method string, uri string, body io.Reader) (*http
 	return req, nil
 }
 
-func (s *ServerClient) PublishPing() error {
+func (s *ServerClient) PublishPingEvent() error {
 	publicIp, err := helper.GetPublicIP()
 	if err != nil {
 		return err
 	}
-	pingEvent := model.TaskEvent{
-		EventType:  model.PingEvent,
-		WorkerName: s.workerName,
-		EventTime:  time.Now(),
-		IP:         publicIp,
+	pingEvent := model.PingEventType{
+		Event: model.Event{
+			EventTime:  time.Now(),
+			WorkerName: s.workerName,
+		},
+		IP: publicIp,
 	}
-	return s.PublishEvent(pingEvent)
+	event, err := envelopEvent(model.PingEvent, pingEvent)
+	if err != nil {
+		return err
+	}
+
+	return s.publishEvent(event)
+}
+
+func (s *ServerClient) PublishTaskEvent(taskEvent *model.TaskEventType) error {
+	taskEvent.WorkerName = s.workerName
+	event, err := envelopEvent(model.NotificationEvent, taskEvent)
+	if err != nil {
+		return err
+	}
+
+	return s.publishEvent(event)
+}
+
+func (s *ServerClient) PublishTaskProgressEvent(taskProgress *model.TaskProgressType) error {
+	taskProgress.WorkerName = s.workerName
+	event, err := envelopEvent(model.ProgressEvent, taskProgress)
+	if err != nil {
+		return err
+	}
+
+	return s.publishEvent(event)
+}
+
+func envelopEvent(eventType model.EventType, eventData interface{}) (*model.EnvelopEvent, error) {
+	b, err := json.Marshal(eventData)
+	if err != nil {
+		return nil, err
+	}
+	return &model.EnvelopEvent{
+		EventType: eventType,
+		EventData: b,
+	}, nil
 }

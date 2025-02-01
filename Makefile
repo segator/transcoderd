@@ -24,21 +24,13 @@ help:	## show this help menu.
 fmt:
 	go fmt  ./...
 
-
-# Install GolangCI-Lint
-install-lint:
-	@echo "Installing GolangCI-Lint $(GOLANGCI_LINT_VERSION)..."
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s $(GOLANGCI_LINT_VERSION)
-
-# Run GolangCI-Lint
+.PHONY: lint
 lint:
-	@echo "Running GolangCI-Lint..."
-	$(GOLANGCI_LINT_BIN) run --config=$(GOLANGCI_LINT_CONFIG)
+	@golangci-lint run
 
-# Run GolangCI-Lint and fix issues automatically
+.PHONY: lint-fix
 lint-fix:
-	@echo "Running GolangCI-Lint with --fix..."
-	$(GOLANGCI_LINT_BIN) run --fix --config=$(GOLANGCI_LINT_CONFIG)
+	@golangci-lint run --fix
 
 
 .PHONY: build

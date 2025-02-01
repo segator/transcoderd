@@ -1,4 +1,4 @@
-package task
+package step
 
 import (
 	"context"
@@ -12,56 +12,35 @@ import (
 	"strings"
 	"time"
 	"transcoder/helper/command"
-	"transcoder/model"
 	"transcoder/worker/config"
+	"transcoder/worker/ffmpeg"
+	"transcoder/worker/job"
 )
 
-var langMapping []PGSTesseractLanguage
-
-type PGSWorker struct {
-	workerConfig *config.Config
+type PGSToSrtStepExecutor struct {
+	pgsConfig *config.PGSConfig
 }
 
-type PGSTesseractLanguage struct {
-	tessLanguage    string
-	mappingLanguage []string
-}
-
-func init() {
-	langMapping = append(langMapping, PGSTesseractLanguage{"deu", []string{"ger", "ge", "de"}})
-	langMapping = append(langMapping, PGSTesseractLanguage{"eus", []string{"baq", "eus"}})
-	langMapping = append(langMapping, PGSTesseractLanguage{"eng", []string{"en", "uk"}})
-	langMapping = append(langMapping, PGSTesseractLanguage{"spa", []string{"es", "esp"}})
-	langMapping = append(langMapping, PGSTesseractLanguage{"deu", []string{"det"}})
-	langMapping = append(langMapping, PGSTesseractLanguage{"fra", []string{"fre"}})
-	langMapping = append(langMapping, PGSTesseractLanguage{"chi_tra", []string{"chi"}})
-	langMapping = append(langMapping, PGSTesseractLanguage{"ell", []string{"gre"}})
-	langMapping = append(langMapping, PGSTesseractLanguage{"isl", []string{"ice"}})
-	langMapping = append(langMapping, PGSTesseractLanguage{"ces", []string{"cze"}})
-}
-func NewPGSWorker(workerConfig *config.Config) *PGSWorker {
-	encodeWorker := &PGSWorker{
-		workerConfig: workerConfig,
+func NewPGSToSrtStepExecutor(pgsConfig *config.PGSConfig) *PGSToSrtStepExecutor {
+	return &PGSToSrtStepExecutor{
+		pgsConfig: pgsConfig,
 	}
-	return encodeWorker
 }
 
-func (p *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS, taskTrack *TaskTracks) (err error) {
-	log.Debugf("Converting PGS To Srt for Job stream %d", taskPGS.PGSID)
-	inputFilePath := taskPGS.PGSSourcePath
-	outputFilePath := taskPGS.PGSTargetPath
+func (d *PGSToSrtStepExecutor) Execute(ctx context.Context, tracker Tracker, jobContext *job.Context, subtitle *ffmpeg.Subtitle) error {
+	log.Debugf("Converting PGS To Srt for sub %d", subtitle.Id)
+	inputFilePath := fmt.Sprintf("%s/%d.sup", jobContext.WorkingDir, subtitle.Id)
+	outputFilePath := fmt.Sprintf("%s/%d.srt", jobContext.WorkingDir, subtitle.Id)
+	language := calculateTesseractLanguage(subtitle.Language)
 
-	language := calculateTesseractLanguage(taskPGS.PGSLanguage)
-	pgsConfig := p.workerConfig.PGSConfig
-
-	PGSToSrtCommand := command.NewCommand(pgsConfig.DotnetPath, pgsConfig.DLLPath,
-		"--tesseractversion", strconv.Itoa(pgsConfig.TessVersion),
-		"--libleptname", pgsConfig.LibleptName,
-		"--libleptversion", strconv.Itoa(pgsConfig.LibleptVersion),
+	PGSToSrtCommand := command.NewCommand(d.pgsConfig.DotnetPath, d.pgsConfig.DLLPath,
+		"--tesseractversion", strconv.Itoa(d.pgsConfig.TessVersion),
+		"--libleptname", d.pgsConfig.LibleptName,
+		"--libleptversion", strconv.Itoa(d.pgsConfig.LibleptVersion),
 		"--input", inputFilePath,
 		"--output", outputFilePath,
 		"--tesseractlanguage", language,
-		"--tesseractdata", pgsConfig.TesseractDataPath)
+		"--tesseractdata", d.pgsConfig.TesseractDataPath).SetWorkDir(jobContext.WorkingDir)
 	outLog := ""
 	startRegex := regexp.MustCompile(`Starting OCR for (\d+) items`)
 	progressRegex := regexp.MustCompile(`Processed item (\d+)`)
@@ -74,7 +53,7 @@ func (p *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS, taskT
 			if err != nil {
 				return
 			}
-			taskTrack.UpdateValue(int64(p))
+			tracker.UpdateValue(int64(p))
 		}
 		startMatch := startRegex.FindStringSubmatch(str)
 		if len(startMatch) > 0 {
@@ -82,7 +61,7 @@ func (p *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS, taskT
 			if err != nil {
 				return
 			}
-			taskTrack.SetTotal(int64(t))
+			tracker.SetTotal(int64(t))
 		}
 
 	})
@@ -134,8 +113,28 @@ func (p *PGSWorker) ConvertPGS(ctx context.Context, taskPGS model.TaskPGS, taskT
 		return fmt.Errorf("could not write to file: %v", err)
 	}
 
-	log.Debugf("Converted PGS To Srt for Job stream %d", taskPGS.PGSID)
+	log.Debugf("Converted PGS To Srt for sub %d", subtitle.Id)
 	return err
+}
+
+var langMapping []PGSTesseractLanguage
+
+type PGSTesseractLanguage struct {
+	tessLanguage    string
+	mappingLanguage []string
+}
+
+func init() {
+	langMapping = append(langMapping, PGSTesseractLanguage{"deu", []string{"ger", "ge", "de"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"eus", []string{"baq", "eus"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"eng", []string{"en", "uk"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"spa", []string{"es", "esp"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"deu", []string{"det"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"fra", []string{"fre"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"chi_tra", []string{"chi"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"ell", []string{"gre"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"isl", []string{"ice"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"ces", []string{"cze"}})
 }
 
 func calculateTesseractLanguage(language string) string {

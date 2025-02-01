@@ -56,13 +56,13 @@ func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) handleWorkerEvent(writer http.ResponseWriter, request *http.Request) {
-	taskEvent := &model.TaskEvent{}
-	err := json.NewDecoder(request.Body).Decode(taskEvent)
+	envelopEvent := &model.EnvelopEvent{}
+	err := json.NewDecoder(request.Body).Decode(envelopEvent)
 	if webError(writer, err, 500) {
 		return
 	}
 
-	err = s.scheduler.HandleWorkerEvent(s.ctx, taskEvent)
+	err = s.scheduler.HandleWorkerEvent(s.ctx, envelopEvent)
 	if webError(writer, err, 500) {
 		return
 	}

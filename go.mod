@@ -1,6 +1,6 @@
 module transcoder
 
-go 1.22.0
+go 1.23.0
 
 toolchain go1.23.3
 
@@ -15,9 +15,8 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/minio/selfupdate v0.6.0
 	github.com/sirupsen/logrus v1.9.3
-	github.com/spf13/pflag v1.0.5
+	github.com/spf13/pflag v1.0.6
 	github.com/spf13/viper v1.19.0
-	gopkg.in/errgo.v2 v2.1.0
 	gopkg.in/vansante/go-ffprobe.v2 v2.2.1
 )
 

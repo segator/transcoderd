@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.1.0](https://github.com/segator/transcoderd/compare/v2.0.1...v2.1.0) (2025-01-20)
+
+
+### 🎉 Features
+
+* PGS conversion shows progress in worker cli ([b890256](https://github.com/segator/transcoderd/commit/b89025601403630e5153fb7d55a3fbfe0af6dac9))
+
+
+### 🐛 Bug Fixes
+
+* some fixes after linter corrections ([b890256](https://github.com/segator/transcoderd/commit/b89025601403630e5153fb7d55a3fbfe0af6dac9))
+* uncomment something commented by accident ([277fbce](https://github.com/segator/transcoderd/commit/277fbcee8afa5353561838034512fb2ee51fe74a))
+
+
+### 📝 Documentation
+
+* update readme latest changes ([b890256](https://github.com/segator/transcoderd/commit/b89025601403630e5153fb7d55a3fbfe0af6dac9))
+
 ## [2.0.1](https://github.com/segator/transcoderd/compare/v2.0.0...v2.0.1) (2025-01-20)
 
 

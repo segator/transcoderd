@@ -1,4 +1,4 @@
-package task
+package worker
 
 import (
 	"context"
@@ -7,23 +7,24 @@ import (
 	"os"
 	"sync"
 	"transcoder/update"
+	"transcoder/worker/console"
 	"transcoder/worker/serverclient"
 
 	"time"
 )
 
 type ServerCoordinator struct {
-	printer      *ConsoleWorkerPrinter
+	logger       console.LeveledLogger
 	serverClient *serverclient.ServerClient
-	worker       *EncodeWorker
+	worker       *JobExecutor
 	updater      *update.Updater
 }
 
-func NewServerCoordinator(serverClient *serverclient.ServerClient, worker *EncodeWorker, updater *update.Updater, printer *ConsoleWorkerPrinter) *ServerCoordinator {
+func NewServerCoordinator(serverClient *serverclient.ServerClient, worker *JobExecutor, updater *update.Updater, logger console.LeveledLogger) *ServerCoordinator {
 	coordinator := &ServerCoordinator{
 		serverClient: serverClient,
 		worker:       worker,
-		printer:      printer,
+		logger:       logger,
 		updater:      updater,
 	}
 	return coordinator
@@ -52,14 +53,13 @@ func (q *ServerCoordinator) stop() {
 
 func (q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
 	// Declare Worker Unique ServerCoordinator
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Second * 30):
-			if err := q.serverClient.PublishPing(); err != nil {
-				q.printer.Errorf("Error Publishing Ping Event: %v", err)
+		case <-time.After(time.Second * 5):
+			if err := q.serverClient.PublishPingEvent(); err != nil {
+				q.logger.Errorf("Error Publishing Ping Event: %v", err)
 			}
 		}
 	}
@@ -74,24 +74,24 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 			if q.worker.AcceptJobs() {
 				release, requireUpdate, err := q.updater.CheckForUpdate()
 				if err != nil {
-					q.printer.Errorf("Error Checking For Update: %v", err)
+					q.logger.Errorf("Error Checking For Update: %v", err)
 					continue
 				}
 				if requireUpdate {
-					q.printer.Log("New version available %s,exiting ...", release.TagName)
+					q.logger.Logf("New version available %s,exiting ...", release.TagName)
 					os.Exit(update.ExitCode)
 				}
 
-				taskJob, err := q.serverClient.RequestJob(q.worker.GetName())
+				requestJobResponse, err := q.serverClient.RequestJob()
 				if err != nil {
 					if !errors.Is(err, serverclient.NoJobAvailable) {
-						q.printer.Errorf("Error Requesting Job: %v", err)
+						q.logger.Errorf("Error Requesting Job: %v", err)
 					}
 					continue
 				}
 
-				if err := q.worker.Execute(taskJob); err != nil {
-					q.printer.Errorf("Error Preparing Job Execution: %v", err)
+				if err := q.worker.ExecuteJob(requestJobResponse.Id, requestJobResponse.EventID); err != nil {
+					q.logger.Errorf("Error Preparing Job Execution: %v", err)
 				}
 			}
 		}

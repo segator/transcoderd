@@ -29,8 +29,8 @@ type Scheduler interface {
 	GetUploadJobWriter(ctx context.Context, uuid string, workerName string) (*UploadJobStream, error)
 	GetDownloadJobWriter(ctx context.Context, uuid string, workerName string) (*DownloadJobStream, error)
 	GetChecksum(ctx context.Context, uuid string) (string, error)
-	RequestJob(ctx context.Context, workerName string) (*model.TaskEncode, error)
-	HandleWorkerEvent(ctx context.Context, taskEvent *model.TaskEvent) error
+	RequestJob(ctx context.Context, workerName string) (*model.RequestJobResponse, error)
+	HandleWorkerEvent(ctx context.Context, taskEvent *model.EnvelopEvent) error
 	CancelJob(ctx context.Context, id string) error
 }
 
@@ -51,7 +51,7 @@ type RuntimeScheduler struct {
 	handleEventMu   sync.Mutex
 }
 
-func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*model.TaskEncode, error) {
+func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*model.RequestJobResponse, error) {
 	r.jobRequestMu.Lock()
 	defer r.jobRequestMu.Unlock()
 	video, err := r.repo.RetrieveQueuedJob(ctx)
@@ -64,13 +64,13 @@ func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 	if video == nil {
 		return nil, nil
 	}
-	newEvent := video.AddEvent(model.NotificationEvent, model.JobNotification, model.AssignedNotificationStatus)
+	newEvent := video.AddEvent(model.JobNotification, model.AssignedNotificationStatus)
 	newEvent.WorkerName = workerName
 	if err = r.repo.AddNewTaskEvent(ctx, newEvent); err != nil {
 		return nil, err
 	}
 
-	task := &model.TaskEncode{
+	task := &model.RequestJobResponse{
 		Id:      video.Id,
 		EventID: video.Events.GetLatest().EventID,
 	}
@@ -82,17 +82,11 @@ func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 	return task, nil
 }
 
-func (r *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, jobEvent *model.TaskEvent) error {
+func (r *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, envelopedEvent *model.EnvelopEvent) error {
 	r.handleEventMu.Lock()
 	defer r.handleEventMu.Unlock()
-	if err := r.processEvent(ctx, jobEvent); err != nil {
+	if err := r.processEvent(ctx, envelopedEvent); err != nil {
 		return err
-	}
-
-	if jobEvent.IsCompleted() {
-		if err := r.completeJob(ctx, jobEvent); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -112,7 +106,7 @@ func (r *RuntimeScheduler) CancelJob(ctx context.Context, id string) error {
 	case status == model.CanceledNotificationStatus:
 		return fmt.Errorf("job already canceled")
 	case status == model.AssignedNotificationStatus, status == model.StartedNotificationStatus:
-		newEvent := job.AddEventComplete(model.NotificationEvent, model.JobNotification, model.CanceledNotificationStatus, "Job canceled by user")
+		newEvent := job.AddEventComplete(model.JobNotification, model.CanceledNotificationStatus, "Job canceled by user")
 		err = r.repo.AddNewTaskEvent(ctx, newEvent)
 		if err != nil {
 			return err
@@ -121,29 +115,60 @@ func (r *RuntimeScheduler) CancelJob(ctx context.Context, id string) error {
 	return fmt.Errorf("job %s is in unknown state", id)
 }
 
-func (r *RuntimeScheduler) processEvent(ctx context.Context, taskEvent *model.TaskEvent) error {
+func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.EnvelopEvent) error {
 	var err error
-	switch taskEvent.EventType {
+	switch event.EventType {
 	case model.PingEvent:
-		err = r.repo.PingServerUpdate(ctx, taskEvent.WorkerName, taskEvent.IP)
+		pingEvent := model.PingEventType{}
+		if err = json.Unmarshal(event.EventData, &pingEvent); err != nil {
+			return err
+		}
+		return r.repo.PingServerUpdate(ctx, pingEvent)
 	case model.NotificationEvent:
-		err = r.repo.AddNewTaskEvent(ctx, taskEvent)
+		taskEvent := model.TaskEventType{}
+		if err = json.Unmarshal(event.EventData, &taskEvent); err != nil {
+			return err
+		}
+		if err = r.repo.AddNewTaskEvent(ctx, &taskEvent); err != nil {
+			return err
+		}
+		if !taskEvent.IsCompleted() {
+			return nil
+		}
+		if err = r.completeJob(ctx, &taskEvent); err != nil {
+			return err
+		}
+	case model.ProgressEvent:
+		taskProgress := model.TaskProgressType{}
+		if err = json.Unmarshal(event.EventData, &taskProgress); err != nil {
+			return err
+		}
+		if taskProgress.Status != model.ProgressingTaskProgressTypeStatus {
+			if err = r.repo.DeleteProgressJob(ctx, taskProgress.ProgressID, taskProgress.NotificationType); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err = r.repo.ProgressJob(ctx, &taskProgress); err != nil {
+			return err
+		}
+
 	default:
-		err = fmt.Errorf("unknown event type %s", taskEvent.EventType)
+		return fmt.Errorf("unknown event type %s", event.EventType)
 	}
 
-	return err
+	return nil
 }
 
-func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.TaskEvent) error {
-	video, err := r.repo.GetJob(ctx, jobEvent.Id.String())
+func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.TaskEventType) error {
+	video, err := r.repo.GetJob(ctx, jobEvent.JobId.String())
 	if err != nil {
 		return err
 	}
 	sourcePath := filepath.Join(r.config.SourcePath, video.SourcePath)
 	target := filepath.Join(r.config.SourcePath, video.TargetPath)
 	l := log.WithFields(log.Fields{
-		"job_id":      jobEvent.Id.String(),
+		"job_id":      jobEvent.JobId.String(),
 		"source_path": sourcePath,
 		"target_path": target,
 	})
@@ -203,17 +228,25 @@ func (r *RuntimeScheduler) start(ctx context.Context) {
 }
 
 func (r *RuntimeScheduler) scheduleRoutine(ctx context.Context) {
+	progressTicker := time.NewTicker(time.Minute * 1)
+	maintenanceTicker := time.NewTicker(r.config.ScheduleTime)
+	defer progressTicker.Stop()
+	defer maintenanceTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case checksumPath := <-r.checksumChan:
 			r.pathChecksumMap[checksumPath.path] = checksumPath.checksum
-		case <-time.After(r.config.ScheduleTime):
-			if err := r.jobMaintenance(ctx); err != nil {
-				log.Errorf("Error on job maintenance %s", err)
+		case <-progressTicker.C:
+			if err := r.progressJobMaitenance(ctx); err != nil {
+				log.Errorf("Error on progress job maintenance: %s", err)
 			}
-
+		case <-maintenanceTicker.C:
+			if err := r.jobMaintenance(ctx); err != nil {
+				log.Errorf("Error on job maintenance: %s", err)
+			}
 		}
 	}
 }
@@ -289,7 +322,7 @@ func (r *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 			return err
 		}
 
-		var eventsToAdd []*model.TaskEvent
+		var eventsToAdd []*model.TaskEventType
 		if job == nil {
 			job, err = r.newJob(ctx, tx, jobRequest)
 			if err != nil {
@@ -298,7 +331,7 @@ func (r *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 			eventsToAdd = job.Events
 		} else {
 			// If job exist we check if we can retry the job
-			eventsToAdd, err = r.updateTerminatedJobByRequest(job, jobRequest)
+			eventsToAdd, err = r.updateJobByRequest(job, jobRequest)
 			if err != nil {
 				return err
 			}
@@ -333,7 +366,7 @@ func (r *RuntimeScheduler) newJob(ctx context.Context, tx repository.Repository,
 	if err != nil {
 		return nil, err
 	}
-	job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
+	job.AddEvent(model.JobNotification, model.QueuedNotificationStatus)
 	return job, nil
 }
 
@@ -466,6 +499,21 @@ func (r *RuntimeScheduler) stop() {
 
 }
 
+func (r *RuntimeScheduler) progressJobMaitenance(ctx context.Context) error {
+	progressJobs, err := r.repo.GetAllProgressJobs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, progressJob := range progressJobs {
+		if time.Since(progressJob.EventTime) > time.Hour*24 {
+			if err = r.repo.DeleteProgressJob(ctx, progressJob.ProgressID, progressJob.NotificationType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (r *RuntimeScheduler) jobMaintenance(ctx context.Context) error {
 	if err := r.queuedJobMaintenance(ctx); err != nil {
 		return err
@@ -487,7 +535,7 @@ func (r *RuntimeScheduler) queuedJobMaintenance(ctx context.Context) error {
 		// Check if source file exists
 		_, err = os.Stat(sourcePath)
 		if os.IsNotExist(err) {
-			newEvent := job.AddEventComplete(model.NotificationEvent, model.JobNotification, model.FailedNotificationStatus, "job source file not found")
+			newEvent := job.AddEventComplete(model.JobNotification, model.FailedNotificationStatus, "job source file not found")
 			if err = r.repo.AddNewTaskEvent(ctx, newEvent); err != nil {
 				return err
 			}
@@ -525,8 +573,8 @@ func (r *RuntimeScheduler) assignedJobMaintenance(ctx context.Context) error {
 	}
 	for _, taskEvent := range taskEvents {
 		if taskEvent.IsAssigned() {
-			log.Infof("Rescheduling %s after job timeout", taskEvent.Id.String())
-			job, err := r.repo.GetJob(ctx, taskEvent.Id.String())
+			log.Infof("Rescheduling %s after job timeout", taskEvent.JobId.String())
+			job, err := r.repo.GetJob(ctx, taskEvent.JobId.String())
 			if err != nil {
 				return err
 			}
@@ -544,20 +592,20 @@ func (r *RuntimeScheduler) assignedJobMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (r *RuntimeScheduler) updateTerminatedJobByRequest(job *model.Job, jobRequest *model.JobRequest) ([]*model.TaskEvent, error) {
-	var eventsToAdd []*model.TaskEvent
+func (r *RuntimeScheduler) updateJobByRequest(job *model.Job, jobRequest *model.JobRequest) ([]*model.TaskEventType, error) {
+	var eventsToAdd []*model.TaskEventType
 	lastEvent := job.Events.GetLatestPerNotificationType(model.JobNotification)
 	status := lastEvent.Status
 
 	switch {
 	case jobRequest.ForceAssigned && (status == model.AssignedNotificationStatus || status == model.StartedNotificationStatus):
-		eventsToAdd = append(eventsToAdd, job.AddEvent(model.NotificationEvent, model.JobNotification, model.CanceledNotificationStatus))
-		eventsToAdd = append(eventsToAdd, job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus))
+		eventsToAdd = append(eventsToAdd, job.AddEvent(model.JobNotification, model.CanceledNotificationStatus))
+		eventsToAdd = append(eventsToAdd, job.AddEvent(model.JobNotification, model.QueuedNotificationStatus))
 
 	case jobRequest.ForceCompleted && status == model.CompletedNotificationStatus,
 		jobRequest.ForceFailed && status == model.FailedNotificationStatus,
 		jobRequest.ForceCanceled && status == model.CanceledNotificationStatus:
-		requeueEvent := job.AddEvent(model.NotificationEvent, model.JobNotification, model.QueuedNotificationStatus)
+		requeueEvent := job.AddEvent(model.JobNotification, model.QueuedNotificationStatus)
 		eventsToAdd = append(eventsToAdd, requeueEvent)
 	default:
 		return nil, fmt.Errorf("%s (%s) job is in %s state by %s, can not be rescheduled", job.Id.String(), jobRequest.SourcePath, lastEvent.Status, lastEvent.WorkerName)

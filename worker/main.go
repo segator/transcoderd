@@ -13,8 +13,9 @@ import (
 	"transcoder/cmd"
 	"transcoder/update"
 	"transcoder/version"
+	"transcoder/worker/console"
 	"transcoder/worker/serverclient"
-	"transcoder/worker/task"
+	"transcoder/worker/worker"
 )
 
 var (
@@ -50,6 +51,8 @@ func init() {
 	pflag.String("worker.ffmpegConfig.videoCodec", "libx265", "FFMPEG Video Codec")
 	pflag.String("worker.ffmpegConfig.videoPreset", "medium", "FFMPEG Video Preset")
 	pflag.String("worker.ffmpegConfig.videoProfile", "main10", "FFMPEG Video Profile")
+	pflag.String("worker.ffmpegConfig.extraArgs", "", "FFMPEG Extra Args")
+	pflag.Int("worker.verifyDeltaTime", 60, "FFMPEG Verify Delta Time in seconds, is the max range of time that the video can be different from the original, if is superior then the video is marked as invalid")
 	pflag.Int("worker.ffmpegConfig.videoCRF", 21, "FFMPEG Video CRF")
 	pflag.Duration("worker.startAfter", 0, "Accept jobs only After HH:mm")
 	pflag.Duration("worker.stopAfter", 0, "Stop Accepting new Jobs after HH:mm")
@@ -94,17 +97,19 @@ func main() {
 }
 
 func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) error {
-	printer := task.NewConsoleWorkerPrinter()
+	renderService := console.NewRenderService()
+	renderService.Run(wg, ctx)
+
 	serverClient := serverclient.NewServerClient(opts.Web, opts.Worker.Name)
 
-	if err := serverClient.PublishPing(); err != nil {
+	if err := serverClient.PublishPingEvent(); err != nil {
 		return err
 	}
-	encodeWorker := task.NewEncodeWorker(opts.Worker, serverClient, printer)
 
+	encodeWorker := worker.NewEncodeWorker(opts.Worker, serverClient, renderService)
 	encodeWorker.Run(wg, ctx)
 
-	coordinator := task.NewServerCoordinator(serverClient, encodeWorker, updater, printer)
+	coordinator := worker.NewServerCoordinator(serverClient, encodeWorker, updater, renderService.Logger())
 	coordinator.Run(wg, ctx)
 	return nil
 }

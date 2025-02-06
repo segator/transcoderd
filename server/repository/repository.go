@@ -18,18 +18,21 @@ var (
 type Repository interface {
 	getConnection() (SQLDBOperations, error)
 	Initialize(ctx context.Context) error
-	PingServerUpdate(ctx context.Context, name string, ip string) error
-	GetTimeoutJobs(ctx context.Context, timeout time.Duration) ([]*model.TaskEvent, error)
+	PingServerUpdate(ctx context.Context, pingEventType model.PingEventType) error
+	GetTimeoutJobs(ctx context.Context, timeout time.Duration) ([]*model.TaskEventType, error)
 	GetJobs(ctx context.Context) (*[]model.Job, error)
 	GetJobsByStatus(ctx context.Context, status model.NotificationStatus) (jobs []*model.Job, returnError error)
 	GetJob(ctx context.Context, uuid string) (*model.Job, error)
 	GetJobByPath(ctx context.Context, path string) (*model.Job, error)
 	AddJob(ctx context.Context, video *model.Job) error
 	UpdateJob(ctx context.Context, video *model.Job) error
-	AddNewTaskEvent(ctx context.Context, event *model.TaskEvent) error
+	ProgressJob(ctx context.Context, progressJob *model.TaskProgressType) error
+	DeleteProgressJob(ctx context.Context, progressId string, notificationType model.NotificationType) error
+	AddNewTaskEvent(ctx context.Context, event *model.TaskEventType) error
 	WithTransaction(ctx context.Context, transactionFunc func(ctx context.Context, tx Repository) error) error
 	GetWorker(ctx context.Context, name string) (*model.Worker, error)
 	RetrieveQueuedJob(ctx context.Context) (*model.Job, error)
+	GetAllProgressJobs(ctx context.Context) ([]model.TaskProgressType, error)
 }
 
 type SQLDBOperations interface {
@@ -332,7 +335,7 @@ func (s *SQLRepository) getJobsByStatus(ctx context.Context, tx SQLDBOperations,
 	return jobs, nil
 }
 
-func (s *SQLRepository) GetTimeoutJobs(ctx context.Context, timeout time.Duration) (taskEvent []*model.TaskEvent, returnError error) {
+func (s *SQLRepository) GetTimeoutJobs(ctx context.Context, timeout time.Duration) (taskEvent []*model.TaskEventType, returnError error) {
 	conn, err := s.getConnection()
 	if err != nil {
 		return nil, err
@@ -412,16 +415,16 @@ func (s *SQLRepository) getJobs(ctx context.Context, tx SQLDBOperations) (*[]mod
 	return &jobs, nil
 }
 
-func (s *SQLRepository) getTaskEvents(ctx context.Context, tx SQLDBOperations, uuid string) ([]*model.TaskEvent, error) {
+func (s *SQLRepository) getTaskEvents(ctx context.Context, tx SQLDBOperations, uuid string) ([]*model.TaskEventType, error) {
 	rows, err := tx.QueryContext(ctx, "select * from job_events where job_id=$1 order by event_time asc", uuid)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var taskEvents []*model.TaskEvent
+	var taskEvents []*model.TaskEventType
 	for rows.Next() {
-		event := model.TaskEvent{}
-		err := rows.Scan(&event.Id, &event.EventID, &event.WorkerName, &event.EventTime, &event.EventType, &event.NotificationType, &event.Status, &event.Message)
+		event := model.TaskEventType{}
+		err := rows.Scan(&event.JobId, &event.EventID, &event.WorkerName, &event.EventTime, &event.NotificationType, &event.Status, &event.Message)
 		if err != nil {
 			return nil, err
 		}
@@ -494,33 +497,56 @@ func (s *SQLRepository) GetJobByPath(ctx context.Context, path string) (video *m
 	return s.getJobByPath(ctx, conn, path)
 }
 
-func (s *SQLRepository) PingServerUpdate(ctx context.Context, name string, ip string) (returnError error) {
+func (s *SQLRepository) PingServerUpdate(ctx context.Context, pingEventType model.PingEventType) (returnError error) {
 	conn, err := s.getConnection()
 	if err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, "INSERT INTO workers (name, ip,last_seen ) VALUES ($1,$2,$3) ON CONFLICT (name) DO UPDATE SET ip = $2, last_seen=$3;", name, ip, time.Now())
+	_, err = conn.ExecContext(ctx, "INSERT INTO workers (name, ip,last_seen ) VALUES ($1,$2,$3) ON CONFLICT (name) DO UPDATE SET ip = $2, last_seen=$3;", pingEventType.WorkerName, pingEventType.IP, time.Now())
 	return err
 }
 
-func (s *SQLRepository) AddNewTaskEvent(ctx context.Context, event *model.TaskEvent) (returnError error) {
+func (s *SQLRepository) AddNewTaskEvent(ctx context.Context, event *model.TaskEventType) (returnError error) {
 	conn, err := s.getConnection()
 	if err != nil {
 		return err
 	}
 	return s.addNewTaskEvent(ctx, conn, event)
-
 }
 
-func (s *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations, event *model.TaskEvent) error {
-	rows, err := tx.QueryContext(ctx, "select COALESCE(max(job_event_id),-1) from job_events where job_id=$1", event.Id.String())
+func (s *SQLRepository) ProgressJob(ctx context.Context, progressJob *model.TaskProgressType) (returnError error) {
+	conn, err := s.getConnection()
+	if err != nil {
+		return err
+	}
+	return s.insertOrUpdateProgressJob(ctx, conn, progressJob)
+}
+
+func (s *SQLRepository) DeleteProgressJob(ctx context.Context, progressId string, notificationType model.NotificationType) error {
+	conn, err := s.getConnection()
+	if err != nil {
+		return err
+	}
+	return s.deleteProgressJob(ctx, conn, progressId, notificationType)
+}
+
+func (s *SQLRepository) GetAllProgressJobs(ctx context.Context) ([]model.TaskProgressType, error) {
+	conn, err := s.getConnection()
+	if err != nil {
+		return nil, err
+	}
+	return s.getAllProgressJobs(ctx, conn)
+}
+
+func (s *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations, event *model.TaskEventType) error {
+	rows, err := tx.QueryContext(ctx, "select COALESCE(max(job_event_id),-1) from job_events where job_id=$1", event.JobId.String())
 	if err != nil {
 		return err
 	}
 
 	videoEventID := -1
 	if rows.Next() {
-		err := rows.Scan(&videoEventID)
+		err = rows.Scan(&videoEventID)
 		if err != nil {
 			return err
 		}
@@ -528,11 +554,11 @@ func (s *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations,
 	rows.Close()
 
 	if videoEventID+1 != event.EventID {
-		return fmt.Errorf("EventID for %s not match,lastReceived %d, new %d", event.Id.String(), videoEventID, event.EventID)
+		return fmt.Errorf("EventID for %s not match,lastReceived %d, new %d", event.JobId.String(), videoEventID, event.EventID)
 	}
 
-	_, err = tx.ExecContext(ctx, "INSERT INTO job_events (job_id, job_event_id,worker_name,event_time,event_type,notification_type,status,message)"+
-		" VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", event.Id.String(), event.EventID, event.WorkerName, time.Now(), event.EventType, event.NotificationType, event.Status, event.Message)
+	_, err = tx.ExecContext(ctx, "INSERT INTO job_events (job_id, job_event_id,worker_name,event_time,notification_type,status,message)"+
+		" VALUES ($1,$2,$3,$4,$5,$6,$7)", event.JobId.String(), event.EventID, event.WorkerName, time.Now(), event.NotificationType, event.Status, event.Message)
 	return err
 }
 func (s *SQLRepository) AddJob(ctx context.Context, job *model.Job) error {
@@ -562,21 +588,21 @@ func (s *SQLRepository) updateJob(ctx context.Context, tx SQLDBOperations, job *
 	return err
 }
 
-func (s *SQLRepository) getTimeoutJobs(ctx context.Context, tx SQLDBOperations, timeout time.Duration) ([]*model.TaskEvent, error) {
+func (s *SQLRepository) getTimeoutJobs(ctx context.Context, tx SQLDBOperations, timeout time.Duration) ([]*model.TaskEventType, error) {
 	timeoutDate := time.Now().Add(-timeout)
 
 	rows, err := tx.QueryContext(ctx, "select v.* from job_events v right join "+
 		"(select job_id,max(job_event_id) as job_event_id  from job_events where notification_type='Job'  group by job_id) as m "+
 		"on m.job_id=v.job_id and m.job_event_id=v.job_event_id where status in ('assigned','started') and v.event_time < $1::timestamptz", timeoutDate)
-
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
-	var taskEvents []*model.TaskEvent
+	var taskEvents []*model.TaskEventType
 	for rows.Next() {
-		event := model.TaskEvent{}
-		err := rows.Scan(&event.Id, &event.EventID, &event.WorkerName, &event.EventTime, &event.EventType, &event.NotificationType, &event.Status, &event.Message)
+		event := model.TaskEventType{}
+		err := rows.Scan(&event.JobId, &event.EventID, &event.WorkerName, &event.EventTime, &event.NotificationType, &event.Status, &event.Message)
 		if err != nil {
 			return nil, err
 		}
@@ -616,19 +642,65 @@ func (s *SQLRepository) WithTransaction(ctx context.Context, transactionFunc fun
 
 func (s *SQLRepository) queuedJob(ctx context.Context, tx SQLDBOperations) (*model.Job, error) {
 	rows, err := tx.QueryContext(ctx, "select job_id, job_event_id from job_status where notification_type='Job' and status='queued' order by event_time asc limit 1")
-
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	if rows.Next() {
-		event := model.TaskEvent{}
-		err := rows.Scan(&event.Id, &event.EventID)
+		event := model.TaskEventType{}
+		err := rows.Scan(&event.JobId, &event.EventID)
 		if err != nil {
 			return nil, err
 		}
-		return s.getJob(ctx, tx, event.Id.String())
+		return s.getJob(ctx, tx, event.JobId.String())
 	}
 
 	return nil, fmt.Errorf("%w, %s", ErrElementNotFound, "No jobs found")
+}
+
+func (s *SQLRepository) insertOrUpdateProgressJob(ctx context.Context, conn SQLDBOperations, jp *model.TaskProgressType) error {
+	query := `
+        INSERT INTO job_progress
+        (progress_id, notification_type,job_id,worker_name, percent, eta)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (progress_id,notification_type)
+        DO UPDATE SET
+            percent = $5,            
+            eta = $6,
+            last_update = now()`
+
+	_, err := conn.ExecContext(ctx, query, jp.ProgressID, jp.NotificationType, jp.JobId, jp.WorkerName, jp.Percent, jp.ETA.Seconds())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *SQLRepository) deleteProgressJob(ctx context.Context, conn SQLDBOperations, progressId string, notificationType model.NotificationType) error {
+	_, err := conn.ExecContext(ctx, "DELETE FROM job_progress WHERE progress_id=$1 and notification_type=$2", progressId, notificationType)
+	if err != nil {
+		return err
+	}
+	return nil
+
+}
+
+func (s *SQLRepository) getAllProgressJobs(ctx context.Context, conn SQLDBOperations) ([]model.TaskProgressType, error) {
+	rows, err := conn.QueryContext(ctx, "select progress_id, notification_type,job_id,worker_name, percent, eta, last_update from job_progress")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var progressJobs []model.TaskProgressType
+	var etaSeconds float64
+	if rows.Next() {
+		progress := model.TaskProgressType{}
+		err = rows.Scan(&progress.ProgressID, &progress.NotificationType, &progress.JobId, &progress.WorkerName, &progress.Percent, &etaSeconds, &progress.EventTime)
+		if err != nil {
+			return nil, err
+		}
+		progress.ETA = time.Duration(etaSeconds) * time.Second
+		progressJobs = append(progressJobs, progress)
+	}
+	return progressJobs, nil
 }

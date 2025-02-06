@@ -1,10 +1,9 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
-	"os"
 	"time"
 	"transcoder/helper/max"
 )
@@ -13,28 +12,26 @@ type EventType string
 type NotificationType string
 type NotificationStatus string
 type JobAction string
-type TaskEvents []*TaskEvent
+type TaskEvents []*TaskEventType
 
 const (
 	PingEvent         EventType = "Ping"
 	NotificationEvent EventType = "Notification"
+	ProgressEvent     EventType = "Progress"
 
-	JobNotification        NotificationType = "Job"
-	DownloadNotification   NotificationType = "Download"
-	UploadNotification     NotificationType = "Upload"
-	MKVExtractNotification NotificationType = "MKVExtract"
-	FFProbeNotification    NotificationType = "FFProbe"
-	PGSNotification        NotificationType = "PGS"
-	FFMPEGSNotification    NotificationType = "FFMPEG"
-
+	JobNotification             NotificationType   = "Job"
+	DownloadNotification        NotificationType   = "Download"
+	UploadNotification          NotificationType   = "Upload"
+	MKVExtractNotification      NotificationType   = "MKVExtract"
+	PGSNotification             NotificationType   = "PGS"
+	FFMPEGSNotification         NotificationType   = "FFMPEG"
+	JobVerify                   NotificationType   = "JobVerify"
 	QueuedNotificationStatus    NotificationStatus = "queued"
 	AssignedNotificationStatus  NotificationStatus = "assigned"
 	StartedNotificationStatus   NotificationStatus = "started"
 	CompletedNotificationStatus NotificationStatus = "completed"
 	CanceledNotificationStatus  NotificationStatus = "canceled"
 	FailedNotificationStatus    NotificationStatus = "failed"
-
-	CancelJob JobAction = "cancel"
 )
 
 type Identity interface {
@@ -64,11 +61,6 @@ type Worker struct {
 	LastSeen  time.Time
 }
 
-type ControlEvent struct {
-	Event       *TaskEncode
-	ControlChan chan interface{}
-}
-
 type JobEvent struct {
 	Id     uuid.UUID `json:"id"`
 	Action JobAction `json:"action"`
@@ -76,16 +68,9 @@ type JobEvent struct {
 
 type JobType string
 
-type TaskEncode struct {
+type RequestJobResponse struct {
 	Id      uuid.UUID `json:"id"`
 	EventID int       `json:"eventID"`
-}
-
-type WorkTaskEncode struct {
-	TaskEncode     *TaskEncode
-	WorkDir        string
-	SourceFilePath string
-	TargetFilePath string
 }
 
 type TaskPGS struct {
@@ -95,124 +80,68 @@ type TaskPGS struct {
 	PGSTargetPath string
 }
 
-type TaskPGSResponse struct {
-	Id    uuid.UUID `json:"id"`
-	PGSID int       `json:"pgsid"`
-	Srt   []byte    `json:"srt"`
-	Err   string    `json:"error"`
-	Queue string    `json:"queue"`
+type EnvelopEvent struct {
+	EventType EventType       `json:"eventType"`
+	EventData json.RawMessage `json:"eventData"`
 }
 
-func (t TaskEncode) getUUID() uuid.UUID {
-	return t.Id
+type Event struct {
+	EventTime  time.Time `json:"eventTime"`
+	WorkerName string    `json:"workerName"`
 }
-
-type TaskEvent struct {
-	Id               uuid.UUID          `json:"id"`
+type TaskEventType struct {
+	Event
+	JobId            uuid.UUID          `json:"Id"`
 	EventID          int                `json:"eventID"`
-	EventType        EventType          `json:"eventType"`
-	WorkerName       string             `json:"workerName"`
-	EventTime        time.Time          `json:"eventTime"`
-	IP               string             `json:"ip"`
 	NotificationType NotificationType   `json:"notificationType"`
 	Status           NotificationStatus `json:"status"`
 	Message          string             `json:"message"`
 }
 
-type TaskStatus struct {
-	LastState *TaskEvent
-	Task      *WorkTaskEncode
+type PingEventType struct {
+	Event
+	IP string `json:"ip"`
 }
 
-func (e TaskEvent) IsAssigned() bool {
-	if e.EventType != NotificationEvent {
-		return false
-	}
+type TaskProgressStatus string
+
+const (
+	ProgressingTaskProgressTypeStatus TaskProgressStatus = "progressing"
+	DoneTaskProgressTypeStatus        TaskProgressStatus = "done"
+	FailureTaskProgressTypeStatus     TaskProgressStatus = "failure"
+)
+
+type TaskProgressType struct {
+	Event
+	JobId            uuid.UUID          `json:"jobId"`
+	ProgressID       string             `json:"progressID"`
+	Percent          float64            `json:"percent"`
+	ETA              time.Duration      `json:"eta"`
+	NotificationType NotificationType   `json:"notificationType"`
+	Status           TaskProgressStatus `json:"status"`
+}
+
+func (e TaskEventType) IsAssigned() bool {
 	if e.NotificationType == JobNotification && (e.Status == AssignedNotificationStatus || e.Status == StartedNotificationStatus) {
 		return true
 	}
 	return false
 }
 
-func (e TaskEvent) IsCompleted() bool {
-	if e.EventType != NotificationEvent {
-		return false
-	}
+func (e TaskEventType) IsCompleted() bool {
 	if e.NotificationType == JobNotification && e.Status == CompletedNotificationStatus {
 		return true
 	}
 	return false
 }
 
-func (e TaskEvent) IsDownloading() bool {
-	if e.EventType != NotificationEvent {
-		return false
-	}
-	if e.NotificationType == DownloadNotification && e.Status == StartedNotificationStatus {
-		return true
-	}
-
-	if e.NotificationType == JobNotification && (e.Status == StartedNotificationStatus) {
-		return true
-	}
-	return false
-}
-
-func (e TaskEvent) IsEncoding() bool {
-	if e.EventType != NotificationEvent {
-		return false
-	}
-	if e.NotificationType == DownloadNotification && e.Status == CompletedNotificationStatus {
-		return true
-	}
-
-	if e.NotificationType == MKVExtractNotification && (e.Status == StartedNotificationStatus || e.Status == CompletedNotificationStatus) {
-		return true
-	}
-	if e.NotificationType == FFProbeNotification && (e.Status == StartedNotificationStatus || e.Status == CompletedNotificationStatus) {
-		return true
-	}
-	if e.NotificationType == PGSNotification && (e.Status == StartedNotificationStatus || e.Status == CompletedNotificationStatus) {
-		return true
-	}
-	if e.NotificationType == FFMPEGSNotification && e.Status == StartedNotificationStatus {
-		return true
-	}
-
-	return false
-}
-
-func (e TaskEvent) IsUploading() bool {
-	if e.EventType != NotificationEvent {
-		return false
-	}
-	if e.NotificationType == FFMPEGSNotification && e.Status == CompletedNotificationStatus {
-		return true
-	}
-
-	if e.NotificationType == UploadNotification && e.Status == StartedNotificationStatus {
-		return true
-	}
-
-	return false
-}
-
-func (w *WorkTaskEncode) Clean() error {
-	log.Debugf("[%s] Cleaning up Task Workspace", w.TaskEncode.Id.String())
-	err := os.RemoveAll(w.WorkDir)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (t TaskEvents) GetLatest() *TaskEvent {
+func (t TaskEvents) GetLatest() *TaskEventType {
 	if len(t) == 0 {
 		return nil
 	}
-	return max.Max(t).(*TaskEvent)
+	return max.Max(t).(*TaskEventType)
 }
-func (t TaskEvents) GetLatestPerNotificationType(notificationType NotificationType) (returnEvent *TaskEvent) {
+func (t TaskEvents) GetLatestPerNotificationType(notificationType NotificationType) (returnEvent *TaskEventType) {
 	eventID := -1
 	for _, event := range t {
 		if event.NotificationType == notificationType && event.EventID > eventID {
@@ -249,7 +178,7 @@ func (t TaskEvents) Less(i, j int) bool {
 func (t TaskEvents) Swap(i, j int) {
 	t[i], t[j] = t[j], t[i]
 }
-func (t TaskEvents) GetByEventId(i int) (*TaskEvent, error) {
+func (t TaskEvents) GetByEventId(i int) (*TaskEventType, error) {
 	for _, event := range t {
 		if event.EventID == i {
 			return event, nil
@@ -260,22 +189,23 @@ func (t TaskEvents) GetByEventId(i int) (*TaskEvent, error) {
 func (t TaskEvents) GetLastElement(i int) interface{} {
 	return t[i]
 }
-func (v *Job) AddEvent(eventType EventType, notificationType NotificationType, notificationStatus NotificationStatus) (newEvent *TaskEvent) {
-	return v.AddEventComplete(eventType, notificationType, notificationStatus, "")
+func (v *Job) AddEvent(notificationType NotificationType, notificationStatus NotificationStatus) (newEvent *TaskEventType) {
+	return v.AddEventComplete(notificationType, notificationStatus, "")
 }
 
-func (v *Job) AddEventComplete(eventType EventType, notificationType NotificationType, notificationStatus NotificationStatus, message string) (newEvent *TaskEvent) {
+func (v *Job) AddEventComplete(notificationType NotificationType, notificationStatus NotificationStatus, message string) (newEvent *TaskEventType) {
 	latestEvent := v.Events.GetLatest()
 	newEventID := 0
 	if latestEvent != nil {
 		newEventID = latestEvent.EventID + 1
 	}
 
-	newEvent = &TaskEvent{
-		Id:               v.Id,
+	newEvent = &TaskEventType{
+		Event: Event{
+			EventTime: time.Now(),
+		},
+		JobId:            v.Id,
 		EventID:          newEventID,
-		EventType:        eventType,
-		EventTime:        time.Now(),
 		NotificationType: notificationType,
 		Status:           notificationStatus,
 		Message:          message,

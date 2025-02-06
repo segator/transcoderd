@@ -212,7 +212,7 @@ func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 	}
 }
 
-func (f *FFMPEGGenerator) buildArguments(threads uint8, outputFilePath string, extraArgs string) string {
+func (f *FFMPEGGenerator) buildArguments(threads uint8, extraArgs string, outputFilePath string) string {
 	coreParameters := fmt.Sprintf("-fflags +genpts -nostats %s -progress pipe:1  -hide_banner  -threads %d -analyzeduration 2147483647 -probesize 2147483647", extraArgs, threads)
 	inputsParameters := ""
 	for _, input := range f.inputPaths {

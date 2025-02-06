@@ -21,15 +21,15 @@ help:	## show this help menu.
 	@echo ""
 
 .PHONY: fmt
-fmt:
+fmt: ## Code Format
 	go fmt  ./...
 
 .PHONY: lint
-lint:
+lint: ## Linters
 	@golangci-lint run
 
 .PHONY: lint-fix
-lint-fix:
+lint-fix: ## Lint fix if possible
 	@golangci-lint run --fix
 
 

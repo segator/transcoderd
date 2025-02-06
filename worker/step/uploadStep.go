@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"time"
+	"transcoder/model"
 	"transcoder/worker/job"
 )
 
@@ -19,14 +20,27 @@ type UploadStepExecutor struct {
 	workerName    string
 }
 
-func NewUploadStepExecutor(workerName string, baseDomainUrl string) *UploadStepExecutor {
-	return &UploadStepExecutor{
+func NewUploadStepExecutor(workerName string, baseDomainUrl string, options ...ExecutorOption) *Executor {
+	uploadStep := &UploadStepExecutor{
 		workerName:    workerName,
 		BaseDomainURL: baseDomainUrl,
 	}
+	return NewStepExecutor(model.UploadNotification, uploadStep.actions, options...)
 }
 
-func (u *UploadStepExecutor) Execute(ctx context.Context, tracker Tracker, jobContext *job.Context) error {
+func (u *UploadStepExecutor) actions(jobContext *job.Context) []Action {
+	return []Action{
+		{
+			Execute: func(ctx context.Context, stepTracker Tracker) error {
+				return u.upload(ctx, stepTracker, jobContext)
+			},
+			Id: jobContext.JobId.String(),
+		},
+	}
+
+}
+
+func (u *UploadStepExecutor) upload(ctx context.Context, tracker Tracker, jobContext *job.Context) error {
 	return retry.Do(func() error {
 		tracker.UpdateValue(0)
 		encodedFile, err := os.Open(jobContext.Target.FilePath)

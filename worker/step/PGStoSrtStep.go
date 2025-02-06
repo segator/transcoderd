@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"github.com/asticode/go-astisub"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 	"transcoder/helper/command"
+	"transcoder/model"
 	"transcoder/worker/config"
 	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
@@ -21,26 +21,41 @@ type PGSToSrtStepExecutor struct {
 	pgsConfig *config.PGSConfig
 }
 
-func NewPGSToSrtStepExecutor(pgsConfig *config.PGSConfig) *PGSToSrtStepExecutor {
-	return &PGSToSrtStepExecutor{
+func NewPGSToSrtStepExecutor(pgsConfig *config.PGSConfig, opts ...ExecutorOption) *Executor {
+	pgsStep := &PGSToSrtStepExecutor{
 		pgsConfig: pgsConfig,
 	}
+
+	return NewStepExecutor(model.PGSNotification, pgsStep.actions, opts...)
 }
 
-func (d *PGSToSrtStepExecutor) Execute(ctx context.Context, tracker Tracker, jobContext *job.Context, subtitle *ffmpeg.Subtitle) error {
-	log.Debugf("Converting PGS To Srt for sub %d", subtitle.Id)
+func (p *PGSToSrtStepExecutor) actions(jobContext *job.Context) []Action {
+	var pgsStepActions []Action
+	for _, pgs := range jobContext.Source.FFProbeData.GetPGSSubtitles() {
+		pgsStepActions = append(pgsStepActions, Action{
+			Execute: func(ctx context.Context, stepTracker Tracker) error {
+				return p.convertPGSToSrt(ctx, stepTracker, jobContext, pgs)
+			},
+			Id: fmt.Sprintf("%s %d", jobContext.JobId, pgs.Id),
+		})
+	}
+	return pgsStepActions
+}
+
+func (p *PGSToSrtStepExecutor) convertPGSToSrt(ctx context.Context, tracker Tracker, jobContext *job.Context, subtitle *ffmpeg.Subtitle) error {
+	pgsConfig := p.pgsConfig
 	inputFilePath := fmt.Sprintf("%s/%d.sup", jobContext.WorkingDir, subtitle.Id)
 	outputFilePath := fmt.Sprintf("%s/%d.srt", jobContext.WorkingDir, subtitle.Id)
 	language := calculateTesseractLanguage(subtitle.Language)
 
-	PGSToSrtCommand := command.NewCommand(d.pgsConfig.DotnetPath, d.pgsConfig.DLLPath,
-		"--tesseractversion", strconv.Itoa(d.pgsConfig.TessVersion),
-		"--libleptname", d.pgsConfig.LibleptName,
-		"--libleptversion", strconv.Itoa(d.pgsConfig.LibleptVersion),
+	PGSToSrtCommand := command.NewCommand(pgsConfig.DotnetPath, pgsConfig.DLLPath,
+		"--tesseractversion", strconv.Itoa(pgsConfig.TessVersion),
+		"--libleptname", pgsConfig.LibleptName,
+		"--libleptversion", strconv.Itoa(pgsConfig.LibleptVersion),
 		"--input", inputFilePath,
 		"--output", outputFilePath,
 		"--tesseractlanguage", language,
-		"--tesseractdata", d.pgsConfig.TesseractDataPath).SetWorkDir(jobContext.WorkingDir)
+		"--tesseractdata", pgsConfig.TesseractDataPath).SetWorkDir(jobContext.WorkingDir)
 	outLog := ""
 	startRegex := regexp.MustCompile(`Starting OCR for (\d+) items`)
 	progressRegex := regexp.MustCompile(`Processed item (\d+)`)
@@ -69,7 +84,7 @@ func (d *PGSToSrtStepExecutor) Execute(ctx context.Context, tracker Tracker, job
 	PGSToSrtCommand.SetStderrFunc(func(buffer []byte, exit bool) {
 		errLog += string(buffer)
 	})
-	log.Debugf("PGSTOSrt Command: %s", PGSToSrtCommand.GetFullCommand())
+	tracker.Logger().Cmdf("PGSTOSrt Command: %s", PGSToSrtCommand.GetFullCommand())
 	ecode, err := PGSToSrtCommand.RunWithContext(ctx)
 	pgslog := fmt.Sprintf("stdout: %s, stderr: %s", outLog, errLog)
 	if err != nil {
@@ -113,7 +128,6 @@ func (d *PGSToSrtStepExecutor) Execute(ctx context.Context, tracker Tracker, job
 		return fmt.Errorf("could not write to file: %v", err)
 	}
 
-	log.Debugf("Converted PGS To Srt for sub %d", subtitle.Id)
 	return err
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/jedib0t/go-pretty/v6/progress"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"time"
 )
 
 type LeveledLogger interface {
@@ -51,9 +52,10 @@ func (c *PrinterLogger) Errorf(msg string, a ...interface{}) {
 }
 
 func (c *PrinterLogger) log(msg string, a ...interface{}) string {
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	printedMessage := fmt.Sprintf(msg, a...)
 	if c.messagePrefix != "" {
-		return fmt.Sprintf("%s %s", c.messagePrefix, printedMessage)
+		return fmt.Sprintf("%s %s %s", timestamp, c.messagePrefix, printedMessage)
 	}
 	return printedMessage
 }

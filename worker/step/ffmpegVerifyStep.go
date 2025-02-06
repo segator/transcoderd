@@ -2,6 +2,8 @@ package step
 
 import (
 	"fmt"
+	"golang.org/x/net/context"
+	"transcoder/model"
 	"transcoder/worker/job"
 )
 
@@ -9,13 +11,26 @@ type FFMPEGVerifyStep struct {
 	verifyDeltaTimeSeconds float64
 }
 
-func NewFFMPEGVerifyStepExecutor(verifyDeltaTimeSeconds float64) *FFMPEGVerifyStep {
-	return &FFMPEGVerifyStep{
+func NewFFMPEGVerifyStepExecutor(verifyDeltaTimeSeconds float64, options ...ExecutorOption) *Executor {
+	verifyStep := &FFMPEGVerifyStep{
 		verifyDeltaTimeSeconds: verifyDeltaTimeSeconds,
 	}
+	return NewStepExecutor(model.JobVerify, verifyStep.actions, options...)
 }
 
-func (f *FFMPEGVerifyStep) Execute(jobContext *job.Context) error {
+func (f *FFMPEGVerifyStep) actions(jobContext *job.Context) []Action {
+	return []Action{
+		{
+			Execute: func(_ context.Context, _ Tracker) error {
+				return f.verifyJob(jobContext)
+			},
+			Id: jobContext.JobId.String(),
+		},
+	}
+
+}
+
+func (f *FFMPEGVerifyStep) verifyJob(jobContext *job.Context) error {
 	sourceData := jobContext.Source.FFProbeData
 	targetData := jobContext.Target.FFProbeData
 

@@ -38,16 +38,16 @@ func (e *ReportStepProgressTracker) SetTotal(total int64) {
 
 func (e *ReportStepProgressTracker) UpdateValue(value int64) {
 	e.consoleStepTracker.UpdateValue(value)
-	e.reportTrackProgress(false)
+	e.reportTrackProgress(model.ProgressingTaskProgressTypeStatus)
 }
 
 func (e *ReportStepProgressTracker) Increment(increment int) {
 	e.consoleStepTracker.Increment(increment)
-	e.reportTrackProgress(false)
+	e.reportTrackProgress(model.ProgressingTaskProgressTypeStatus)
 }
 
-func (e *ReportStepProgressTracker) reportTrackProgress(forceReport bool) {
-	if time.Since(e.lastUpdate) > 5*time.Second || forceReport {
+func (e *ReportStepProgressTracker) reportTrackProgress(status model.TaskProgressStatus) {
+	if time.Since(e.lastUpdate) > 5*time.Second || status != model.ProgressingTaskProgressTypeStatus {
 		err := e.serverClient.PublishTaskProgressEvent(&model.TaskProgressType{
 			Event: model.Event{
 				EventTime: time.Now(),
@@ -57,6 +57,7 @@ func (e *ReportStepProgressTracker) reportTrackProgress(forceReport bool) {
 			Percent:          e.consoleStepTracker.PercentDone(),
 			ETA:              e.consoleStepTracker.ETA(),
 			NotificationType: e.notificationType,
+			Status:           status,
 		})
 		if err != nil {
 			e.logger.Errorf("Error on publishing track progress %s", err.Error())
@@ -67,10 +68,10 @@ func (e *ReportStepProgressTracker) reportTrackProgress(forceReport bool) {
 
 func (e *ReportStepProgressTracker) Error() {
 	e.consoleStepTracker.Error()
-	e.reportTrackProgress(true)
+	e.reportTrackProgress(model.FailureTaskProgressTypeStatus)
 }
 
 func (e *ReportStepProgressTracker) Done() {
 	e.consoleStepTracker.Done()
-	e.reportTrackProgress(true)
+	e.reportTrackProgress(model.DoneTaskProgressTypeStatus)
 }

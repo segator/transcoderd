@@ -666,9 +666,10 @@ func (s *SQLRepository) insertOrUpdateProgressJob(ctx context.Context, conn SQLD
         ON CONFLICT (progress_id,notification_type)
         DO UPDATE SET
             percent = $5,            
-            eta = $6`
+            eta = $6,
+            last_update = now()`
 
-	_, err := conn.ExecContext(ctx, query, jp.JobId, jp.ProgressID, jp.NotificationType, jp.WorkerName, jp.Percent, time.Now().Add(jp.ETA))
+	_, err := conn.ExecContext(ctx, query, jp.ProgressID, jp.NotificationType, jp.JobId, jp.WorkerName, jp.Percent, jp.ETA.Seconds())
 	if err != nil {
 		return err
 	}
@@ -691,12 +692,14 @@ func (s *SQLRepository) getAllProgressJobs(ctx context.Context, conn SQLDBOperat
 	}
 	defer rows.Close()
 	var progressJobs []model.TaskProgressType
+	var etaSeconds float64
 	if rows.Next() {
 		progress := model.TaskProgressType{}
-		err = rows.Scan(&progress.ProgressID, &progress.NotificationType, &progress.JobId, &progress.WorkerName, &progress.Percent, &progress.ETA, &progress.EventTime)
+		err = rows.Scan(&progress.ProgressID, &progress.NotificationType, &progress.JobId, &progress.WorkerName, &progress.Percent, &etaSeconds, &progress.EventTime)
 		if err != nil {
 			return nil, err
 		}
+		progress.ETA = time.Duration(etaSeconds) * time.Second
 		progressJobs = append(progressJobs, progress)
 	}
 	return progressJobs, nil

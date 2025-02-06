@@ -45,7 +45,6 @@ func (e *RenderService) Run(wg *sync.WaitGroup, ctx context.Context) {
 func (e *RenderService) StepTracker(id string, notificationType model.NotificationType, logger LeveledLogger) *StepTracker {
 	progressTracker, color := newProgressTracker(id, notificationType)
 	e.pw.AppendTracker(progressTracker)
-
 	return &StepTracker{
 		id:              id,
 		stepType:        notificationType,

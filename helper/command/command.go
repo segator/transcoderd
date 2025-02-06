@@ -24,6 +24,7 @@ type Command struct {
 	WorkDir    string
 	stdoutFunc ReaderFunc
 	stderrFunc ReaderFunc
+	buffSize   int
 }
 
 func NewAllowedCodesOption(codes ...int) Option {
@@ -36,10 +37,11 @@ func NewCommandByString(command string, params string) *Command {
 }
 func NewCommand(command string, params ...string) *Command {
 	cmd := &Command{
-		Command: command,
-		Params:  params,
-		Env:     os.Environ(),
-		WorkDir: GetWD(),
+		Command:  command,
+		Params:   params,
+		Env:      os.Environ(),
+		WorkDir:  GetWD(),
+		buffSize: 4096,
 	}
 	return cmd
 }
@@ -60,6 +62,11 @@ func (c *Command) SetEnv(env []string) *Command {
 
 func (c *Command) AddEnv(env string) *Command {
 	c.Env = append(c.Env, env)
+	return c
+}
+
+func (c *Command) BuffSize(size int) *Command {
+	c.buffSize = size
 	return c
 }
 
@@ -144,7 +151,7 @@ func allowedCodes(opts []Option, exitCode int) bool {
 
 func (c *Command) readerStreamProcessor(ctx context.Context, wg *sync.WaitGroup, reader io.ReadCloser, callbackFunc ReaderFunc) {
 	defer wg.Done()
-	buffer := make([]byte, 4096)
+	buffer := make([]byte, c.buffSize)
 loop:
 	for {
 		select {

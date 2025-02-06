@@ -51,6 +51,7 @@ func init() {
 	pflag.String("worker.ffmpegConfig.videoCodec", "libx265", "FFMPEG Video Codec")
 	pflag.String("worker.ffmpegConfig.videoPreset", "medium", "FFMPEG Video Preset")
 	pflag.String("worker.ffmpegConfig.videoProfile", "main10", "FFMPEG Video Profile")
+	pflag.String("worker.ffmpegConfig.extraArgs", "", "FFMPEG Extra Args")
 	pflag.Int("worker.verifyDeltaTime", 60, "FFMPEG Verify Delta Time in seconds, is the max range of time that the video can be different from the original, if is superior then the video is marked as invalid")
 	pflag.Int("worker.ffmpegConfig.videoCRF", 21, "FFMPEG Video CRF")
 	pflag.Duration("worker.startAfter", 0, "Accept jobs only After HH:mm")

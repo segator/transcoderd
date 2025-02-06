@@ -96,7 +96,7 @@ CREATE UNLOGGED TABLE  IF NOT EXISTS job_progress (
                                                       job_id varchar(255) NOT NULL,
                                                       worker_name varchar(255) NOT NULL,
                                                       percent real NOT NULL,
-                                                      eta timestamp NOT NULL,
+                                                      eta real NOT NULL,
                                                       last_update timestamp NOT NULL DEFAULT NOW(),
                                                       PRIMARY KEY (progress_id,notification_type),
                                                       FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE

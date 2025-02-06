@@ -23,7 +23,6 @@ const (
 	DownloadNotification        NotificationType   = "Download"
 	UploadNotification          NotificationType   = "Upload"
 	MKVExtractNotification      NotificationType   = "MKVExtract"
-	FFProbeNotification         NotificationType   = "FFProbe"
 	PGSNotification             NotificationType   = "PGS"
 	FFMPEGSNotification         NotificationType   = "FFMPEG"
 	JobVerify                   NotificationType   = "JobVerify"
@@ -104,13 +103,22 @@ type PingEventType struct {
 	IP string `json:"ip"`
 }
 
+type TaskProgressStatus string
+
+const (
+	ProgressingTaskProgressTypeStatus TaskProgressStatus = "progressing"
+	DoneTaskProgressTypeStatus        TaskProgressStatus = "done"
+	FailureTaskProgressTypeStatus     TaskProgressStatus = "failure"
+)
+
 type TaskProgressType struct {
 	Event
-	JobId            uuid.UUID        `json:"jobId"`
-	ProgressID       string           `json:"progressID"`
-	Percent          float64          `json:"percent"`
-	ETA              time.Duration    `json:"eta"`
-	NotificationType NotificationType `json:"notificationType"`
+	JobId            uuid.UUID          `json:"jobId"`
+	ProgressID       string             `json:"progressID"`
+	Percent          float64            `json:"percent"`
+	ETA              time.Duration      `json:"eta"`
+	NotificationType NotificationType   `json:"notificationType"`
+	Status           TaskProgressStatus `json:"status"`
 }
 
 func (e TaskEventType) IsAssigned() bool {
@@ -124,50 +132,6 @@ func (e TaskEventType) IsCompleted() bool {
 	if e.NotificationType == JobNotification && e.Status == CompletedNotificationStatus {
 		return true
 	}
-	return false
-}
-
-func (e TaskEventType) IsDownloading() bool {
-	if e.NotificationType == DownloadNotification && e.Status == StartedNotificationStatus {
-		return true
-	}
-
-	if e.NotificationType == JobNotification && (e.Status == StartedNotificationStatus) {
-		return true
-	}
-	return false
-}
-
-func (e TaskEventType) IsEncoding() bool {
-	if e.NotificationType == DownloadNotification && e.Status == CompletedNotificationStatus {
-		return true
-	}
-
-	if e.NotificationType == MKVExtractNotification && (e.Status == StartedNotificationStatus || e.Status == CompletedNotificationStatus) {
-		return true
-	}
-	if e.NotificationType == FFProbeNotification && (e.Status == StartedNotificationStatus || e.Status == CompletedNotificationStatus) {
-		return true
-	}
-	if e.NotificationType == PGSNotification && (e.Status == StartedNotificationStatus || e.Status == CompletedNotificationStatus) {
-		return true
-	}
-	if e.NotificationType == FFMPEGSNotification && e.Status == StartedNotificationStatus {
-		return true
-	}
-
-	return false
-}
-
-func (e TaskEventType) IsUploading() bool {
-	if e.NotificationType == FFMPEGSNotification && e.Status == CompletedNotificationStatus {
-		return true
-	}
-
-	if e.NotificationType == UploadNotification && e.Status == StartedNotificationStatus {
-		return true
-	}
-
 	return false
 }
 

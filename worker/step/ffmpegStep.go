@@ -14,6 +14,7 @@ import (
 	"time"
 	"transcoder/helper"
 	"transcoder/helper/command"
+	"transcoder/model"
 	"transcoder/worker/config"
 	"transcoder/worker/console"
 	"transcoder/worker/ffmpeg"
@@ -24,13 +25,26 @@ type FFMPEGStepExecutor struct {
 	ffmpegConfig *config.FFMPEGConfig
 }
 
-func NewFFMPEGStepExecutor(ffmpegConfig *config.FFMPEGConfig) *FFMPEGStepExecutor {
-	return &FFMPEGStepExecutor{
+func NewFFMPEGStepExecutor(ffmpegConfig *config.FFMPEGConfig, options ...ExecutorOption) *Executor {
+	ffmpegStep := &FFMPEGStepExecutor{
 		ffmpegConfig,
 	}
+	return NewStepExecutor(model.FFMPEGSNotification, ffmpegStep.actions, options...)
 }
 
-func (f *FFMPEGStepExecutor) Execute(ctx context.Context, stepTracker Tracker, jobContext *job.Context) error {
+func (f *FFMPEGStepExecutor) actions(jobContext *job.Context) []Action {
+	return []Action{
+		{
+			Execute: func(ctx context.Context, stepTracker Tracker) error {
+				return f.encode(ctx, stepTracker, jobContext)
+			},
+			Id: jobContext.JobId.String(),
+		},
+	}
+
+}
+
+func (f *FFMPEGStepExecutor) encode(ctx context.Context, stepTracker Tracker, jobContext *job.Context) error {
 	FFMPEGProgressChan := make(chan int64)
 	go f.ffmpegProgressRoutine(ctx, jobContext, stepTracker, FFMPEGProgressChan)
 	err := f.ffmpeg(ctx, stepTracker.Logger(), jobContext, FFMPEGProgressChan)
@@ -101,7 +115,7 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 	encodedFilePath := fmt.Sprintf("%s-encoded.%s", strings.TrimSuffix(sourceFileName, filepath.Ext(sourceFileName)), "mkv")
 	targetPath := filepath.Join(jobContext.WorkingDir, encodedFilePath)
 
-	ffmpegArguments := ffmpegGenerator.buildArguments(uint8(f.ffmpegConfig.Threads), targetPath)
+	ffmpegArguments := ffmpegGenerator.buildArguments(uint8(f.ffmpegConfig.Threads), f.ffmpegConfig.ExtraArgs, targetPath)
 	logger.Cmdf("FFMPEG Command:%s %s", helper.GetFFmpegPath(), ffmpegArguments)
 	ffmpegCommand := command.NewCommandByString(helper.GetFFmpegPath(), ffmpegArguments).
 		SetWorkDir(jobContext.WorkingDir).
@@ -198,8 +212,8 @@ func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 	}
 }
 
-func (f *FFMPEGGenerator) buildArguments(threads uint8, outputFilePath string) string {
-	coreParameters := fmt.Sprintf("-fflags +genpts -nostats -t 60 -progress pipe:1  -hide_banner  -threads %d -analyzeduration 2147483647 -probesize 2147483647", threads)
+func (f *FFMPEGGenerator) buildArguments(threads uint8, outputFilePath string, extraArgs string) string {
+	coreParameters := fmt.Sprintf("-fflags +genpts -nostats %s -progress pipe:1  -hide_banner  -threads %d -analyzeduration 2147483647 -probesize 2147483647", extraArgs, threads)
 	inputsParameters := ""
 	for _, input := range f.inputPaths {
 		inputsParameters = fmt.Sprintf("%s -i \"%s\"", inputsParameters, input)

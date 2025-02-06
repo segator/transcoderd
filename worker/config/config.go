@@ -22,6 +22,7 @@ type FFMPEGConfig struct {
 	VideoProfile string `mapstructure:"videoProfile" envconfig:"WORKER_FFMPEG_VIDEOPROFILE"`
 	VideoCRF     int    `mapstructure:"videoCRF" envconfig:"WORKER_FFMPEG_VIDEOCRF"`
 	Threads      int    `mapstructure:"threads" envconfig:"WORKER_FFMPEG_THREADS"`
+	ExtraArgs    string `mapstructure:"extraArgs" envconfig:"WORKER_FFMPEG_EXTRA_ARGS"`
 }
 
 type Config struct {

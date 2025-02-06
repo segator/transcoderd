@@ -19,11 +19,10 @@ import (
 	"transcoder/worker/step"
 )
 
-const maxPrefetchedJobs = 1
+const maxActiveJobs = 2
 
 type JobExecutor struct {
-	prefetchJobs uint32
-	stepChan     chan []*job.Context
+	activeJobs uint32
 
 	workerConfig *config.Config
 	tempPath     string
@@ -31,26 +30,100 @@ type JobExecutor struct {
 	mu           sync.RWMutex
 	client       *serverclient.ServerClient
 
-	console *console.RenderService
+	console       *console.RenderService
+	stepExecutors map[model.NotificationType]*step.Executor
 }
 
 func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerClient, renderService *console.RenderService) *JobExecutor {
 	tempPath := filepath.Join(workerConfig.TemporalPath, fmt.Sprintf("worker-%s", workerConfig.Name))
 
-	encodeWorker := &JobExecutor{
-		client:       client,
-		wg:           sync.WaitGroup{},
-		workerConfig: workerConfig,
-		stepChan:     make(chan *job.Context, 100),
-		tempPath:     tempPath,
-		console:      renderService,
-		prefetchJobs: 0,
+	jobExecutor := &JobExecutor{
+		client:        client,
+		wg:            sync.WaitGroup{},
+		workerConfig:  workerConfig,
+		stepExecutors: make(map[model.NotificationType]*step.Executor),
+		tempPath:      tempPath,
+		console:       renderService,
+		activeJobs:    0,
 	}
+	stepExecutors := setupStepExecutors(jobExecutor)
+	jobExecutor.stepExecutors = stepExecutors
+
 	if err := os.MkdirAll(tempPath, os.ModePerm); err != nil {
 		log.Fatal(err)
 	}
 
-	return encodeWorker
+	return jobExecutor
+}
+
+func setupStepExecutors(jobExecutor *JobExecutor) map[model.NotificationType]*step.Executor {
+	workerConfig := jobExecutor.workerConfig
+	client := jobExecutor.client
+
+	onErrOpt := step.WithOnErrorOpt(func(jobContext *job.Context, notificationType model.NotificationType, err error) {
+		jobExecutor.publishTaskEvent(jobContext, model.JobNotification, model.FailedNotificationStatus, fmt.Sprintf("%s:%s", notificationType, err.Error()))
+		jobExecutor.ConsoleTrackStep(jobContext.JobId.String(), model.JobNotification).Error()
+		if err := jobExecutor.CleanJob(jobContext); err != nil {
+			jobExecutor.jobLogger(jobContext).Errorf("failed to clean job workspace %v", err)
+		}
+	})
+	stepExecutors := make(map[model.NotificationType]*step.Executor)
+
+	// Download Step
+	stepExecutors[model.DownloadNotification] = step.NewDownloadStepExecutor(
+		workerConfig.Name,
+		client.GetBaseDomain(),
+		step.WithOnCompleteOpt(func(jobContext *job.Context) {
+			if jobContext.Source.FFProbeData.HaveImageTypeSubtitle() {
+				stepExecutors[model.MKVExtractNotification].AddJob(jobContext)
+				return
+			}
+			stepExecutors[model.FFMPEGSNotification].AddJob(jobContext)
+		}),
+		onErrOpt)
+
+	// MKVExtract Step
+	stepExecutors[model.MKVExtractNotification] = step.NewMKVExtractStepExecutor(onErrOpt,
+		step.WithOnCompleteOpt(func(jobContext *job.Context) {
+			stepExecutors[model.PGSNotification].AddJob(jobContext)
+		}),
+		onErrOpt)
+
+	// PGS Step
+	stepExecutors[model.PGSNotification] = step.NewPGSToSrtStepExecutor(workerConfig.PGSConfig,
+		step.WithParallelRunners(workerConfig.PGSConfig.ParallelJobs),
+		step.WithOnCompleteOpt(func(jobContext *job.Context) {
+			stepExecutors[model.FFMPEGSNotification].AddJob(jobContext)
+		}),
+		onErrOpt)
+
+	// FFMPEG Step
+	stepExecutors[model.FFMPEGSNotification] = step.NewFFMPEGStepExecutor(workerConfig.EncodeConfig,
+		step.WithOnCompleteOpt(func(jobContext *job.Context) {
+			stepExecutors[model.JobVerify].AddJob(jobContext)
+		}),
+		onErrOpt)
+
+	// Verify Step
+	stepExecutors[model.JobVerify] = step.NewFFMPEGVerifyStepExecutor(workerConfig.VerifyDeltaTime,
+		step.WithOnCompleteOpt(func(jobContext *job.Context) {
+			stepExecutors[model.UploadNotification].AddJob(jobContext)
+		}),
+		onErrOpt)
+
+	// Upload Step
+	stepExecutors[model.UploadNotification] = step.NewUploadStepExecutor(workerConfig.Name,
+		client.GetBaseDomain(),
+		step.WithOnCompleteOpt(func(jobContext *job.Context) {
+			jobExecutor.publishTaskEvent(jobContext, model.JobNotification, model.CompletedNotificationStatus, "")
+			jobExecutor.ConsoleTrackStep(jobContext.JobId.String(), model.JobNotification).Done()
+			if err := jobExecutor.CleanJob(jobContext); err != nil {
+				jobExecutor.jobLogger(jobContext).Errorf("failed to clean job workspace: %v", err)
+			}
+		}),
+		onErrOpt)
+
+	return stepExecutors
 }
 
 func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) {
@@ -70,15 +143,15 @@ func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) {
 
 func (e *JobExecutor) start(ctx context.Context) {
 	e.resumeJobs()
-	go e.downloadQueueRoutine(ctx)
-	go e.encodeQueueRoutine(ctx)
-	go e.uploadQueueRoutine(ctx)
+	for _, stepExecutor := range e.stepExecutors {
+		go e.stepQueueRoutine(ctx, stepExecutor)
+	}
 }
 
 func (e *JobExecutor) stop() {
-	defer close(e.downloadChan)
-	defer close(e.uploadChan)
-	defer close(e.encodeChan)
+	for _, stepExecutor := range e.stepExecutors {
+		stepExecutor.Stop()
+	}
 }
 
 func (e *JobExecutor) resumeJobs() {
@@ -92,20 +165,9 @@ func (e *JobExecutor) resumeJobs() {
 		if filepath.Ext(path) == ".json" {
 			filepath.Base(path)
 			jobContext := job.ReadContextFromDiskByPath(path)
+			atomic.AddUint32(&e.activeJobs, 1)
 
-			switch jobContext.LastEvent.NotificationType {
-			case model.DownloadNotification:
-				e.AddDownloadJob(jobContext)
-				// TODO esto esta mal, el encode tiene varios steps
-			case model.FFMPEGSNotification:
-				// add as prefetched job so won't try to download more jobs until jobs are in encoding phase
-				atomic.AddUint32(&e.prefetchJobs, 1)
-				e.AddEncodeJob(jobContext)
-			case model.UploadNotification:
-				e.AddUploadJob(jobContext)
-			default:
-				log.Panicf("if this happens is a bug %s", jobContext.LastEvent.NotificationType)
-			}
+			e.stepExecutors[jobContext.LastEvent.NotificationType].AddJob(jobContext)
 		}
 
 		return nil
@@ -126,7 +188,7 @@ func (e *JobExecutor) AcceptJobs() bool {
 		elapsedSinceMidnight := now.Sub(midnight)
 		return elapsedSinceMidnight >= *e.workerConfig.StartAfter && elapsedSinceMidnight <= *e.workerConfig.StopAfter
 	}
-	return e.PrefetchJobs() < maxPrefetchedJobs
+	return e.ActiveJobs() < maxActiveJobs
 }
 func (e *JobExecutor) jobLogger(jobContext *job.Context) console.LeveledLogger {
 	return e.console.Logger(console.WithMessagePrefix(fmt.Sprintf("[%s]", jobContext.JobId.String())))
@@ -139,7 +201,9 @@ func (e *JobExecutor) ExecuteJob(jobId uuid.UUID, lastEvent int) error {
 	}
 
 	e.publishTaskEvent(jobContext, model.JobNotification, model.StartedNotificationStatus, "")
-	e.AddDownloadJob(jobContext)
+
+	atomic.AddUint32(&e.activeJobs, 1)
+	e.stepExecutors[model.DownloadNotification].AddJob(jobContext)
 	return nil
 }
 
@@ -165,88 +229,50 @@ func (e *JobExecutor) publishTaskEvent(jobContext *job.Context, notificationType
 	if err := jobContext.PersistJobContext(); err != nil {
 		l.Errorf("Error on publishing event %s", err.Error())
 	}
-	l.Logf("%s have been %s: %s", event.NotificationType, event.Status, event.Message)
+	l.Logf("%s have been %s", event.NotificationType, event.Status)
 
 }
 
-func (e *JobExecutor) PrefetchJobs() uint32 {
-	return atomic.LoadUint32(&e.prefetchJobs)
+func (e *JobExecutor) ActiveJobs() uint32 {
+	return atomic.LoadUint32(&e.activeJobs)
 }
 
-func (e *JobExecutor) AddDownloadJob(job *job.Context) {
-	atomic.AddUint32(&e.prefetchJobs, 1)
-	e.downloadChan <- job
-}
-
-func (e *JobExecutor) AddEncodeJob(job *job.Context) {
-	e.encodeChan <- job
-}
-
-func (e *JobExecutor) AddUploadJob(job *job.Context) {
-	e.uploadChan <- job
-}
-
-func (e *JobExecutor) downloadQueueRoutine(ctx context.Context) {
-	e.wg.Add(1)
-	defer e.wg.Done()
-	downloadStepExecutor := step.NewDownloadStepExecutor(e.workerConfig.Name, e.client.GetBaseDomain())
+func (e *JobExecutor) stepQueueRoutine(ctx context.Context, stepExecutor *step.Executor) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case job, ok := <-e.downloadChan:
+		case jobCtx, ok := <-stepExecutor.GetJobChan():
 			if !ok {
 				return
 			}
-
-			stepFunc := func(ctx context.Context, stepTracker step.Tracker) error {
-				videoData, err := downloadStepExecutor.Execute(ctx, stepTracker, job)
-				if err == nil {
-					job.Source = videoData
-				}
-				return err
-			}
-
-			err := e.executeSingleStep(ctx, stepFunc, job, model.DownloadNotification)
+			stepExecutor.OnJob(jobCtx)
+			err := e.executeStepActions(ctx, stepExecutor, jobCtx)
 			if err != nil {
-				atomic.AddUint32(&e.prefetchJobs, ^uint32(0))
+				stepExecutor.OnError(jobCtx, stepExecutor.NotificationType(), err)
 				continue
 			}
-			e.AddEncodeJob(job)
+			stepExecutor.OnComplete(jobCtx)
 		}
 	}
-
 }
 
-type StepAction struct {
-	Execute StepActionFunc
-	Id      string
-}
-type StepActionFunc func(ctx context.Context, stepTracker step.Tracker) error
-
-func (e *JobExecutor) executeSingleStep(ctx context.Context, stepActionFunc StepActionFunc, jobContext *job.Context, notificationType model.NotificationType) error {
-	stepActions := []StepAction{
-		{
-			Execute: stepActionFunc, Id: jobContext.JobId.String(),
-		},
-	}
-	return e.executeParallelStep(ctx, 1, stepActions, jobContext, notificationType)
-}
-
-func (e *JobExecutor) executeParallelStep(ctx context.Context, parallelSteps int, stepActions []StepAction, jobContext *job.Context, notificationType model.NotificationType) error {
+func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step.Executor, jobContext *job.Context) error {
 	wg := sync.WaitGroup{}
-	actionsChan := make(chan StepAction, len(stepActions))
-	errs := make(chan error, len(stepActions))
 
-	for i := 0; i < parallelSteps; i++ {
+	actions := stepExecutor.Actions(jobContext)
+	actionsChan := make(chan step.Action, len(actions))
+	errs := make(chan error, len(actions))
+
+	// prepare parallel runners
+	for i := 0; i < stepExecutor.Parallel(); i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for action := range actionsChan {
-				tracker := e.TrackStep(jobContext.JobId, action.Id, notificationType)
-				tracker.SetTotal(0)
+				tracker := e.ReportTrackStep(jobContext.JobId, action.Id, stepExecutor.NotificationType())
 				if err := action.Execute(ctx, tracker); err != nil {
-					tracker.Logger().Errorf("Error on executing step %s: %s", notificationType, err.Error())
+					tracker.Logger().Errorf("Error on executing step %s: %s", stepExecutor.NotificationType(), err.Error())
 					tracker.Error()
 					errs <- err
 					continue
@@ -256,8 +282,8 @@ func (e *JobExecutor) executeParallelStep(ctx context.Context, parallelSteps int
 		}()
 	}
 
-	e.publishTaskEvent(jobContext, notificationType, model.StartedNotificationStatus, "")
-	for _, action := range stepActions {
+	e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.StartedNotificationStatus, "")
+	for _, action := range actions {
 		actionsChan <- action
 	}
 
@@ -271,106 +297,26 @@ func (e *JobExecutor) executeParallelStep(ctx context.Context, parallelSteps int
 	}
 	err := errors.Join(errorList...)
 	if err != nil {
-		e.publishTaskEvent(jobContext, notificationType, model.FailedNotificationStatus, err.Error())
-		if err := jobContext.Clean(); err != nil {
-			e.jobLogger(jobContext).Errorf("failed to clean job workspace %v", err)
-		}
+		e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.FailedNotificationStatus, err.Error())
 		return err
 	}
 
-	e.publishTaskEvent(jobContext, notificationType, model.CompletedNotificationStatus, "")
+	e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.CompletedNotificationStatus, "")
 	return nil
 }
 
-func (e *JobExecutor) uploadQueueRoutine(ctx context.Context) {
-	e.wg.Add(1)
-	defer e.wg.Done()
-	uploadStepExecutor := step.NewUploadStepExecutor(e.workerConfig.Name, e.client.GetBaseDomain())
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case jobContext, ok := <-e.uploadChan:
-			if !ok {
-				continue
-			}
-			uploadStepFunc := func(ctx context.Context, stepTracker step.Tracker) error {
-				return uploadStepExecutor.Execute(ctx, stepTracker, jobContext)
-			}
-			if err := e.executeSingleStep(ctx, uploadStepFunc, jobContext, model.UploadNotification); err != nil {
-				continue
-			}
-
-			e.publishTaskEvent(jobContext, model.JobNotification, model.CompletedNotificationStatus, "")
-			if err := jobContext.Clean(); err != nil {
-				e.jobLogger(jobContext).Errorf("failed to clean job workspace: %v", err)
-			}
-		}
-	}
-
+func (e *JobExecutor) CleanJob(jobContext *job.Context) error {
+	atomic.AddUint32(&e.activeJobs, ^uint32(0))
+	return jobContext.Clean()
 }
 
-func (e *JobExecutor) encodeQueueRoutine(ctx context.Context) {
-	e.wg.Add(1)
-	defer e.wg.Done()
-
-	mkvExtractStepExecutor := step.NewMKVExtractStepExecutor()
-	ffmpegStepExecutor := step.NewFFMPEGStepExecutor(e.workerConfig.EncodeConfig)
-	pgsStepExecutor := step.NewPGSToSrtStepExecutor(e.workerConfig.PGSConfig)
-	ffmpegVerifyStep := step.NewFFMPEGVerifyStepExecutor(e.workerConfig.VerifyDeltaTime)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case jobContext, ok := <-e.encodeChan:
-			if !ok {
-				return
-			}
-			atomic.AddUint32(&e.prefetchJobs, ^uint32(0))
-
-			if jobContext.Source.FFProbeData.HaveImageTypeSubtitle() {
-				mkvExtractStepFunc := func(ctx context.Context, stepTracker step.Tracker) error {
-					return mkvExtractStepExecutor.Execute(ctx, stepTracker, jobContext)
-				}
-
-				if err := e.executeSingleStep(ctx, mkvExtractStepFunc, jobContext, model.MKVExtractNotification); err != nil {
-					continue
-				}
-
-				var pgsStepActions []StepAction
-				for _, pgs := range jobContext.Source.FFProbeData.GetPGSSubtitles() {
-					pgsStepActions = append(pgsStepActions, StepAction{
-						Execute: func(ctx context.Context, stepTracker step.Tracker) error {
-							return pgsStepExecutor.Execute(ctx, stepTracker, jobContext, pgs)
-						},
-						Id: fmt.Sprintf("%s %d", jobContext.JobId, pgs.Id),
-					})
-				}
-				if err := e.executeParallelStep(ctx, e.workerConfig.PGSConfig.ParallelJobs, pgsStepActions, jobContext, model.PGSNotification); err != nil {
-					continue
-				}
-			}
-			ffmpegStepFunc := func(ctx context.Context, stepTracker step.Tracker) error {
-				return ffmpegStepExecutor.Execute(ctx, stepTracker, jobContext)
-			}
-			if err := e.executeSingleStep(ctx, ffmpegStepFunc, jobContext, model.FFMPEGSNotification); err != nil {
-				continue
-			}
-
-			ffmpegVerifyFunc := func(ctx context.Context, stepTracker step.Tracker) error {
-				return ffmpegVerifyStep.Execute(jobContext)
-			}
-			if err := e.executeSingleStep(ctx, ffmpegVerifyFunc, jobContext, model.JobVerify); err != nil {
-				continue
-			}
-			e.AddUploadJob(jobContext)
-		}
-	}
+// ConsoleTrackStep Console tracker to print progress to console
+func (e *JobExecutor) ConsoleTrackStep(stepId string, notificationType model.NotificationType) *console.StepTracker {
+	return e.console.StepTracker(stepId, notificationType, e.console.Logger(console.WithMessagePrefix(fmt.Sprintf("[%s]", stepId))))
 }
 
-func (e *JobExecutor) TrackStep(jobId uuid.UUID, stepId string, notificationType model.NotificationType) *ReportStepProgressTracker {
-	stepLogger := e.console.Logger(console.WithMessagePrefix(fmt.Sprintf("[%s]", stepId)))
-	consoleTracker := e.console.StepTracker(stepId, notificationType, stepLogger)
+// ReportTrackStep This one is like consoleTrackStep but also reports progress to server
+func (e *JobExecutor) ReportTrackStep(jobId uuid.UUID, stepId string, notificationType model.NotificationType) *ReportStepProgressTracker {
+	consoleTracker := e.ConsoleTrackStep(stepId, notificationType)
 	return newReportStepProgressTracker(jobId, stepId, notificationType, e.client, consoleTracker)
-
 }

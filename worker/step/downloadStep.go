@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+	"transcoder/model"
 	"transcoder/worker/console"
 	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
@@ -26,14 +27,32 @@ type DownloadStepExecutor struct {
 	BaseDomainURL string
 }
 
-func NewDownloadStepExecutor(workerName string, baseDomainUrl string) *DownloadStepExecutor {
-	return &DownloadStepExecutor{
+func NewDownloadStepExecutor(workerName string, baseDomainUrl string, options ...ExecutorOption) *Executor {
+	downloadStep := &DownloadStepExecutor{
 		workerName:    workerName,
 		BaseDomainURL: baseDomainUrl,
 	}
+	return NewStepExecutor(model.DownloadNotification, downloadStep.actions, options...)
 }
 
-func (d *DownloadStepExecutor) Execute(ctx context.Context, tracker Tracker, jobContext *job.Context) (*job.VideoData, error) {
+func (d *DownloadStepExecutor) actions(jobContext *job.Context) []Action {
+	return []Action{
+		{
+			Execute: func(ctx context.Context, stepTracker Tracker) error {
+				videoData, err := d.download(ctx, stepTracker, jobContext)
+				if err != nil {
+					return err
+				}
+				jobContext.Source = videoData
+				return nil
+			},
+			Id: jobContext.JobId.String(),
+		},
+	}
+
+}
+
+func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jobContext *job.Context) (*job.VideoData, error) {
 	var sourceFilePath string
 	var sourceChecksum string
 	var fileSize int64

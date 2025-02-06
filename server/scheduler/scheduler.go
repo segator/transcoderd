@@ -143,15 +143,16 @@ func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.Envelo
 		if err = json.Unmarshal(event.EventData, &taskProgress); err != nil {
 			return err
 		}
-		if taskProgress.Percent == 100 {
+		if taskProgress.Status != model.ProgressingTaskProgressTypeStatus {
 			if err = r.repo.DeleteProgressJob(ctx, taskProgress.ProgressID, taskProgress.NotificationType); err != nil {
 				return err
 			}
-		} else {
-			if err = r.repo.ProgressJob(ctx, &taskProgress); err != nil {
-				return err
-			}
+			return nil
 		}
+		if err = r.repo.ProgressJob(ctx, &taskProgress); err != nil {
+			return err
+		}
+
 	default:
 		return fmt.Errorf("unknown event type %s", event.EventType)
 	}

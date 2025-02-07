@@ -148,7 +148,7 @@ func NewSQLRepository(config *SQLServerConfig) (*SQLRepository, error) {
 	if log.IsLevelEnabled(log.DebugLevel) {
 		go func() {
 			for {
-				fmt.Printf("In use %d not use %d  open %d wait %d\n", db.Stats().Idle, db.Stats().InUse, db.Stats().OpenConnections, db.Stats().WaitCount)
+				log.Debugf("In use %d not use %d  open %d wait %d", db.Stats().Idle, db.Stats().InUse, db.Stats().OpenConnections, db.Stats().WaitCount)
 				time.Sleep(time.Second * 5)
 			}
 		}()

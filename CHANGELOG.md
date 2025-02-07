@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.2.0](https://github.com/segator/transcoderd/compare/v2.1.0...v2.2.0) (2025-02-07)
+
+
+### 🎉 Features
+
+* add romanian tesseract lang ([f3447da](https://github.com/segator/transcoderd/commit/f3447dafc34e796b82dd53c6d809132a0d058041))
+* masive refactor for fun ([#22](https://github.com/segator/transcoderd/issues/22)) ([f3447da](https://github.com/segator/transcoderd/commit/f3447dafc34e796b82dd53c6d809132a0d058041))
+* progress events are not send to job_events now new table job_progress ([f3447da](https://github.com/segator/transcoderd/commit/f3447dafc34e796b82dd53c6d809132a0d058041))
+* **server:** logs prints timestamp ([864b19d](https://github.com/segator/transcoderd/commit/864b19d62e103f6dab4da0129bb407109ad6f8eb))
+* tessdata support language zho ([7c23c9b](https://github.com/segator/transcoderd/commit/7c23c9b15ae5a0cd91bb447cf2c3f3a5e0e333d9))
+
+
+### 🐛 Bug Fixes
+
+* some minor fixes ([f3447da](https://github.com/segator/transcoderd/commit/f3447dafc34e796b82dd53c6d809132a0d058041))
+
+
+### 🔧 Miscellaneous Chores
+
+* change logger format for an specific log message regarding db conn usage ([0cbf476](https://github.com/segator/transcoderd/commit/0cbf476a92e33a92f807092f3d4b032c6f1ea776))
+* update pgstosrt to latest version ([f3447da](https://github.com/segator/transcoderd/commit/f3447dafc34e796b82dd53c6d809132a0d058041))
+
+
+### ♻️ Code Refactoring
+
+* simplier code and more readable ([f3447da](https://github.com/segator/transcoderd/commit/f3447dafc34e796b82dd53c6d809132a0d058041))
+
 ## [2.1.0](https://github.com/segator/transcoderd/compare/v2.0.1...v2.1.0) (2025-01-20)
 
 

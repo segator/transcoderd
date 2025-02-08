@@ -526,7 +526,7 @@ func (r *RuntimeScheduler) jobMaintenance(ctx context.Context) error {
 }
 
 func (r *RuntimeScheduler) queuedJobMaintenance(ctx context.Context) error {
-	queuedJobs, err := r.repo.GetJobsByStatus(ctx, model.QueuedNotificationStatus)
+	queuedJobs, err := r.repo.GetJobsByStatus(ctx, model.JobNotification, model.QueuedNotificationStatus)
 	if err != nil {
 		return err
 	}
@@ -546,22 +546,34 @@ func (r *RuntimeScheduler) queuedJobMaintenance(ctx context.Context) error {
 }
 
 func (r *RuntimeScheduler) failedJobMaintenance(ctx context.Context) error {
-	failedJobs, err := r.repo.GetJobsByStatus(ctx, model.FailedNotificationStatus)
+	failedJobs, err := r.repo.GetJobsByStatus(ctx, model.JobNotification, model.FailedNotificationStatus)
 	if err != nil {
 		return err
 	}
 	for _, failedJob := range failedJobs {
-		if verifyFailureMessage(failedJob.StatusMessage) {
-			jobRequest := &model.JobRequest{
-				SourcePath:  failedJob.SourcePath,
-				TargetPath:  failedJob.TargetPath,
-				ForceFailed: true,
-			}
-			_, err = r.scheduleJobRequest(ctx, jobRequest)
-			if err != nil {
+		if !verifyFailureMessage(failedJob.StatusMessage) {
+			continue
+		}
+
+		failureJobEvents := failedJob.Events.FilterBy(model.JobNotification, model.FailedNotificationStatus)
+		if len(failureJobEvents) > 10 {
+			newEvent := failedJob.AddEventComplete(model.JobNotification, model.CanceledNotificationStatus, "Job canceled by system, because of too many failed attempts")
+			if err = r.repo.AddNewTaskEvent(ctx, newEvent); err != nil {
 				return err
 			}
+			continue
 		}
+
+		jobRequest := &model.JobRequest{
+			SourcePath:  failedJob.SourcePath,
+			TargetPath:  failedJob.TargetPath,
+			ForceFailed: true,
+		}
+		_, err = r.scheduleJobRequest(ctx, jobRequest)
+		if err != nil {
+			return err
+		}
+
 	}
 	return nil
 }
@@ -638,13 +650,8 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`source File duration `, message) {
 		return false
 	}
-	if simpleRegex(`timeout Waiting for PGS Job Done`, message) {
-		return true
-	}
+
 	if simpleRegex(`Disk quota exceeded`, message) || simpleRegex(`No space left on device`, message) {
-		return true
-	}
-	if simpleRegex(`error on process PGS.*no such file or directory`, message) {
 		return true
 	}
 	// if simpleRegex(`At least one output file must be specified`, message) {
@@ -696,6 +703,11 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`connection refused`, message) {
 		return true
 	}
+
+	if simpleRegex(`with 0 items`, message) {
+		return false
+	}
+
 	// if simpleRegex(`srt: Invalid data found when processing input`, message) {
 	//	return true
 	//}
@@ -720,6 +732,7 @@ func verifyFailureMessage(message string) bool {
 	if simpleRegex(`probably corrupt input`, message) {
 		return false
 	}
+
 	return false
 }
 

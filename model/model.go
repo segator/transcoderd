@@ -189,6 +189,16 @@ func (t TaskEvents) GetByEventId(i int) (*TaskEventType, error) {
 func (t TaskEvents) GetLastElement(i int) interface{} {
 	return t[i]
 }
+
+func (t TaskEvents) FilterBy(notification NotificationType, status NotificationStatus) (filteredEvents TaskEvents) {
+	for _, event := range t {
+		if event.NotificationType == notification && event.Status == status {
+			filteredEvents = append(filteredEvents, event)
+		}
+	}
+	return filteredEvents
+
+}
 func (v *Job) AddEvent(notificationType NotificationType, notificationStatus NotificationStatus) (newEvent *TaskEventType) {
 	return v.AddEventComplete(notificationType, notificationStatus, "")
 }

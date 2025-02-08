@@ -21,7 +21,7 @@ type Repository interface {
 	PingServerUpdate(ctx context.Context, pingEventType model.PingEventType) error
 	GetTimeoutJobs(ctx context.Context, timeout time.Duration) ([]*model.TaskEventType, error)
 	GetJobs(ctx context.Context) (*[]model.Job, error)
-	GetJobsByStatus(ctx context.Context, status model.NotificationStatus) (jobs []*model.Job, returnError error)
+	GetJobsByStatus(ctx context.Context, notificationType model.NotificationType, status model.NotificationStatus) (jobs []*model.Job, returnError error)
 	GetJob(ctx context.Context, uuid string) (*model.Job, error)
 	GetJobByPath(ctx context.Context, path string) (*model.Job, error)
 	AddJob(ctx context.Context, video *model.Job) error
@@ -297,16 +297,16 @@ func (s *SQLRepository) RetrieveQueuedJob(ctx context.Context) (video *model.Job
 	return s.queuedJob(ctx, conn)
 }
 
-func (s *SQLRepository) GetJobsByStatus(ctx context.Context, status model.NotificationStatus) (jobs []*model.Job, returnError error) {
+func (s *SQLRepository) GetJobsByStatus(ctx context.Context, notificationType model.NotificationType, status model.NotificationStatus) (jobs []*model.Job, returnError error) {
 	conn, err := s.getConnection()
 	if err != nil {
 		return nil, err
 	}
-	return s.getJobsByStatus(ctx, conn, status)
+	return s.getJobsByStatus(ctx, conn, notificationType, status)
 }
 
-func (s *SQLRepository) getJobsByStatus(ctx context.Context, tx SQLDBOperations, statusFilter model.NotificationStatus) ([]*model.Job, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT v.id, v.source_path,v.source_size, v.target_path,v.target_size,vs.event_time, vs.status, vs.notification_type, vs.message FROM jobs v INNER JOIN job_status vs ON v.id = vs.job_id WHERE vs.status = $1;", statusFilter)
+func (s *SQLRepository) getJobsByStatus(ctx context.Context, tx SQLDBOperations, notificationTypeFilter model.NotificationType, statusFilter model.NotificationStatus) ([]*model.Job, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT v.id, v.source_path,v.source_size, v.target_path,v.target_size,vs.event_time, vs.status, vs.notification_type, vs.message FROM jobs v INNER JOIN job_status vs ON v.id = vs.job_id WHERE vs.notification_type = $1 and vs.status = $2 order by event_time desc;", notificationTypeFilter, statusFilter)
 	if err != nil {
 		return nil, err
 	}

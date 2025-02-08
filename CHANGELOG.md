@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.0](https://github.com/segator/transcoderd/compare/v2.2.1...v2.3.0) (2025-02-08)
+
+
+### 🎉 Features
+
+* if a job failed more than 10 times is marked as canceled ([032b406](https://github.com/segator/transcoderd/commit/032b40613ce2246517d966bbd0623df7e2ac2ba7))
+
 ## [2.2.1](https://github.com/segator/transcoderd/compare/v2.2.0...v2.2.1) (2025-02-08)
 
 

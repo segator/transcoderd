@@ -55,7 +55,7 @@ func (p *PGSToSrtStepExecutor) convertPGSToSrt(ctx context.Context, tracker Trac
 		"--input", inputFilePath,
 		"--output", outputFilePath,
 		"--tesseractlanguage", language,
-		"--tesseractdata", pgsConfig.TesseractDataPath).SetWorkDir(jobContext.WorkingDir)
+		"--tesseractdata", pgsConfig.TesseractDataPath)
 	outLog := ""
 	startRegex := regexp.MustCompile(`Starting OCR for (\d+) items`)
 	progressRegex := regexp.MustCompile(`Processed item (\d+)`)

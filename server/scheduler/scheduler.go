@@ -240,7 +240,7 @@ func (r *RuntimeScheduler) scheduleRoutine(ctx context.Context) {
 		case checksumPath := <-r.checksumChan:
 			r.pathChecksumMap[checksumPath.path] = checksumPath.checksum
 		case <-progressTicker.C:
-			if err := r.progressJobMaitenance(ctx); err != nil {
+			if err := r.progressJobMaintenance(ctx); err != nil {
 				log.Errorf("Error on progress job maintenance: %s", err)
 			}
 		case <-maintenanceTicker.C:
@@ -499,7 +499,7 @@ func (r *RuntimeScheduler) stop() {
 
 }
 
-func (r *RuntimeScheduler) progressJobMaitenance(ctx context.Context) error {
+func (r *RuntimeScheduler) progressJobMaintenance(ctx context.Context) error {
 	progressJobs, err := r.repo.GetAllProgressJobs(ctx)
 	if err != nil {
 		return err

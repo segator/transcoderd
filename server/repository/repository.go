@@ -682,7 +682,6 @@ func (s *SQLRepository) deleteProgressJob(ctx context.Context, conn SQLDBOperati
 		return err
 	}
 	return nil
-
 }
 
 func (s *SQLRepository) getAllProgressJobs(ctx context.Context, conn SQLDBOperations) ([]model.TaskProgressType, error) {
@@ -693,7 +692,7 @@ func (s *SQLRepository) getAllProgressJobs(ctx context.Context, conn SQLDBOperat
 	defer rows.Close()
 	var progressJobs []model.TaskProgressType
 	var etaSeconds float64
-	if rows.Next() {
+	for rows.Next() {
 		progress := model.TaskProgressType{}
 		err = rows.Scan(&progress.ProgressID, &progress.NotificationType, &progress.JobId, &progress.WorkerName, &progress.Percent, &etaSeconds, &progress.EventTime)
 		if err != nil {

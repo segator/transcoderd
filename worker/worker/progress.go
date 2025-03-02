@@ -47,7 +47,7 @@ func (e *ReportStepProgressTracker) Increment(increment int) {
 }
 
 func (e *ReportStepProgressTracker) reportTrackProgress(status model.TaskProgressStatus) {
-	if time.Since(e.lastUpdate) > 5*time.Second || status != model.ProgressingTaskProgressTypeStatus {
+	if time.Since(e.lastUpdate) > 15*time.Second || status != model.ProgressingTaskProgressTypeStatus {
 		err := e.serverClient.PublishTaskProgressEvent(&model.TaskProgressType{
 			Event: model.Event{
 				EventTime: time.Now(),

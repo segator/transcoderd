@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"time"
-	"transcoder/helper"
 	"transcoder/model"
 	"transcoder/server/web"
 )
@@ -126,16 +125,11 @@ func (s *ServerClient) request(method string, uri string, body io.Reader) (*http
 }
 
 func (s *ServerClient) PublishPingEvent() error {
-	publicIp, err := helper.GetPublicIP()
-	if err != nil {
-		return err
-	}
 	pingEvent := model.PingEventType{
 		Event: model.Event{
 			EventTime:  time.Now(),
 			WorkerName: s.workerName,
 		},
-		IP: publicIp,
 	}
 	event, err := envelopEvent(model.PingEvent, pingEvent)
 	if err != nil {

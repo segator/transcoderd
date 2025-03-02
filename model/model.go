@@ -81,8 +81,9 @@ type TaskPGS struct {
 }
 
 type EnvelopEvent struct {
-	EventType EventType       `json:"eventType"`
-	EventData json.RawMessage `json:"eventData"`
+	EventType  EventType       `json:"eventType"`
+	EventData  json.RawMessage `json:"eventData"`
+	RemoteAddr string
 }
 
 type Event struct {
@@ -100,7 +101,6 @@ type TaskEventType struct {
 
 type PingEventType struct {
 	Event
-	IP string `json:"ip"`
 }
 
 type TaskProgressStatus string

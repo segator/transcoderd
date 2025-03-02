@@ -123,7 +123,7 @@ func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.Envelo
 		if err = json.Unmarshal(event.EventData, &pingEvent); err != nil {
 			return err
 		}
-		return r.repo.PingServerUpdate(ctx, pingEvent)
+		return r.repo.PingServerUpdate(ctx, event.RemoteAddr, pingEvent)
 	case model.NotificationEvent:
 		taskEvent := model.TaskEventType{}
 		if err = json.Unmarshal(event.EventData, &taskEvent); err != nil {
@@ -156,7 +156,6 @@ func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.Envelo
 	default:
 		return fmt.Errorf("unknown event type %s", event.EventType)
 	}
-
 	return nil
 }
 

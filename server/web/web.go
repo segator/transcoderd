@@ -56,7 +56,9 @@ func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) handleWorkerEvent(writer http.ResponseWriter, request *http.Request) {
-	envelopEvent := &model.EnvelopEvent{}
+	envelopEvent := &model.EnvelopEvent{
+		RemoteAddr: strings.Split(request.RemoteAddr, ":")[0],
+	}
 	err := json.NewDecoder(request.Body).Decode(envelopEvent)
 	if webError(writer, err, 500) {
 		return

@@ -18,7 +18,7 @@ var (
 type Repository interface {
 	getConnection() (SQLDBOperations, error)
 	Initialize(ctx context.Context) error
-	PingServerUpdate(ctx context.Context, pingEventType model.PingEventType) error
+	PingServerUpdate(ctx context.Context, remoteAddr string, pingEventType model.PingEventType) error
 	GetTimeoutJobs(ctx context.Context, timeout time.Duration) ([]*model.TaskEventType, error)
 	GetJobs(ctx context.Context) (*[]model.Job, error)
 	GetJobsByStatus(ctx context.Context, notificationType model.NotificationType, status model.NotificationStatus) (jobs []*model.Job, returnError error)
@@ -497,12 +497,12 @@ func (s *SQLRepository) GetJobByPath(ctx context.Context, path string) (video *m
 	return s.getJobByPath(ctx, conn, path)
 }
 
-func (s *SQLRepository) PingServerUpdate(ctx context.Context, pingEventType model.PingEventType) (returnError error) {
+func (s *SQLRepository) PingServerUpdate(ctx context.Context, remoteAddr string, pingEventType model.PingEventType) (returnError error) {
 	conn, err := s.getConnection()
 	if err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, "INSERT INTO workers (name, ip,last_seen ) VALUES ($1,$2,$3) ON CONFLICT (name) DO UPDATE SET ip = $2, last_seen=$3;", pingEventType.WorkerName, pingEventType.IP, time.Now())
+	_, err = conn.ExecContext(ctx, "INSERT INTO workers (name, ip,last_seen ) VALUES ($1,$2,$3) ON CONFLICT (name) DO UPDATE SET ip = $2, last_seen=$3;", pingEventType.WorkerName, remoteAddr, time.Now())
 	return err
 }
 

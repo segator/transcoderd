@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.3.1](https://github.com/segator/transcoderd/compare/v2.3.0...v2.3.1) (2025-03-02)
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/asticode/go-astisub from 0.32.0 to 0.32.1 ([#26](https://github.com/segator/transcoderd/issues/26)) ([fb7a24a](https://github.com/segator/transcoderd/commit/fb7a24a0607737a00088b7473da74bed92cd8517))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.6.5 to 6.6.7 ([#28](https://github.com/segator/transcoderd/issues/28)) ([844efa1](https://github.com/segator/transcoderd/commit/844efa16a9f8b7a82e6c9e722ff54840590bcc67))
+
+
+### ♻️ Code Refactoring
+
+* server now calculates public IP instead of worker sending it ([#29](https://github.com/segator/transcoderd/issues/29)) ([7ac096f](https://github.com/segator/transcoderd/commit/7ac096f881730cbefb753bb89e212f1abfd5f56b))
+
 ## [2.3.0](https://github.com/segator/transcoderd/compare/v2.2.1...v2.3.0) (2025-02-10)
 
 

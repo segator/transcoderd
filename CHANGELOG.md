@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.3.2](https://github.com/segator/transcoderd/compare/v2.3.1...v2.3.2) (2025-03-06)
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/asticode/go-astisub from 0.32.1 to 0.34.0 ([2544776](https://github.com/segator/transcoderd/commit/25447764a533888dc5d64ad18bc79b9e33d99654))
+* **deps:** bump github.com/asticode/go-astisub from 0.32.1 to 0.34.0 ([aa2b2c3](https://github.com/segator/transcoderd/commit/aa2b2c35b36968954fbf6dc8b4ee3a92bc3d07e9))
+* **deps:** bump golang.org/x/net from 0.33.0 to 0.35.0 ([810896a](https://github.com/segator/transcoderd/commit/810896a1b01335d7259242d80d137e288c4b6ada))
+* **deps:** bump golang.org/x/net from 0.33.0 to 0.35.0 ([ba26161](https://github.com/segator/transcoderd/commit/ba261610e05ace411767a0729bb746caf1aa39f2))
+
 ## [2.3.1](https://github.com/segator/transcoderd/compare/v2.3.0...v2.3.1) (2025-03-02)
 
 

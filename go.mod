@@ -17,7 +17,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/pflag v1.0.6
 	github.com/spf13/viper v1.20.1
-	golang.org/x/net v0.37.0
+	golang.org/x/net v0.38.0
 	gopkg.in/ini.v1 v1.67.0
 	gopkg.in/vansante/go-ffprobe.v2 v2.2.1
 )

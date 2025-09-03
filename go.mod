@@ -15,7 +15,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/minio/selfupdate v0.6.0
 	github.com/sirupsen/logrus v1.9.3
-	github.com/spf13/pflag v1.0.6
+	github.com/spf13/pflag v1.0.9
 	github.com/spf13/viper v1.20.1
 	golang.org/x/net v0.42.0
 	gopkg.in/ini.v1 v1.67.0

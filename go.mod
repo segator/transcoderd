@@ -5,7 +5,7 @@ go 1.23.0
 toolchain go1.23.3
 
 require (
-	github.com/asticode/go-astisub v0.34.0
+	github.com/asticode/go-astisub v0.35.0
 	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/blang/semver/v4 v4.0.0
 	github.com/google/uuid v1.6.0

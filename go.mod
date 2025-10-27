@@ -3,7 +3,7 @@ module transcoder
 go 1.24.0
 
 require (
-	github.com/asticode/go-astisub v0.35.0
+	github.com/asticode/go-astisub v0.36.0
 	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/blang/semver/v4 v4.0.0
 	github.com/google/uuid v1.6.0

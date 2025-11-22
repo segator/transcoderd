@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	retryablehttp "github.com/hashicorp/go-retryablehttp"
 	"io"
 	"net/http"
 	"time"
 	"transcoder/model"
 	"transcoder/server/web"
+
+	retryablehttp "github.com/hashicorp/go-retryablehttp"
 )
 
 type ServerClient struct {
@@ -69,7 +70,7 @@ func (s *ServerClient) publishEvent(event *model.EnvelopEvent) error {
 	return nil
 }
 
-var NoJobAvailable = errors.New("no job available")
+var ErrNoJobAvailable = errors.New("no job available")
 
 func (s *ServerClient) RequestJob() (*model.RequestJobResponse, error) {
 	req, err := s.request("GET", "/api/v1/job/request", nil)
@@ -83,7 +84,7 @@ func (s *ServerClient) RequestJob() (*model.RequestJobResponse, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
-		return nil, NoJobAvailable
+		return nil, ErrNoJobAvailable
 	}
 
 	if resp.StatusCode != http.StatusOK {

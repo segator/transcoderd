@@ -3,12 +3,13 @@ package worker
 import (
 	"context"
 	"errors"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"sync"
 	"transcoder/update"
 	"transcoder/worker/console"
 	"transcoder/worker/serverclient"
+
+	log "github.com/sirupsen/logrus"
 
 	"time"
 )
@@ -84,7 +85,7 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 
 				requestJobResponse, err := q.serverClient.RequestJob()
 				if err != nil {
-					if !errors.Is(err, serverclient.NoJobAvailable) {
+					if !errors.Is(err, serverclient.ErrNoJobAvailable) {
 						q.logger.Errorf("Error Requesting Job: %v", err)
 					}
 					continue

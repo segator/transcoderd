@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gorilla/mux"
-	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 	"net/url"
@@ -19,6 +17,9 @@ import (
 	"transcoder/model"
 	"transcoder/server/scheduler"
 	"transcoder/update"
+
+	"github.com/gorilla/mux"
+	log "github.com/sirupsen/logrus"
 )
 
 type Server struct {
@@ -37,7 +38,7 @@ func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	job, err := s.scheduler.RequestJob(s.ctx, workerName)
-	if errors.Is(err, scheduler.NoJobsAvailable) {
+	if errors.Is(err, scheduler.ErrNoJobsAvailable) {
 		webError(writer, err, 204)
 		return
 	}

@@ -194,9 +194,10 @@ func StringToSlice(command string) (output []string) {
 		switch {
 		case c == ' ' && cutDoubleQuote && cutQuote:
 			if len(inLineWord) > 0 {
-				if inLineWord[0] == '\'' {
+				switch inLineWord[0] {
+				case '\'':
 					inLineWord = strings.Trim(inLineWord, "'")
-				} else if inLineWord[0] == '"' {
+				case '"':
 					inLineWord = strings.Trim(inLineWord, "\"")
 				}
 				output = append(output, inLineWord)

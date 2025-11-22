@@ -11,7 +11,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-ARG FFMPEG_BUILD_SCRIPT_VERSION=v1.54
+ARG FFMPEG_BUILD_SCRIPT_VERSION=v1.57
 # ADD doesn't cache when used from URL
 RUN git clone --depth 1 --branch ${FFMPEG_BUILD_SCRIPT_VERSION}  https://github.com/markus-perl/ffmpeg-build-script.git && \
     cd ffmpeg-build-script && \

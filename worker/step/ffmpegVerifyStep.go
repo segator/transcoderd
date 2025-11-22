@@ -1,8 +1,8 @@
 package step
 
 import (
+	"context"
 	"fmt"
-	"golang.org/x/net/context"
 	"transcoder/model"
 	"transcoder/worker/job"
 )

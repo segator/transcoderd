@@ -5,7 +5,7 @@ import (
 )
 
 var (
-	NoJobsAvailable       = errors.New("no jobs available to process")
+	ErrNoJobsAvailable    = errors.New("no jobs available to process")
 	ErrorJobNotFound      = errors.New("job Not found")
 	ErrorStreamNotAllowed = errors.New("upload not allowed")
 	ErrorInvalidStatus    = errors.New("job invalid status")

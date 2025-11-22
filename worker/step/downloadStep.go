@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/avast/retry-go"
-	"github.com/google/uuid"
 	"io"
 	"mime"
 	"net/http"
@@ -18,6 +16,9 @@ import (
 	"transcoder/worker/console"
 	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
+
+	"github.com/avast/retry-go"
+	"github.com/google/uuid"
 )
 
 var errJobNotFound = errors.New("job Not found")
@@ -121,7 +122,7 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 			logger.Errorf("Error on downloading job %v", err)
 		}),
 		retry.RetryIf(func(err error) bool {
-			return !(errors.Is(err, context.Canceled) || errors.Is(err, errJobNotFound))
+			return !errors.Is(err, context.Canceled) && !errors.Is(err, errJobNotFound)
 		}))
 	if err != nil {
 		return nil, err

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +14,9 @@ import (
 	"transcoder/helper"
 	"transcoder/model"
 	"transcoder/server/repository"
+
+	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 )
 
 var (
@@ -57,7 +58,7 @@ func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 	video, err := r.repo.RetrieveQueuedJob(ctx)
 	if err != nil {
 		if errors.Is(err, repository.ErrElementNotFound) {
-			return nil, NoJobsAvailable
+			return nil, ErrNoJobsAvailable
 		}
 		return nil, err
 	}
@@ -98,14 +99,14 @@ func (r *RuntimeScheduler) CancelJob(ctx context.Context, id string) error {
 	}
 
 	status := job.Events.GetStatus()
-	switch {
-	case status == model.CompletedNotificationStatus:
+	switch status {
+	case model.CompletedNotificationStatus:
 		return fmt.Errorf("job already completed")
-	case status == model.FailedNotificationStatus:
+	case model.FailedNotificationStatus:
 		return fmt.Errorf("job is failed")
-	case status == model.CanceledNotificationStatus:
+	case model.CanceledNotificationStatus:
 		return fmt.Errorf("job already canceled")
-	case status == model.AssignedNotificationStatus, status == model.StartedNotificationStatus:
+	case model.AssignedNotificationStatus, model.StartedNotificationStatus:
 		newEvent := job.AddEventComplete(model.JobNotification, model.CanceledNotificationStatus, "Job canceled by user")
 		err = r.repo.AddNewTaskEvent(ctx, newEvent)
 		if err != nil {

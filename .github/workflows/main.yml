@@ -61,9 +61,6 @@ jobs:
         run: devbox run -- make test
       - name: Build
         run: devbox run -- make build
-        env:
-          DOCKER_CACHE_TO: type=gha,mode=max
-          DOCKER_CACHE_FROM: type=gha
       - name: Publish artifacts
         if: github.event_name != 'pull_request'
         run: make publish

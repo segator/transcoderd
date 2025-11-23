@@ -27,12 +27,17 @@ fmt: ## Code Format
 .PHONY: test
 test: ## Run unit tests
 	@mkdir -p build
+	$(GO) test -v -coverprofile=build/coverage.out -covermode=atomic ./...
+
+.PHONY: test-race
+test-race: ## Run unit tests with race detector (requires more memory)
+	@mkdir -p build
 	$(GO) test -v -race -coverprofile=build/coverage.out -covermode=atomic ./...
 
 .PHONY: test-short
 test-short: ## Run unit tests in short mode
 	@mkdir -p build
-	$(GO) test -v -short -race ./...
+	$(GO) test -v -short ./...
 
 .PHONY: test-coverage
 test-coverage: test ## Run tests and show coverage

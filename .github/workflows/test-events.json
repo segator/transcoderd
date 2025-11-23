@@ -1,0 +1,36 @@
+{
+  "push": {
+    "ref": "refs/heads/main",
+    "repository": {
+      "name": "transcoderd",
+      "full_name": "segator/transcoderd",
+      "owner": {
+        "login": "segator"
+      }
+    },
+    "pusher": {
+      "name": "developer",
+      "email": "dev@example.com"
+    },
+    "head_commit": {
+      "message": "Test commit for act",
+      "author": {
+        "name": "Developer",
+        "email": "dev@example.com"
+      }
+    }
+  },
+  "pull_request": {
+    "number": 1,
+    "head": {
+      "ref": "test-branch",
+      "sha": "abc123"
+    },
+    "base": {
+      "ref": "main"
+    },
+    "title": "Test PR",
+    "body": "Test pull request for act"
+  }
+}
+

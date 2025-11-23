@@ -1,0 +1,16 @@
+# act configuration
+# Configuración para ejecutar GitHub Actions localmente
+
+# Usar imagen de Ubuntu con más herramientas
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+
+# Variables de entorno por defecto
+--env GITHUB_ACTIONS=true
+--env CI=true
+
+# Rehusar containers para ir más rápido
+--reuse
+
+# Mostrar output detallado
+--verbose
+

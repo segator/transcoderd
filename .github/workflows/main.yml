@@ -57,6 +57,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run Tests
+        run: make test
       - name: Build
         run: make build
       - name: Publish artifacts

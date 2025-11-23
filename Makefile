@@ -24,6 +24,18 @@ help:	## show this help menu.
 fmt: ## Code Format
 	go fmt  ./...
 
+.PHONY: test
+test: ## Run unit tests
+	$(GO) test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+.PHONY: test-short
+test-short: ## Run unit tests in short mode
+	$(GO) test -v -short -race ./...
+
+.PHONY: test-coverage
+test-coverage: test ## Run tests and show coverage
+	$(GO) tool cover -html=coverage.out
+
 .PHONY: lint
 lint: ## Linters
 	@golangci-lint run

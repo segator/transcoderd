@@ -56,6 +56,31 @@ lint: ## Linters
 lint-fix: ## Lint fix if possible
 	@golangci-lint run --fix
 
+.PHONY: act-ci
+act-ci: ## Run CI workflow locally with act
+	@echo "Running CI workflow with act..."
+	act -j ci
+
+.PHONY: act-ci-dryrun
+act-ci-dryrun: ## Dry run of CI workflow with act
+	@echo "Dry run of CI workflow..."
+	act -j ci -n
+
+.PHONY: act-lint
+act-lint: ## Run lint workflow locally with act
+	@echo "Running lint workflow with act..."
+	act -W .github/workflows/lint.yml
+
+.PHONY: act-list
+act-list: ## List all workflows and jobs
+	@echo "Available workflows and jobs:"
+	@act -l
+
+.PHONY: act-test
+act-test: ## Run only the test step with act
+	@echo "Running tests with act..."
+	act -j ci --workflows .github/workflows/main.yml -s GITHUB_TOKEN=dummy
+
 
 .PHONY: build
 build: buildgo-server buildgo-worker buildcontainer-server buildcontainer-worker  ## Build all artifacts

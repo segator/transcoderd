@@ -6,3 +6,8 @@ statik/
 /gui/
 build/coverage.out
 coverage.out
+
+# act (GitHub Actions local runner)
+.secrets
+.env.act
+

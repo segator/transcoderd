@@ -105,7 +105,11 @@ func TestContextPersistJobContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
-	defer ctx.Clean()
+	defer func() {
+		if err := ctx.Clean(); err != nil {
+			t.Errorf("Clean() error = %v", err)
+		}
+	}()
 
 	ctx.UpdateEvent(model.DownloadNotification, model.CompletedNotificationStatus, "Test message")
 

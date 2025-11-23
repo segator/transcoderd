@@ -22,7 +22,7 @@ func TestConfigCanBeInitialized(t *testing.T) {
 		Scheduler: nil,
 	}
 
-	if cfg == nil {
-		t.Fatal("Config should not be nil")
-	}
+	// Verify fields can be accessed
+	_ = cfg.Database
+	_ = cfg.Scheduler
 }

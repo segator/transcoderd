@@ -26,15 +26,27 @@ fmt: ## Code Format
 
 .PHONY: test
 test: ## Run unit tests
-	$(GO) test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+	@mkdir -p build
+	$(GO) test -v -race -coverprofile=build/coverage.out -covermode=atomic ./...
 
 .PHONY: test-short
 test-short: ## Run unit tests in short mode
+	@mkdir -p build
 	$(GO) test -v -short -race ./...
 
 .PHONY: test-coverage
 test-coverage: test ## Run tests and show coverage
-	$(GO) tool cover -html=coverage.out
+	$(GO) tool cover -html=build/coverage.out
+
+.PHONY: test-summary
+test-summary: ## Show test coverage summary
+	@echo "Running tests and generating coverage report..."
+	@mkdir -p build
+	@$(GO) test ./... -short -coverprofile=build/coverage.out -covermode=atomic > /dev/null 2>&1
+	@echo "\n📊 Coverage Summary:"
+	@$(GO) tool cover -func=build/coverage.out | grep total | awk '{print "Total Coverage: " $$3}'
+	@echo "\n📦 Package Coverage:"
+	@$(GO) test ./... -short -coverprofile=build/coverage.out -covermode=atomic 2>&1 | grep "coverage:" | sort -t: -k2 -rn
 
 .PHONY: lint
 lint: ## Linters

@@ -1,5 +1,52 @@
 # Changelog
 
+## [2.3.2](https://github.com/segator/transcoderd/compare/v2.3.1...v2.3.2) (2025-12-24)
+
+
+### 🏗️ Build System
+
+* **deps:** ffmpeg build script to v1.57 ([#68](https://github.com/segator/transcoderd/issues/68)) ([5e4e8ee](https://github.com/segator/transcoderd/commit/5e4e8ee9c0d34644a03969f74c18b62dc0fee4ac))
+
+
+### 🤖 Continuous Integration
+
+* fix golangci-lint ([#60](https://github.com/segator/transcoderd/issues/60)) ([55e4907](https://github.com/segator/transcoderd/commit/55e4907baa8ef5fe159f4de9cf058d886ad245ed))
+* lint code ([#69](https://github.com/segator/transcoderd/issues/69)) ([1274a58](https://github.com/segator/transcoderd/commit/1274a58139f55e09f9cab797c20ab16f4bbd796a))
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/asticode/go-astisub from 0.32.1 to 0.34.0 ([2544776](https://github.com/segator/transcoderd/commit/25447764a533888dc5d64ad18bc79b9e33d99654))
+* **deps:** bump github.com/asticode/go-astisub from 0.32.1 to 0.34.0 ([aa2b2c3](https://github.com/segator/transcoderd/commit/aa2b2c35b36968954fbf6dc8b4ee3a92bc3d07e9))
+* **deps:** bump github.com/asticode/go-astisub from 0.34.0 to 0.35.0 ([#53](https://github.com/segator/transcoderd/issues/53)) ([1253884](https://github.com/segator/transcoderd/commit/1253884014547e4edb841d8a3f81cd359dd82471))
+* **deps:** bump github.com/asticode/go-astisub from 0.35.0 to 0.36.0 ([#57](https://github.com/segator/transcoderd/issues/57)) ([f5c3f33](https://github.com/segator/transcoderd/commit/f5c3f33c72684987e4cf9a2c597667ee92cbab7f))
+* **deps:** bump github.com/asticode/go-astisub from 0.36.0 to 0.38.0 ([#59](https://github.com/segator/transcoderd/issues/59)) ([9ad914b](https://github.com/segator/transcoderd/commit/9ad914b839ed3ccbfb0b229c29b457400f6efb6d))
+* **deps:** bump github.com/hashicorp/go-retryablehttp from 0.7.7 to 0.7.8 ([#44](https://github.com/segator/transcoderd/issues/44)) ([5e4fbed](https://github.com/segator/transcoderd/commit/5e4fbede42d0cbd39c72a285042d89450c4b1b20))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.6.7 to 6.6.9 ([#58](https://github.com/segator/transcoderd/issues/58)) ([432c7ca](https://github.com/segator/transcoderd/commit/432c7ca1045110477ef6a091aa58916f48724698))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.6.9 to 6.7.0 ([#61](https://github.com/segator/transcoderd/issues/61)) ([bc46a71](https://github.com/segator/transcoderd/commit/bc46a71151bf3e55042f19e5e460dbf6473b11d6))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.7.0 to 6.7.1 ([#62](https://github.com/segator/transcoderd/issues/62)) ([0bb0f75](https://github.com/segator/transcoderd/commit/0bb0f753c9b707a7274cc5e477e6282e1ebab8f8))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.7.1 to 6.7.2 ([#64](https://github.com/segator/transcoderd/issues/64)) ([c3c2e5d](https://github.com/segator/transcoderd/commit/c3c2e5da8f5d275ea676bfc2450f726cc4fcc8dd))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.7.2 to 6.7.3 ([#65](https://github.com/segator/transcoderd/issues/65)) ([54f5a38](https://github.com/segator/transcoderd/commit/54f5a38d1915e2904148d64c3f339163e052ea68))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.7.3 to 6.7.5 ([#67](https://github.com/segator/transcoderd/issues/67)) ([794e672](https://github.com/segator/transcoderd/commit/794e672deb09d20d5f46ebcfc04965949c410a48))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.7.5 to 6.7.7 ([#72](https://github.com/segator/transcoderd/issues/72)) ([68f55c4](https://github.com/segator/transcoderd/commit/68f55c4857931d57ceec03f53db3a0674689878a))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.7.7 to 6.7.8 ([#73](https://github.com/segator/transcoderd/issues/73)) ([95a9b95](https://github.com/segator/transcoderd/commit/95a9b9551375e5718f096c970186359a2b6d8dc9))
+* **deps:** bump github.com/spf13/pflag from 1.0.6 to 1.0.9 ([#50](https://github.com/segator/transcoderd/issues/50)) ([5bf4090](https://github.com/segator/transcoderd/commit/5bf409052c1ce341d9a98bef9ec4f23ed94ce3bd))
+* **deps:** bump github.com/spf13/pflag from 1.0.9 to 1.0.10 ([#51](https://github.com/segator/transcoderd/issues/51)) ([af05cab](https://github.com/segator/transcoderd/commit/af05cab672060e5d917c6682f3c25f093c9832bc))
+* **deps:** bump github.com/spf13/viper from 1.19.0 to 1.20.1 ([#38](https://github.com/segator/transcoderd/issues/38)) ([726ec04](https://github.com/segator/transcoderd/commit/726ec043d812be6bc6b2750c3128e5f58eea1404))
+* **deps:** bump github.com/spf13/viper from 1.20.1 to 1.21.0 ([#52](https://github.com/segator/transcoderd/issues/52)) ([dd5d440](https://github.com/segator/transcoderd/commit/dd5d440eaa4ce52c58dc3b93fd2234f2cce75ff1))
+* **deps:** bump golang.org/x/crypto from 0.44.0 to 0.45.0 in the go_modules group across 1 directory ([#66](https://github.com/segator/transcoderd/issues/66)) ([5335747](https://github.com/segator/transcoderd/commit/5335747bd137195f9a9ac5a6742af5a4d3dc5f1c))
+* **deps:** bump golang.org/x/net from 0.33.0 to 0.35.0 ([810896a](https://github.com/segator/transcoderd/commit/810896a1b01335d7259242d80d137e288c4b6ada))
+* **deps:** bump golang.org/x/net from 0.33.0 to 0.35.0 ([ba26161](https://github.com/segator/transcoderd/commit/ba261610e05ace411767a0729bb746caf1aa39f2))
+* **deps:** bump golang.org/x/net from 0.35.0 to 0.36.0 in the go_modules group ([#36](https://github.com/segator/transcoderd/issues/36)) ([1198e07](https://github.com/segator/transcoderd/commit/1198e07b0811e714ec78a2ca1ac1d4b6f8451f06))
+* **deps:** bump golang.org/x/net from 0.35.0 to 0.37.0 ([#35](https://github.com/segator/transcoderd/issues/35)) ([535fbc0](https://github.com/segator/transcoderd/commit/535fbc047e158144a13e57c5fe49ffae46bc8d76))
+* **deps:** bump golang.org/x/net from 0.37.0 to 0.42.0 ([#45](https://github.com/segator/transcoderd/issues/45)) ([04ca6b3](https://github.com/segator/transcoderd/commit/04ca6b31571f99127cba2a9a4d6466ca565459ec))
+* **deps:** bump golang.org/x/net from 0.42.0 to 0.43.0 ([#48](https://github.com/segator/transcoderd/issues/48)) ([178b559](https://github.com/segator/transcoderd/commit/178b55943b0fb5828e43158977f58b89f405203b))
+* **deps:** bump golang.org/x/net from 0.43.0 to 0.44.0 ([#54](https://github.com/segator/transcoderd/issues/54)) ([8a47f16](https://github.com/segator/transcoderd/commit/8a47f163edd0e66ae89f9faef4cd8db114a7c8b2))
+* **deps:** bump golang.org/x/net from 0.44.0 to 0.45.0 ([#55](https://github.com/segator/transcoderd/issues/55)) ([985d9bf](https://github.com/segator/transcoderd/commit/985d9bfa5f92ea54b755f94be991b8ac8c0a769c))
+* **deps:** bump golang.org/x/net from 0.45.0 to 0.46.0 ([#56](https://github.com/segator/transcoderd/issues/56)) ([fbdaf98](https://github.com/segator/transcoderd/commit/fbdaf9896b2ea657a93331c604245061052fdf7c))
+* **deps:** bump golang.org/x/net from 0.46.0 to 0.47.0 ([#63](https://github.com/segator/transcoderd/issues/63)) ([9275963](https://github.com/segator/transcoderd/commit/9275963e2382df4c270143b121823fe1cb9fe384))
+* **deps:** bump golang.org/x/net from 0.47.0 to 0.48.0 ([#71](https://github.com/segator/transcoderd/issues/71)) ([8c27b7a](https://github.com/segator/transcoderd/commit/8c27b7ab87fe98604cb8405ed4a8ff02a208ef60))
+
 ## [2.3.1](https://github.com/segator/transcoderd/compare/v2.3.0...v2.3.1) (2025-03-02)
 
 

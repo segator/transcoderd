@@ -10,7 +10,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/jedib0t/go-pretty/v6 v6.7.8
-	github.com/lib/pq v1.10.9
+	github.com/lib/pq v1.11.1
 	github.com/minio/selfupdate v0.6.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/pflag v1.0.10

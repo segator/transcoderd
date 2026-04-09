@@ -24,6 +24,43 @@ help:	## show this help menu.
 fmt: ## Code Format
 	go fmt  ./...
 
+.PHONY: test
+test: ## Run unit tests
+	@mkdir -p build
+	$(GO) test -v -coverprofile=build/coverage.out -covermode=atomic ./...
+
+.PHONY: test-race
+test-race: ## Run unit tests with race detector (requires more memory)
+	@mkdir -p build
+	$(GO) test -v -race -coverprofile=build/coverage.out -covermode=atomic ./...
+
+.PHONY: test-short
+test-short: ## Run unit tests in short mode
+	@mkdir -p build
+	$(GO) test -v -short ./...
+
+.PHONY: test-integration
+test-integration: ## Run integration tests
+	@echo "Running integration tests..."
+	$(GO) test -tags=integration -v -timeout 5m ./integration/...
+
+.PHONY: test-all
+test-all: test test-integration ## Run all tests (unit + integration)
+
+.PHONY: test-coverage
+test-coverage: test ## Run tests and show coverage
+	$(GO) tool cover -html=build/coverage.out
+
+.PHONY: test-summary
+test-summary: ## Show test coverage summary
+	@echo "Running tests and generating coverage report..."
+	@mkdir -p build
+	@$(GO) test ./... -short -coverprofile=build/coverage.out -covermode=atomic > /dev/null 2>&1
+	@echo "\n📊 Coverage Summary:"
+	@$(GO) tool cover -func=build/coverage.out | grep total | awk '{print "Total Coverage: " $$3}'
+	@echo "\n📦 Package Coverage:"
+	@$(GO) test ./... -short -coverprofile=build/coverage.out -covermode=atomic 2>&1 | grep "coverage:" | sort -t: -k2 -rn
+
 .PHONY: lint
 lint: ## Linters
 	@golangci-lint run
@@ -31,6 +68,31 @@ lint: ## Linters
 .PHONY: lint-fix
 lint-fix: ## Lint fix if possible
 	@golangci-lint run --fix
+
+.PHONY: act-ci
+act-ci: ## Run CI workflow locally with act
+	@echo "Running CI workflow with act..."
+	act -j ci
+
+.PHONY: act-ci-dryrun
+act-ci-dryrun: ## Dry run of CI workflow with act
+	@echo "Dry run of CI workflow..."
+	act -j ci -n
+
+.PHONY: act-lint
+act-lint: ## Run lint workflow locally with act
+	@echo "Running lint workflow with act..."
+	act -W .github/workflows/lint.yml
+
+.PHONY: act-list
+act-list: ## List all workflows and jobs
+	@echo "Available workflows and jobs:"
+	@act -l
+
+.PHONY: act-test
+act-test: ## Run only the test step with act
+	@echo "Running tests with act..."
+	act -j ci --workflows .github/workflows/main.yml -s GITHUB_TOKEN=dummy
 
 
 .PHONY: build
@@ -47,17 +109,20 @@ buildgo-%:
 publish: publishcontainer-server publishcontainer-worker ## Publish all artifacts
 
 
-DOCKER_BUILD_ARG := --cache-to type=inline
+DOCKER_CACHE_TO ?= type=inline
+DOCKER_CACHE_FROM ?=
 
 
 .PHONY: buildcontainer-%
 .PHONY: publishcontainer-%
 buildcontainer-% publishcontainer-%:
-	@export DOCKER_BUILD_ARG="$(DOCKER_BUILD_ARG) $(if $(findstring publishcontainer,$@),--push,--load) $(if $(filter false,$(CACHE)),--no-cache,)"; \
+	@export DOCKER_BUILD_ARG="$(if $(findstring publishcontainer,$@),--push,--load) $(if $(filter false,$(CACHE)),--no-cache,)"; \
 	docker buildx build \
 		$${DOCKER_BUILD_ARG} \
-		--cache-from $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
-		--cache-from $(IMAGE_NAME):$*-main \
+		--cache-to $(DOCKER_CACHE_TO) \
+		--cache-from type=registry,ref=$(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
+		--cache-from type=registry,ref=$(IMAGE_NAME):$*-main \
+		$(if $(DOCKER_CACHE_FROM),--cache-from $(DOCKER_CACHE_FROM),) \
 		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION) \
 		-t $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
 		-f Dockerfile \

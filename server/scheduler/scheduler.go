@@ -521,8 +521,10 @@ func (r *RuntimeScheduler) jobMaintenance(ctx context.Context) error {
 	if err := r.failedJobMaintenance(ctx); err != nil {
 		return err
 	}
-	return r.assignedJobMaintenance(ctx)
-
+	if err := r.assignedJobMaintenance(ctx); err != nil {
+		return err
+	}
+	return r.completedJobMaintenance(ctx)
 }
 
 func (r *RuntimeScheduler) queuedJobMaintenance(ctx context.Context) error {
@@ -597,6 +599,44 @@ func (r *RuntimeScheduler) assignedJobMaintenance(ctx context.Context) error {
 			}
 			_, err = r.scheduleJobRequest(ctx, jobRequest)
 			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// completedJobMaintenance checks completed jobs to see if their target files still
+// exist on disk. If a target file is missing (e.g. deleted and replaced with a new
+// source), the job is re-queued for re-encoding.
+func (r *RuntimeScheduler) completedJobMaintenance(ctx context.Context) error {
+	completedJobs, err := r.repo.GetJobsByStatus(ctx, model.JobNotification, model.CompletedNotificationStatus)
+	if err != nil {
+		return err
+	}
+	for _, job := range completedJobs {
+		targetPath := filepath.Join(r.config.SourcePath, job.TargetPath)
+		if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+			l := log.WithFields(log.Fields{
+				"job_id":      job.Id.String(),
+				"target_path": targetPath,
+				"source_path": job.SourcePath,
+			})
+
+			// Only re-queue if the source file exists (otherwise there is nothing to encode)
+			sourcePath := filepath.Join(r.config.SourcePath, job.SourcePath)
+			if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+				l.Debug("Completed job target missing but source also missing, skipping")
+				continue
+			}
+
+			l.Info("Completed job target file missing, re-queuing for re-encoding")
+			jobRequest := &model.JobRequest{
+				SourcePath:     job.SourcePath,
+				TargetPath:     job.TargetPath,
+				ForceCompleted: true,
+			}
+			if _, err := r.scheduleJobRequest(ctx, jobRequest); err != nil {
 				return err
 			}
 		}
@@ -714,11 +754,13 @@ func verifyFailureMessage(message string) bool {
 	// if simpleRegex(`segmentation fault`, message) {
 	//	return true
 	//}
+	// mov_text and S_TEXT/WEBVTT are now handled by the worker via mkvextract+convert,
+	// so retry jobs that previously failed with these messages.
 	if simpleRegex(`Subtitle: mov_text`, message) {
-		return false
+		return true
 	}
 	if simpleRegex(`unsupported AVCodecID S_TEXT/WEBVTT`, message) {
-		return false
+		return true
 	}
 	if simpleRegex(`Errorf while decoding stream`, message) {
 		return false

@@ -74,7 +74,7 @@ func setupStepExecutors(jobExecutor *JobExecutor) map[model.NotificationType]*st
 		workerConfig.Name,
 		client.GetBaseDomain(),
 		step.WithOnCompleteOpt(func(jobContext *job.Context) {
-			if jobContext.Source.FFProbeData.HaveImageTypeSubtitle() {
+			if jobContext.Source.FFProbeData.HaveExtractableSubtitle() {
 				stepExecutors[model.MKVExtractNotification].AddJob(jobContext)
 				return
 			}
@@ -85,7 +85,13 @@ func setupStepExecutors(jobExecutor *JobExecutor) map[model.NotificationType]*st
 	// MKVExtract Step
 	stepExecutors[model.MKVExtractNotification] = step.NewMKVExtractStepExecutor(onErrOpt,
 		step.WithOnCompleteOpt(func(jobContext *job.Context) {
-			stepExecutors[model.PGSNotification].AddJob(jobContext)
+			if jobContext.Source.FFProbeData.HaveImageTypeSubtitle() {
+				stepExecutors[model.PGSNotification].AddJob(jobContext)
+				return
+			}
+			// No PGS subs (only extracted unsupported codec subs converted to SRT),
+			// skip OCR and go straight to FFmpeg encoding.
+			stepExecutors[model.FFMPEGSNotification].AddJob(jobContext)
 		}),
 		onErrOpt)
 

@@ -36,11 +36,11 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Install devbox
+        uses: jetify-com/devbox-install-action@v0.12.0
         with:
-          cache: ${{ steps.cache.outputs.cache }}
-          go-version: 1.22
+          enable-cache: ${{ steps.cache.outputs.cache }}
+
       - name: Set up release please
         id: release
         uses: googleapis/release-please-action@v4
@@ -57,13 +57,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run Tests
+        run: devbox run -- make test
       - name: Build
-        run: make build
+        run: devbox run -- make build
+        env:
+          DOCKER_CACHE_TO: type=gha,mode=max
+          DOCKER_CACHE_FROM: type=gha
       - name: Publish artifacts
         if: github.event_name != 'pull_request'
         run: make publish
+        env:
+          DOCKER_CACHE_TO: type=gha,mode=max
+          DOCKER_CACHE_FROM: type=gha
       - name: Publish simplified tag artifacts
         if: ${{ steps.release.outputs.release_created }}
+        env:
+          DOCKER_CACHE_TO: type=gha,mode=max
+          DOCKER_CACHE_FROM: type=gha
         run: |
           PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} make publish
           PROJECT_VERSION=v${{ steps.release.outputs.major }} make publish

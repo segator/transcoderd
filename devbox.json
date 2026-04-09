@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
+  "env": {
+    "GOPATH": "$HOME/go/",
+    "PATH":   "$PATH:$HOME/sdk/go1.24.5"
+  },
+  "packages": [
+    "golangci-lint@latest",
+    "go@1.24.5"
+  ],
+  "shell": {
+    "init_hook": [
+      "export \"GOROOT=$(go env GOROOT)\""
+    ],
+    "scripts": {
+      "test": [
+        "echo \"Error: no test specified\" && exit 1"
+      ]
+    }
+  }
+}

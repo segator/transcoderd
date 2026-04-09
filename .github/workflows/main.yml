@@ -61,11 +61,20 @@ jobs:
         run: devbox run -- make test
       - name: Build
         run: devbox run -- make build
+        env:
+          DOCKER_CACHE_TO: type=gha,mode=max
+          DOCKER_CACHE_FROM: type=gha
       - name: Publish artifacts
         if: github.event_name != 'pull_request'
         run: make publish
+        env:
+          DOCKER_CACHE_TO: type=gha,mode=max
+          DOCKER_CACHE_FROM: type=gha
       - name: Publish simplified tag artifacts
         if: ${{ steps.release.outputs.release_created }}
+        env:
+          DOCKER_CACHE_TO: type=gha,mode=max
+          DOCKER_CACHE_FROM: type=gha
         run: |
           PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} make publish
           PROJECT_VERSION=v${{ steps.release.outputs.major }} make publish

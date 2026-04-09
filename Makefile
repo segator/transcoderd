@@ -39,6 +39,14 @@ test-short: ## Run unit tests in short mode
 	@mkdir -p build
 	$(GO) test -v -short ./...
 
+.PHONY: test-integration
+test-integration: ## Run integration tests
+	@echo "Running integration tests..."
+	$(GO) test -tags=integration -v -timeout 5m ./integration/...
+
+.PHONY: test-all
+test-all: test test-integration ## Run all tests (unit + integration)
+
 .PHONY: test-coverage
 test-coverage: test ## Run tests and show coverage
 	$(GO) tool cover -html=build/coverage.out

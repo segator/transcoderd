@@ -60,6 +60,29 @@ func (c *NormalizedFFProbe) GetPGSSubtitles() []*Subtitle {
 	return PGSTOSrt
 }
 
+// GetExtractableSubtitles returns subtitle streams that need mkvextract + conversion to SRT.
+// These are streams with codecs that FFmpeg cannot read from MKV (e.g. S_TEXT/WEBVTT).
+func (c *NormalizedFFProbe) GetExtractableSubtitles() []*Subtitle {
+	var extractable []*Subtitle
+	for _, subt := range c.Subtitle {
+		if subt.NeedsMKVExtraction() {
+			extractable = append(extractable, subt)
+		}
+	}
+	return extractable
+}
+
+// HaveExtractableSubtitle returns true if the container has any subtitle that needs
+// mkvextract (either PGS for OCR or unsupported codecs for conversion).
+func (c *NormalizedFFProbe) HaveExtractableSubtitle() bool {
+	for _, sub := range c.Subtitle {
+		if sub.IsImageTypeSubtitle() || sub.NeedsMKVExtraction() {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *NormalizedFFProbe) ToJson() string {
 	b, err := json.Marshal(c)
 	if err != nil {
@@ -71,12 +94,14 @@ func (s *Subtitle) IsImageTypeSubtitle() bool {
 	return strings.Contains(strings.ToLower(s.Format), "pgs")
 }
 
-// IsUnsupportedCodec returns true if the subtitle stream has an unknown or unsupported codec.
+// NeedsMKVExtraction returns true if the subtitle stream has an unknown or unsupported codec
+// that FFmpeg cannot read directly from MKV but can be handled by extracting with mkvextract
+// and converting to SRT.
 // This happens when MKV files contain subtitle tracks with codec IDs that FFmpeg doesn't
-// recognize (e.g. S_TEXT/WEBVTT), causing ffprobe to report the codec as empty/"none".
-// It also catches codecs that are known to be incompatible with MKV output (e.g. mov_text).
-// These streams must be skipped entirely since FFmpeg cannot decode or copy them.
-func (s *Subtitle) IsUnsupportedCodec() bool {
+// recognize (e.g. S_TEXT/WEBVTT from mkvmerge v85+), causing ffprobe to report the codec
+// as empty/"none". It also catches codecs incompatible with MKV output (e.g. mov_text).
+// These streams are extracted via mkvextract, converted to SRT, and fed back to FFmpeg.
+func (s *Subtitle) NeedsMKVExtraction() bool {
 	if s.IsImageTypeSubtitle() {
 		return false
 	}

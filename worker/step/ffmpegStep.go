@@ -188,12 +188,9 @@ func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 	subtInputIndex := 1
 	outputIndex := 0
 	for _, subtitle := range container.Subtitle {
-		if subtitle.IsUnsupportedCodec() {
-			// Skip subtitle streams with unknown/unsupported codecs (e.g. S_TEXT/WEBVTT in MKV
-			// which ffprobe reports as codec "none"). FFmpeg cannot decode or copy these.
-			continue
-		}
-		if subtitle.IsImageTypeSubtitle() {
+		if subtitle.IsImageTypeSubtitle() || subtitle.NeedsMKVExtraction() {
+			// Both PGS (OCR'd to SRT) and extracted unsupported codecs (converted to SRT)
+			// are fed as separate input files. Map from the corresponding input index.
 			subtitleMap := fmt.Sprintf("-map %d -c:s:%d srt", subtInputIndex, outputIndex)
 			subtitleForced := ""
 			subtitleComment := ""
@@ -241,6 +238,7 @@ func (f *FFMPEGGenerator) buildArguments(threads uint8, extraArgs string, output
 func (f *FFMPEGGenerator) setInputFilters(jobContext *job.Context) {
 	source := jobContext.Source
 	f.inputPaths = append(f.inputPaths, source.FilePath)
+	// Add PGS-to-SRT converted files as separate inputs
 	if source.FFProbeData.HaveImageTypeSubtitle() {
 		for _, subt := range source.FFProbeData.Subtitle {
 			if subt.IsImageTypeSubtitle() {
@@ -248,6 +246,11 @@ func (f *FFMPEGGenerator) setInputFilters(jobContext *job.Context) {
 				f.inputPaths = append(f.inputPaths, srtEncodedFile)
 			}
 		}
+	}
+	// Add extracted-and-converted subtitle files (e.g. WebVTT -> SRT) as separate inputs
+	for _, subt := range source.FFProbeData.GetExtractableSubtitles() {
+		srtConvertedFile := filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%d.srt", subt.Id))
+		f.inputPaths = append(f.inputPaths, srtConvertedFile)
 	}
 }
 

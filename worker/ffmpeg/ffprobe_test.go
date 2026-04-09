@@ -32,7 +32,7 @@ func TestSubtitleIsImageTypeSubtitle(t *testing.T) {
 	}
 }
 
-func TestSubtitleIsUnsupportedCodec(t *testing.T) {
+func TestSubtitleNeedsMKVExtraction(t *testing.T) {
 	tests := []struct {
 		name   string
 		format string
@@ -52,9 +52,9 @@ func TestSubtitleIsUnsupportedCodec(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sub := &Subtitle{Format: tt.format}
-			got := sub.IsUnsupportedCodec()
+			got := sub.NeedsMKVExtraction()
 			if got != tt.want {
-				t.Errorf("IsUnsupportedCodec() = %v, want %v for format %q", got, tt.want, tt.format)
+				t.Errorf("NeedsMKVExtraction() = %v, want %v for format %q", got, tt.want, tt.format)
 			}
 		})
 	}
@@ -100,6 +100,129 @@ func TestNormalizedFFProbeHaveImageTypeSubtitle(t *testing.T) {
 			got := probe.HaveImageTypeSubtitle()
 			if got != tt.want {
 				t.Errorf("HaveImageTypeSubtitle() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizedFFProbeGetExtractableSubtitles(t *testing.T) {
+	tests := []struct {
+		name      string
+		subtitles []*Subtitle
+		wantCount int
+	}{
+		{
+			name: "Has WebVTT-like (empty codec) subtitles",
+			subtitles: []*Subtitle{
+				{Id: 1, Format: "srt", Language: "eng"},
+				{Id: 2, Format: "", Language: "spa"},
+				{Id: 3, Format: "none", Language: "fre"},
+			},
+			wantCount: 2,
+		},
+		{
+			name: "Has mov_text subtitle",
+			subtitles: []*Subtitle{
+				{Id: 1, Format: "srt", Language: "eng"},
+				{Id: 2, Format: "mov_text", Language: "spa"},
+			},
+			wantCount: 1,
+		},
+		{
+			name: "PGS is not extractable (handled by OCR pipeline)",
+			subtitles: []*Subtitle{
+				{Id: 1, Format: "pgs", Language: "eng"},
+				{Id: 2, Format: "", Language: "spa"},
+			},
+			wantCount: 1,
+		},
+		{
+			name: "No extractable subtitles",
+			subtitles: []*Subtitle{
+				{Id: 1, Format: "srt", Language: "eng"},
+				{Id: 2, Format: "ass", Language: "spa"},
+			},
+			wantCount: 0,
+		},
+		{
+			name:      "Empty subtitles",
+			subtitles: []*Subtitle{},
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			probe := &NormalizedFFProbe{Subtitle: tt.subtitles}
+			got := probe.GetExtractableSubtitles()
+			if len(got) != tt.wantCount {
+				t.Errorf("GetExtractableSubtitles() returned %d subtitles, want %d", len(got), tt.wantCount)
+			}
+			for _, sub := range got {
+				if !sub.NeedsMKVExtraction() {
+					t.Errorf("GetExtractableSubtitles() returned non-extractable subtitle: %q", sub.Format)
+				}
+			}
+		})
+	}
+}
+
+func TestNormalizedFFProbeHaveExtractableSubtitle(t *testing.T) {
+	tests := []struct {
+		name      string
+		subtitles []*Subtitle
+		want      bool
+	}{
+		{
+			name: "Has PGS subtitle",
+			subtitles: []*Subtitle{
+				{Format: "srt"},
+				{Format: "pgs"},
+			},
+			want: true,
+		},
+		{
+			name: "Has unsupported codec subtitle",
+			subtitles: []*Subtitle{
+				{Format: "srt"},
+				{Format: ""},
+			},
+			want: true,
+		},
+		{
+			name: "Has both PGS and unsupported codec",
+			subtitles: []*Subtitle{
+				{Format: "pgs"},
+				{Format: "none"},
+			},
+			want: true,
+		},
+		{
+			name: "Only normal text subtitles",
+			subtitles: []*Subtitle{
+				{Format: "srt"},
+				{Format: "ass"},
+			},
+			want: false,
+		},
+		{
+			name:      "Empty subtitles",
+			subtitles: []*Subtitle{},
+			want:      false,
+		},
+		{
+			name:      "Nil subtitles",
+			subtitles: nil,
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			probe := &NormalizedFFProbe{Subtitle: tt.subtitles}
+			got := probe.HaveExtractableSubtitle()
+			if got != tt.want {
+				t.Errorf("HaveExtractableSubtitle() = %v, want %v", got, tt.want)
 			}
 		})
 	}

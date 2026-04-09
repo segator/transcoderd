@@ -32,6 +32,34 @@ func TestSubtitleIsImageTypeSubtitle(t *testing.T) {
 	}
 }
 
+func TestSubtitleIsUnsupportedCodec(t *testing.T) {
+	tests := []struct {
+		name   string
+		format string
+		want   bool
+	}{
+		{"Empty format (ffprobe unknown codec)", "", true},
+		{"None format (ffprobe unrecognized)", "none", true},
+		{"mov_text (MP4-only codec)", "mov_text", true},
+		{"SRT subtitle", "srt", false},
+		{"Subrip subtitle", "subrip", false},
+		{"ASS subtitle", "ass", false},
+		{"SSA subtitle", "ssa", false},
+		{"PGS subtitle (handled by OCR pipeline)", "hdmv_pgs_subtitle", false},
+		{"PGS uppercase", "PGS", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sub := &Subtitle{Format: tt.format}
+			got := sub.IsUnsupportedCodec()
+			if got != tt.want {
+				t.Errorf("IsUnsupportedCodec() = %v, want %v for format %q", got, tt.want, tt.format)
+			}
+		})
+	}
+}
+
 func TestNormalizedFFProbeHaveImageTypeSubtitle(t *testing.T) {
 	tests := []struct {
 		name      string

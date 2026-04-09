@@ -71,6 +71,25 @@ func (s *Subtitle) IsImageTypeSubtitle() bool {
 	return strings.Contains(strings.ToLower(s.Format), "pgs")
 }
 
+// IsUnsupportedCodec returns true if the subtitle stream has an unknown or unsupported codec.
+// This happens when MKV files contain subtitle tracks with codec IDs that FFmpeg doesn't
+// recognize (e.g. S_TEXT/WEBVTT), causing ffprobe to report the codec as empty/"none".
+// It also catches codecs that are known to be incompatible with MKV output (e.g. mov_text).
+// These streams must be skipped entirely since FFmpeg cannot decode or copy them.
+func (s *Subtitle) IsUnsupportedCodec() bool {
+	if s.IsImageTypeSubtitle() {
+		return false
+	}
+	format := strings.ToLower(s.Format)
+	if format == "" || format == "none" {
+		return true
+	}
+	if format == "mov_text" {
+		return true
+	}
+	return false
+}
+
 func ExtractFFProbeData(ctx context.Context, inputFile string) (data *ffprobe.ProbeData, err error) {
 	fileReader, err := os.Open(inputFile)
 	if err != nil {

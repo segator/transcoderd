@@ -11,13 +11,12 @@ import (
 
 // InMemoryRepository implementa Repository en memoria para tests
 type InMemoryRepository struct {
-	mu             sync.RWMutex
-	jobs           map[string]*model.Job
-	events         map[string][]*model.TaskEventType
-	progress       map[string]*model.TaskProgressType
-	workers        map[string]*model.Worker
-	jobsByPath     map[string]*model.Job
-	transactionCtx context.Context
+	mu         sync.RWMutex
+	jobs       map[string]*model.Job
+	events     map[string][]*model.TaskEventType
+	progress   map[string]*model.TaskProgressType
+	workers    map[string]*model.Worker
+	jobsByPath map[string]*model.Job
 }
 
 func NewInMemoryRepository() *InMemoryRepository {

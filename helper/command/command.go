@@ -85,7 +85,6 @@ func (c *Command) Run(opt ...Option) (exitCode int, err error) {
 
 func (c *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode int, err error) {
 	wg := &sync.WaitGroup{}
-	defer wg.Wait()
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(ctx, c.Command, c.Params...)
@@ -112,6 +111,9 @@ func (c *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode i
 	go c.readerStreamProcessor(ctx, wg, stderr, c.stderrFunc)
 
 	err = cmd.Wait()
+	// Wait for stream processor goroutines to finish before returning,
+	// so callers can safely read captured output immediately.
+	wg.Wait()
 	if err != nil {
 		var msg *exec.ExitError
 		if errors.As(err, &msg) {
@@ -156,14 +158,18 @@ loop:
 	for {
 		select {
 		case <-ctx.Done():
+			if callbackFunc != nil {
+				callbackFunc(nil, true)
+			}
 			return
 		default:
 			readed, err := reader.Read(buffer)
 			if err != nil {
-				if err == io.EOF {
-					if callbackFunc != nil {
-						callbackFunc(nil, true)
-					}
+				// Treat any read error as end-of-stream. cmd.Wait() closes
+				// the pipe, which may surface as io.ErrClosedPipe or
+				// os.ErrClosed rather than io.EOF.
+				if callbackFunc != nil {
+					callbackFunc(nil, true)
 				}
 				break loop
 			}

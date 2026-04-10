@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestNewCommand(t *testing.T) {
@@ -223,13 +222,13 @@ func TestCommandExecution(t *testing.T) {
 
 	var mu sync.Mutex
 	var output []byte
-	done := make(chan struct{})
+	eofCalled := false
 
 	stdoutFunc := func(buffer []byte, exit bool) {
 		mu.Lock()
 		defer mu.Unlock()
 		if exit {
-			close(done)
+			eofCalled = true
 			return
 		}
 		output = append(output, buffer...)
@@ -254,17 +253,16 @@ func TestCommandExecution(t *testing.T) {
 		t.Errorf("exitCode = %d, want 0", exitCode)
 	}
 
-	// RunWithContext uses defer wg.Wait() so stdout goroutines may still
-	// be running after it returns. Wait for the EOF callback.
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Timed out waiting for stdout EOF callback")
-	}
-
+	// RunWithContext now waits for goroutines before returning,
+	// so output and eofCalled are safe to read without extra waiting.
 	mu.Lock()
 	outputStr := strings.TrimSpace(string(output))
+	gotEOF := eofCalled
 	mu.Unlock()
+
+	if !gotEOF {
+		t.Error("EOF callback was never called")
+	}
 
 	if len(outputStr) == 0 {
 		t.Error("No output captured")

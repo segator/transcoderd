@@ -35,6 +35,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
+        if: github.event_name != 'pull_request'
         uses: docker/setup-buildx-action@v3
       - name: Install devbox
         uses: jetify-com/devbox-install-action@v0.12.0
@@ -52,6 +53,7 @@ jobs:
         if: ${{ steps.release.outputs.release_created }}
         run: echo "PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}" >> $GITHUB_ENV
       - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -59,22 +61,16 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Run Tests
         run: devbox run -- make test
-      - name: Build
-        run: devbox run -- make build
-        env:
-          DOCKER_CACHE_TO: type=gha,mode=max
-          DOCKER_CACHE_FROM: type=gha
-      - name: Publish artifacts
+      - name: Build Go binaries
+        run: devbox run -- make buildgo
+      - name: Build and push cache images (FFmpeg, PGS)
+        if: github.event_name != 'pull_request'
+        run: make buildcache
+      - name: Publish Docker containers
         if: github.event_name != 'pull_request'
         run: make publish
-        env:
-          DOCKER_CACHE_TO: type=gha,mode=max
-          DOCKER_CACHE_FROM: type=gha
       - name: Publish simplified tag artifacts
         if: ${{ steps.release.outputs.release_created }}
-        env:
-          DOCKER_CACHE_TO: type=gha,mode=max
-          DOCKER_CACHE_FROM: type=gha
         run: |
           PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} make publish
           PROJECT_VERSION=v${{ steps.release.outputs.major }} make publish
@@ -83,5 +79,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload ${{ steps.release.outputs.tag_name }} ./dist/*  --clobber
-
-

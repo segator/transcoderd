@@ -66,6 +66,93 @@ docker run -d \
        --hostname $(hostname) \ 
        ghcr.io/segator/transcoderd:worker-v2.3.1 \ # x-release-please-version
        --web.token my_secret_token \ # Replace it for the same value as in the server config
-       --web.domain http://192.168.1.55:8080 # Replace it for the server IP or public endpoint if you want remote access.
+        --web.domain http://192.168.1.55:8080 # Replace it for the server IP or public endpoint if you want remote access.
         
+```
+
+## Development
+
+### Prerequisites
+- [Go 1.24](https://go.dev/dl/)
+- [golangci-lint](https://golangci-lint.run/welcome/install/)
+- Docker with [buildx](https://docs.docker.com/build/install-buildx/) (for container builds)
+- PostgreSQL (for integration tests, provided via testcontainers)
+
+Alternatively, install [Devbox](https://www.jetify.com/devbox) which provides all Go and lint tooling via Nix.
+
+### Build
+
+```bash
+make build              # Build Go binaries + Docker containers
+make buildgo            # Build Go binaries only (no Docker)
+make buildgo-server     # Build server binary only -> dist/transcoderd-server
+make buildgo-worker     # Build worker binary only -> dist/transcoderd-worker
+```
+
+### Test
+
+```bash
+make test               # Unit tests with coverage
+make test-race          # Unit tests with race detector
+make test-short         # Unit tests in short mode
+make test-integration   # Integration tests (requires Docker for testcontainers)
+make test-all           # Unit + integration tests
+make test-coverage      # Run tests and open coverage report in browser
+
+# Run a single test
+go test -v -run TestFunctionName ./path/to/package/...
+```
+
+### Lint
+
+```bash
+make lint               # Run golangci-lint
+make lint-fix           # Run golangci-lint with auto-fix
+make fmt                # Run go fmt
+```
+
+### Docker
+
+```bash
+make buildcontainer-server   # Build server Docker image (loads locally)
+make buildcontainer-worker   # Build worker Docker image (loads locally)
+make publishcontainer-server # Build and push server image to registry
+make publishcontainer-worker # Build and push worker image to registry
+```
+
+Cache images for FFmpeg and PGS builder stages (avoids ~50min FFmpeg rebuilds):
+
+```bash
+make buildcache              # Build and push all cache images
+make buildcache-ffmpeg       # Build and push FFmpeg cache image only
+make buildcache-pgs          # Build and push PGS cache image only
+```
+
+### CI Pipeline
+
+- **Lint**: runs `golangci-lint` on every push and PR
+- **Build + Test**: runs `make test` and `make buildgo` on every push and PR
+- **Docker Publish**: builds and pushes Docker images on pushes to `main` only (PRs skip Docker)
+- **Release**: managed by [Release Please](https://github.com/googleapis/release-please) on `main` using conventional commits
+
+### Project Structure
+
+```
+cmd/            # Shared CLI config (pflag, viper, mapstructure)
+model/          # Domain types (Job, Event, Worker)
+helper/         # Utilities (command exec, concurrent collections, progress)
+server/         # Server application
+  config/       # Server config structs
+  repository/   # PostgreSQL repository (interface + SQL impl)
+  scheduler/    # Job scheduling engine
+  web/          # HTTP API (gorilla/mux)
+worker/         # Worker application
+  config/       # Worker config structs (FFmpeg, PGS, etc.)
+  console/      # TUI rendering and logging
+  ffmpeg/       # ffprobe wrapper
+  job/          # Job execution context
+  serverclient/ # HTTP client to server API
+  step/         # Encoding pipeline steps
+  worker/       # Worker coordination loop
+integration/    # Integration tests (build tag: integration)
 ```

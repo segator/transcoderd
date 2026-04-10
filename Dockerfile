@@ -38,10 +38,10 @@ FROM base AS server
 COPY ./dist/transcoderd-server /app/transcoderd-server
 ENTRYPOINT ["/app/transcoderd-server"]
 
-FROM mcr.microsoft.com/dotnet/sdk:6.0 AS builder-pgs
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS builder-pgs
 WORKDIR /src
 ARG tessdata_version=ced78752cc61322fb554c280d13360b35b8684e4
-ARG pgstosrt_version=3123a9004cf1e163b6b7171a72deff2a899ed361
+ARG pgstosrt_version=ef11919491b5c98f9dcdaf13d721596e60efb7ed
 
 RUN apt-get -y update && \
   apt-get -y upgrade && \
@@ -50,7 +50,7 @@ RUN apt-get -y update && \
     ca-certificates \
     g++ \
     libtool \
-    libtesseract4 \
+    libtesseract-dev \
     make \
     pkg-config \
     wget \
@@ -67,16 +67,16 @@ RUN wget -O pgstosrt.zip "https://github.com/Tentacule/PgsToSrt/archive/${pgstos
     rm pgstosrt.zip && \
     cd PgsToSrt-${pgstosrt_version}/src && \
     dotnet restore  && \
-    dotnet publish -c Release -f net6.0 -o /src/PgsToSrt/out
+    dotnet publish -c Release -f net8.0 -o /src/PgsToSrt/out
 
 FROM base AS worker
 WORKDIR /app
 COPY --from=builder-pgs /src/tessdata /app/tessdata
 COPY --from=builder-pgs /src/PgsToSrt/out /app
-RUN wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb && \
+RUN wget https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb && \
     dpkg -i packages-microsoft-prod.deb && \
     apt-get update && \
-    apt-get install -y dotnet-runtime-6.0 libtesseract-dev && \
+    apt-get install -y dotnet-runtime-8.0 libtesseract-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f packages-microsoft-prod.deb

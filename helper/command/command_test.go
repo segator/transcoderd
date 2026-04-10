@@ -5,7 +5,9 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestNewCommand(t *testing.T) {
@@ -219,8 +221,17 @@ func TestCommandExecution(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
+	var mu sync.Mutex
 	var output []byte
+	done := make(chan struct{})
+
 	stdoutFunc := func(buffer []byte, exit bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if exit {
+			close(done)
+			return
+		}
 		output = append(output, buffer...)
 	}
 
@@ -243,11 +254,22 @@ func TestCommandExecution(t *testing.T) {
 		t.Errorf("exitCode = %d, want 0", exitCode)
 	}
 
-	if len(output) == 0 {
+	// RunWithContext uses defer wg.Wait() so stdout goroutines may still
+	// be running after it returns. Wait for the EOF callback.
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Timed out waiting for stdout EOF callback")
+	}
+
+	mu.Lock()
+	outputStr := strings.TrimSpace(string(output))
+	mu.Unlock()
+
+	if len(outputStr) == 0 {
 		t.Error("No output captured")
 	}
 
-	outputStr := strings.TrimSpace(string(output))
 	if !strings.Contains(outputStr, "test") {
 		t.Errorf("output = %q, want to contain 'test'", outputStr)
 	}

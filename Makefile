@@ -5,7 +5,7 @@ GOOPTS ?=
 GOOS ?= $(shell $(GO) env GOHOSTOS)
 GOARCH ?= $(shell $(GO) env GOHOSTARCH)
 GIT_COMMIT_SHA := $(shell git rev-parse --short HEAD)
-GIT_BRANCH_NAME := $(shell git rev-parse --abbrev-ref HEAD)
+GIT_BRANCH_NAME := $(shell git rev-parse --abbrev-ref HEAD | sed 's/[^a-zA-Z0-9._-]/-/g')
 BUILD_DATE := $(shell date +%Y-%m-%dT%H:%M:%SZ)
 IMAGE_NAME ?= ghcr.io/segator/transcoderd
 PROJECT_VERSION ?= $(shell cat version.txt)-dev
@@ -96,7 +96,10 @@ act-test: ## Run only the test step with act
 
 
 .PHONY: build
-build: buildgo-server buildgo-worker buildcontainer-server buildcontainer-worker  ## Build all artifacts
+build: buildgo-server buildgo-worker buildcontainer-server buildcontainer-worker  ## Build all artifacts (Go binaries + Docker containers)
+
+.PHONY: buildgo
+buildgo: buildgo-server buildgo-worker  ## Build Go binaries only (no Docker)
 
 
 
@@ -109,8 +112,35 @@ buildgo-%:
 publish: publishcontainer-server publishcontainer-worker ## Publish all artifacts
 
 
-DOCKER_CACHE_TO ?= type=inline
-DOCKER_CACHE_FROM ?=
+# Cache image tags for slow build stages (FFmpeg ~50min, PGS ~5min).
+# These are built once and reused across server/worker builds.
+FFMPEG_CACHE_IMAGE := $(IMAGE_NAME):cache-ffmpeg
+PGS_CACHE_IMAGE := $(IMAGE_NAME):cache-pgs
+
+.PHONY: buildcache
+buildcache: buildcache-ffmpeg buildcache-pgs ## Build and push cache images for slow stages
+
+.PHONY: buildcache-ffmpeg
+buildcache-ffmpeg: ## Build and push FFmpeg cache image
+	docker buildx build \
+		--push \
+		--cache-from type=registry,ref=$(FFMPEG_CACHE_IMAGE) \
+		--cache-to type=inline \
+		-t $(FFMPEG_CACHE_IMAGE) \
+		-f Dockerfile \
+		--target builder-ffmpeg \
+		. ;
+
+.PHONY: buildcache-pgs
+buildcache-pgs: ## Build and push PGS cache image
+	docker buildx build \
+		--push \
+		--cache-from type=registry,ref=$(PGS_CACHE_IMAGE) \
+		--cache-to type=inline \
+		-t $(PGS_CACHE_IMAGE) \
+		-f Dockerfile \
+		--target builder-pgs \
+		. ;
 
 
 .PHONY: buildcontainer-%
@@ -119,13 +149,13 @@ buildcontainer-% publishcontainer-%:
 	@export DOCKER_BUILD_ARG="$(if $(findstring publishcontainer,$@),--push,--load) $(if $(filter false,$(CACHE)),--no-cache,)"; \
 	docker buildx build \
 		$${DOCKER_BUILD_ARG} \
-		--cache-to $(DOCKER_CACHE_TO) \
+		--cache-to type=inline \
 		--cache-from type=registry,ref=$(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
 		--cache-from type=registry,ref=$(IMAGE_NAME):$*-main \
-		$(if $(DOCKER_CACHE_FROM),--cache-from $(DOCKER_CACHE_FROM),) \
+		--cache-from type=registry,ref=$(FFMPEG_CACHE_IMAGE) \
+		--cache-from type=registry,ref=$(PGS_CACHE_IMAGE) \
 		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION) \
 		-t $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
 		-f Dockerfile \
 		--target $* \
 		. ;
-

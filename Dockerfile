@@ -73,13 +73,15 @@ FROM base AS worker
 WORKDIR /app
 COPY --from=builder-pgs /src/tessdata /app/tessdata
 COPY --from=builder-pgs /src/PgsToSrt/out /app
-RUN wget https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb && \
-    dpkg -i packages-microsoft-prod.deb && \
-    apt-get update && \
-    apt-get install -y dotnet-runtime-8.0 libtesseract-dev && \
+RUN apt-get update && \
+    apt-get install -y libtesseract-dev && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -f packages-microsoft-prod.deb
+    rm -rf /var/lib/apt/lists/*
+RUN wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh && \
+    chmod +x dotnet-install.sh && \
+    ./dotnet-install.sh --channel 8.0 --runtime dotnet --install-dir /usr/share/dotnet && \
+    ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet && \
+    rm dotnet-install.sh
 
 
 COPY ./dist/transcoderd-worker /app/transcoderd-worker

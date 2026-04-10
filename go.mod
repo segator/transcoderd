@@ -12,7 +12,7 @@ require (
 	github.com/jedib0t/go-pretty/v6 v6.7.9
 	github.com/lib/pq v1.12.3
 	github.com/minio/selfupdate v0.6.0
-	github.com/sirupsen/logrus v1.9.3
+	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/testcontainers/testcontainers-go v0.40.0

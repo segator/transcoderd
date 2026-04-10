@@ -18,7 +18,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
 	gopkg.in/ini.v1 v1.67.1
-	gopkg.in/vansante/go-ffprobe.v2 v2.2.1
+	gopkg.in/vansante/go-ffprobe.v2 v2.3.0
 )
 
 require (

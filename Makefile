@@ -125,7 +125,7 @@ buildcache-ffmpeg: ## Build and push FFmpeg cache image
 	docker buildx build \
 		--push \
 		--cache-from type=registry,ref=$(FFMPEG_CACHE_IMAGE) \
-		--cache-to type=inline \
+		--cache-to type=registry,ref=$(FFMPEG_CACHE_IMAGE),mode=max \
 		-t $(FFMPEG_CACHE_IMAGE) \
 		-f Dockerfile \
 		--target builder-ffmpeg \
@@ -136,7 +136,7 @@ buildcache-pgs: ## Build and push PGS cache image
 	docker buildx build \
 		--push \
 		--cache-from type=registry,ref=$(PGS_CACHE_IMAGE) \
-		--cache-to type=inline \
+		--cache-to type=registry,ref=$(PGS_CACHE_IMAGE),mode=max \
 		-t $(PGS_CACHE_IMAGE) \
 		-f Dockerfile \
 		--target builder-pgs \
@@ -149,7 +149,6 @@ buildcontainer-% publishcontainer-%:
 	@export DOCKER_BUILD_ARG="$(if $(findstring publishcontainer,$@),--push,--load) $(if $(filter false,$(CACHE)),--no-cache,)"; \
 	docker buildx build \
 		$${DOCKER_BUILD_ARG} \
-		--cache-to type=inline \
 		--cache-from type=registry,ref=$(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
 		--cache-from type=registry,ref=$(IMAGE_NAME):$*-main \
 		--cache-from type=registry,ref=$(FFMPEG_CACHE_IMAGE) \

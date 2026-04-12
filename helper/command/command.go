@@ -110,10 +110,12 @@ func (c *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode i
 	go c.readerStreamProcessor(ctx, wg, stdout, c.stdoutFunc)
 	go c.readerStreamProcessor(ctx, wg, stderr, c.stderrFunc)
 
-	err = cmd.Wait()
-	// Wait for stream processor goroutines to finish before returning,
-	// so callers can safely read captured output immediately.
+	// Wait for stream processors to drain all pipe data before calling
+	// cmd.Wait(). The Go docs explicitly warn: "it is incorrect to call
+	// Wait before all reads from the pipe have completed" because Wait
+	// closes the pipe, which can discard unread data.
 	wg.Wait()
+	err = cmd.Wait()
 	if err != nil {
 		var msg *exec.ExitError
 		if errors.As(err, &msg) {

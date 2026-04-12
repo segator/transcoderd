@@ -112,34 +112,33 @@ buildgo-%:
 publish: publishcontainer-server publishcontainer-worker ## Publish all artifacts
 
 
-# Cache image tags for slow build stages (FFmpeg ~50min, PGS ~5min).
-# These are built once and reused across server/worker builds.
-FFMPEG_CACHE_IMAGE := $(IMAGE_NAME):cache-ffmpeg
-PGS_CACHE_IMAGE := $(IMAGE_NAME):cache-pgs
+# Dedicated cache refs for slow build stages (FFmpeg ~50min, PGS ~5min).
+# Using separate refs avoids manifest-type collisions between image push
+# and cache export that cause cross-run cache misses.
+FFMPEG_CACHE_REF := $(IMAGE_NAME):buildcache-ffmpeg
+PGS_CACHE_REF := $(IMAGE_NAME):buildcache-pgs
 
 .PHONY: buildcache
-buildcache: buildcache-ffmpeg buildcache-pgs ## Build and push cache images for slow stages
+buildcache: buildcache-ffmpeg buildcache-pgs ## Export cache for slow build stages to registry
 
 .PHONY: buildcache-ffmpeg
-buildcache-ffmpeg: ## Build and push FFmpeg cache image
+buildcache-ffmpeg: ## Build and export FFmpeg cache to registry
 	docker buildx build \
-		--push \
-		--cache-from type=registry,ref=$(FFMPEG_CACHE_IMAGE) \
-		--cache-to type=registry,ref=$(FFMPEG_CACHE_IMAGE),mode=max \
-		-t $(FFMPEG_CACHE_IMAGE) \
+		--cache-from type=registry,ref=$(FFMPEG_CACHE_REF) \
+		--cache-to type=registry,ref=$(FFMPEG_CACHE_REF),mode=max \
 		-f Dockerfile \
 		--target builder-ffmpeg \
+		--output type=cacheonly \
 		. ;
 
 .PHONY: buildcache-pgs
-buildcache-pgs: ## Build and push PGS cache image
+buildcache-pgs: ## Build and export PGS cache to registry
 	docker buildx build \
-		--push \
-		--cache-from type=registry,ref=$(PGS_CACHE_IMAGE) \
-		--cache-to type=registry,ref=$(PGS_CACHE_IMAGE),mode=max \
-		-t $(PGS_CACHE_IMAGE) \
+		--cache-from type=registry,ref=$(PGS_CACHE_REF) \
+		--cache-to type=registry,ref=$(PGS_CACHE_REF),mode=max \
 		-f Dockerfile \
 		--target builder-pgs \
+		--output type=cacheonly \
 		. ;
 
 
@@ -151,8 +150,8 @@ buildcontainer-% publishcontainer-%:
 		$${DOCKER_BUILD_ARG} \
 		--cache-from type=registry,ref=$(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
 		--cache-from type=registry,ref=$(IMAGE_NAME):$*-main \
-		--cache-from type=registry,ref=$(FFMPEG_CACHE_IMAGE) \
-		--cache-from type=registry,ref=$(PGS_CACHE_IMAGE) \
+		--cache-from type=registry,ref=$(FFMPEG_CACHE_REF) \
+		--cache-from type=registry,ref=$(PGS_CACHE_REF) \
 		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION) \
 		-t $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
 		-f Dockerfile \

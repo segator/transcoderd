@@ -1,0 +1,14 @@
+# Ignore build artifacts and dev files to reduce Docker build context.
+# The dist/ directory is explicitly INCLUDED because the Dockerfile
+# copies Go binaries from it (COPY ./dist/transcoderd-* ...).
+.git/
+build/
+.github/
+*.md
+.golangci.yaml
+.gitignore
+.release-please-manifest.json
+release-please-config.json
+devbox.json
+devbox.lock
+AGENTS.md

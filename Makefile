@@ -9,28 +9,42 @@ GIT_BRANCH_NAME := $(shell git rev-parse --abbrev-ref HEAD | sed 's/[^a-zA-Z0-9.
 BUILD_DATE := $(shell date +%Y-%m-%dT%H:%M:%SZ)
 IMAGE_NAME ?= ghcr.io/segator/transcoderd
 PROJECT_VERSION ?= $(shell cat version.txt)-dev
-CACHE ?=true
+CACHE ?= true
 
 
 .DEFAULT: help
 .PHONY: help
-help:	## show this help menu.
+help: ## show this help menu.
 	@echo "Usage: make [TARGET ...]"
 	@echo ""
 	@@egrep -h "#[#]" $(MAKEFILE_LIST) | sed -e 's/\\$$//' | awk 'BEGIN {FS = "[:=].*?#[#] "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 
+# ---------------------------------------------------------------------------
+# Code quality
+# ---------------------------------------------------------------------------
 .PHONY: fmt
-fmt: ## Code Format
-	go fmt  ./...
+fmt: ## Format Go code
+	go fmt ./...
 
+.PHONY: lint
+lint: ## Run linters
+	@golangci-lint run
+
+.PHONY: lint-fix
+lint-fix: ## Run linters with auto-fix
+	@golangci-lint run --fix
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
 .PHONY: test
-test: ## Run unit tests
+test: ## Run unit tests with coverage
 	@mkdir -p build
 	$(GO) test -v -coverprofile=build/coverage.out -covermode=atomic ./...
 
 .PHONY: test-race
-test-race: ## Run unit tests with race detector (requires more memory)
+test-race: ## Run unit tests with race detector
 	@mkdir -p build
 	$(GO) test -v -race -coverprofile=build/coverage.out -covermode=atomic ./...
 
@@ -40,120 +54,73 @@ test-short: ## Run unit tests in short mode
 	$(GO) test -v -short ./...
 
 .PHONY: test-integration
-test-integration: ## Run integration tests
-	@echo "Running integration tests..."
+test-integration: ## Run integration tests (requires Docker)
 	$(GO) test -tags=integration -v -timeout 5m ./integration/...
 
 .PHONY: test-all
 test-all: test test-integration ## Run all tests (unit + integration)
 
 .PHONY: test-coverage
-test-coverage: test ## Run tests and show coverage
+test-coverage: test ## Run tests and open coverage in browser
 	$(GO) tool cover -html=build/coverage.out
 
-.PHONY: test-summary
-test-summary: ## Show test coverage summary
-	@echo "Running tests and generating coverage report..."
-	@mkdir -p build
-	@$(GO) test ./... -short -coverprofile=build/coverage.out -covermode=atomic > /dev/null 2>&1
-	@echo "\n📊 Coverage Summary:"
-	@$(GO) tool cover -func=build/coverage.out | grep total | awk '{print "Total Coverage: " $$3}'
-	@echo "\n📦 Package Coverage:"
-	@$(GO) test ./... -short -coverprofile=build/coverage.out -covermode=atomic 2>&1 | grep "coverage:" | sort -t: -k2 -rn
-
-.PHONY: lint
-lint: ## Linters
-	@golangci-lint run
-
-.PHONY: lint-fix
-lint-fix: ## Lint fix if possible
-	@golangci-lint run --fix
-
-.PHONY: act-ci
-act-ci: ## Run CI workflow locally with act
-	@echo "Running CI workflow with act..."
-	act -j ci
-
-.PHONY: act-ci-dryrun
-act-ci-dryrun: ## Dry run of CI workflow with act
-	@echo "Dry run of CI workflow..."
-	act -j ci -n
-
-.PHONY: act-lint
-act-lint: ## Run lint workflow locally with act
-	@echo "Running lint workflow with act..."
-	act -W .github/workflows/lint.yml
-
-.PHONY: act-list
-act-list: ## List all workflows and jobs
-	@echo "Available workflows and jobs:"
-	@act -l
-
-.PHONY: act-test
-act-test: ## Run only the test step with act
-	@echo "Running tests with act..."
-	act -j ci --workflows .github/workflows/main.yml -s GITHUB_TOKEN=dummy
-
-
+# ---------------------------------------------------------------------------
+# Go build
+# ---------------------------------------------------------------------------
 .PHONY: build
-build: buildgo-server buildgo-worker buildcontainer-server buildcontainer-worker  ## Build all artifacts (Go binaries + Docker containers)
+build: buildgo-server buildgo-worker buildcontainer-server buildcontainer-worker ## Build everything (Go + Docker)
 
 .PHONY: buildgo
-buildgo: buildgo-server buildgo-worker  ## Build Go binaries only (no Docker)
-
-
+buildgo: buildgo-server buildgo-worker ## Build Go binaries only
 
 .PHONY: buildgo-%
 buildgo-%:
 	@echo "Building dist/transcoderd-$*"
-	@CGO_ENABLED=0 go build  -ldflags "-X main.ApplicationName=transcoderd-$* -X transcoder/version.Version=${PROJECT_VERSION} -X transcoder/version.Commit=${GIT_COMMIT_SHA} -X transcoder/version.Date=${BUILD_DATE}" -o dist/transcoderd-$* $*/main.go
+	@CGO_ENABLED=0 go build \
+		-ldflags "-X main.ApplicationName=transcoderd-$* -X transcoder/version.Version=${PROJECT_VERSION} -X transcoder/version.Commit=${GIT_COMMIT_SHA} -X transcoder/version.Date=${BUILD_DATE}" \
+		-o dist/transcoderd-$* $*/main.go
 
-.PHONY: publish
-publish: publishcontainer-server publishcontainer-worker ## Publish all artifacts
+# ---------------------------------------------------------------------------
+# Docker — pre-built builder images (FFmpeg ~50min, PGS ~5min)
+#
+# These are published once and reused by all CI builds via FROM in Dockerfile.
+# Rebuild only when FFmpeg version or PGS dependencies change:
+#   make publish-builder-ffmpeg
+#   make publish-builder-pgs
+# ---------------------------------------------------------------------------
+.PHONY: publish-builder-ffmpeg
+publish-builder-ffmpeg: ## Build & push FFmpeg builder image (~50min)
+	docker buildx build --push \
+		-t $(IMAGE_NAME):builder-ffmpeg \
+		-f Dockerfile --target builder-ffmpeg .
 
+.PHONY: publish-builder-pgs
+publish-builder-pgs: ## Build & push PGS builder image (~5min)
+	docker buildx build --push \
+		-t $(IMAGE_NAME):builder-pgs \
+		-f Dockerfile --target builder-pgs .
 
-# Dedicated cache refs for slow build stages (FFmpeg ~50min, PGS ~5min).
-# Using separate refs avoids manifest-type collisions between image push
-# and cache export that cause cross-run cache misses.
-FFMPEG_CACHE_REF := $(IMAGE_NAME):buildcache-ffmpeg
-PGS_CACHE_REF := $(IMAGE_NAME):buildcache-pgs
-
-.PHONY: buildcache
-buildcache: buildcache-ffmpeg buildcache-pgs ## Export cache for slow build stages to registry
-
-.PHONY: buildcache-ffmpeg
-buildcache-ffmpeg: ## Build and export FFmpeg cache to registry
-	docker buildx build \
-		--cache-from type=registry,ref=$(FFMPEG_CACHE_REF) \
-		--cache-to type=registry,ref=$(FFMPEG_CACHE_REF),mode=max \
-		-f Dockerfile \
-		--target builder-ffmpeg \
-		--output type=cacheonly \
-		. ;
-
-.PHONY: buildcache-pgs
-buildcache-pgs: ## Build and export PGS cache to registry
-	docker buildx build \
-		--cache-from type=registry,ref=$(PGS_CACHE_REF) \
-		--cache-to type=registry,ref=$(PGS_CACHE_REF),mode=max \
-		-f Dockerfile \
-		--target builder-pgs \
-		--output type=cacheonly \
-		. ;
-
-
+# ---------------------------------------------------------------------------
+# Docker — application images (server, worker)
+#
+# These pull the pre-built FFmpeg/PGS images automatically via FROM args
+# in the Dockerfile — no BuildKit cache needed.
+# ---------------------------------------------------------------------------
 .PHONY: buildcontainer-%
-.PHONY: publishcontainer-%
-buildcontainer-% publishcontainer-%:
-	@export DOCKER_BUILD_ARG="$(if $(findstring publishcontainer,$@),--push,--load) $(if $(filter false,$(CACHE)),--no-cache,)"; \
-	docker buildx build \
-		$${DOCKER_BUILD_ARG} \
-		--cache-from type=registry,ref=$(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
-		--cache-from type=registry,ref=$(IMAGE_NAME):$*-main \
-		--cache-from type=registry,ref=$(FFMPEG_CACHE_REF) \
-		--cache-from type=registry,ref=$(PGS_CACHE_REF) \
+buildcontainer-%:
+	docker buildx build --load \
+		$(if $(filter false,$(CACHE)),--no-cache,) \
 		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION) \
 		-t $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
-		-f Dockerfile \
-		--target $* \
-		. ;
+		-f Dockerfile --target $* .
+
+.PHONY: publishcontainer-%
+publishcontainer-%:
+	docker buildx build --push \
+		$(if $(filter false,$(CACHE)),--no-cache,) \
+		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION) \
+		-t $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
+		-f Dockerfile --target $* .
+
+.PHONY: publish
+publish: publishcontainer-server publishcontainer-worker ## Publish server & worker images

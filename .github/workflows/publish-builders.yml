@@ -1,0 +1,46 @@
+# Publish the slow-to-build Docker builder images (FFmpeg, PGS) to the registry.
+# These images are consumed by the main Dockerfile via FROM args, so CI builds
+# never have to rebuild FFmpeg (~50min) or PGS (~5min) from source.
+#
+# Run this workflow manually when:
+#   - FFmpeg build script version changes
+#   - PGS/tessdata dependencies change
+#   - Ubuntu or .NET SDK base image needs updating
+name: Publish builder images
+
+on:
+  workflow_dispatch:
+    inputs:
+      builder:
+        description: "Which builder to publish"
+        required: true
+        type: choice
+        options:
+          - all
+          - ffmpeg
+          - pgs
+
+permissions:
+  packages: write
+
+jobs:
+  publish-builders:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish FFmpeg builder
+        if: inputs.builder == 'all' || inputs.builder == 'ffmpeg'
+        run: make publish-builder-ffmpeg
+
+      - name: Publish PGS builder
+        if: inputs.builder == 'all' || inputs.builder == 'pgs'
+        run: make publish-builder-pgs

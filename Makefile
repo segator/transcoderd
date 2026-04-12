@@ -1,3 +1,4 @@
+# Makefile for transcoderd — distributed video transcoding system
 GO ?= go
 GOFMT ?= $(GO)fmt
 FIRST_GOPATH := $(firstword $(subst :, ,$(shell $(GO) env GOPATH)))

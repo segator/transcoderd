@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.4.1](https://github.com/segator/transcoderd/compare/v2.4.0...v2.4.1) (2026-04-12)
+
+
+### 🐛 Bug Fixes
+
+* remove completedJobMaintenance cronjob ([#93](https://github.com/segator/transcoderd/issues/93)) ([53b6975](https://github.com/segator/transcoderd/commit/53b6975237be3b24d7dbbc09226c1ea6e78d4285))
+* separate Docker cache refs from image tags to fix cross-run cache misses ([#90](https://github.com/segator/transcoderd/issues/90)) ([b756e70](https://github.com/segator/transcoderd/commit/b756e701dc2942cab7ea77f95c766f784f5b316a))
+* use pre-built Docker builder images instead of BuildKit cache ([#94](https://github.com/segator/transcoderd/issues/94)) ([ba96c6a](https://github.com/segator/transcoderd/commit/ba96c6a191023c4ea631d73c728d58998966e12a))
+
 ## [2.4.0](https://github.com/segator/transcoderd/compare/v2.3.1...v2.4.0) (2026-04-11)
 
 

@@ -117,9 +117,6 @@ publish: publishcontainer-server publishcontainer-worker ## Publish all artifact
 # and cache export that cause cross-run cache misses.
 FFMPEG_CACHE_REF := $(IMAGE_NAME):buildcache-ffmpeg
 PGS_CACHE_REF := $(IMAGE_NAME):buildcache-pgs
-# Legacy cache tags from before the ref rename (remove once new cache is populated).
-FFMPEG_CACHE_REF_LEGACY := $(IMAGE_NAME):cache-ffmpeg
-PGS_CACHE_REF_LEGACY := $(IMAGE_NAME):cache-pgs
 
 .PHONY: buildcache
 buildcache: buildcache-ffmpeg buildcache-pgs ## Export cache for slow build stages to registry
@@ -128,7 +125,6 @@ buildcache: buildcache-ffmpeg buildcache-pgs ## Export cache for slow build stag
 buildcache-ffmpeg: ## Build and export FFmpeg cache to registry
 	docker buildx build \
 		--cache-from type=registry,ref=$(FFMPEG_CACHE_REF) \
-		--cache-from type=registry,ref=$(FFMPEG_CACHE_REF_LEGACY) \
 		--cache-to type=registry,ref=$(FFMPEG_CACHE_REF),mode=max \
 		-f Dockerfile \
 		--target builder-ffmpeg \
@@ -139,7 +135,6 @@ buildcache-ffmpeg: ## Build and export FFmpeg cache to registry
 buildcache-pgs: ## Build and export PGS cache to registry
 	docker buildx build \
 		--cache-from type=registry,ref=$(PGS_CACHE_REF) \
-		--cache-from type=registry,ref=$(PGS_CACHE_REF_LEGACY) \
 		--cache-to type=registry,ref=$(PGS_CACHE_REF),mode=max \
 		-f Dockerfile \
 		--target builder-pgs \
@@ -156,9 +151,7 @@ buildcontainer-% publishcontainer-%:
 		--cache-from type=registry,ref=$(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
 		--cache-from type=registry,ref=$(IMAGE_NAME):$*-main \
 		--cache-from type=registry,ref=$(FFMPEG_CACHE_REF) \
-		--cache-from type=registry,ref=$(FFMPEG_CACHE_REF_LEGACY) \
 		--cache-from type=registry,ref=$(PGS_CACHE_REF) \
-		--cache-from type=registry,ref=$(PGS_CACHE_REF_LEGACY) \
 		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION) \
 		-t $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
 		-f Dockerfile \

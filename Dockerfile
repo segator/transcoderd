@@ -1,4 +1,8 @@
-ARG BASE_IMAGE=ubuntu:24.04
+# Pin to a dated tag so BuildKit cache keys are deterministic across CI runs.
+# The rolling "ubuntu:24.04" tag resolves to different digests over time, which
+# invalidates the entire builder-ffmpeg cache chain on ephemeral CI builders.
+# To update: pick a newer tag from https://hub.docker.com/_/ubuntu/tags?name=noble-
+ARG BASE_IMAGE=ubuntu:noble-20251013
 FROM ${BASE_IMAGE} AS builder-ffmpeg
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -38,7 +42,8 @@ FROM base AS server
 COPY ./dist/transcoderd-server /app/transcoderd-server
 ENTRYPOINT ["/app/transcoderd-server"]
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS builder-pgs
+# Pin to a specific patch version for deterministic cache keys (same reason as BASE_IMAGE).
+FROM mcr.microsoft.com/dotnet/sdk:8.0.419 AS builder-pgs
 WORKDIR /src
 ARG tessdata_version=ced78752cc61322fb554c280d13360b35b8684e4
 ARG pgstosrt_version=ef11919491b5c98f9dcdaf13d721596e60efb7ed

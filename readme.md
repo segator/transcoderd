@@ -73,7 +73,7 @@ docker run -d \
 ## Development
 
 ### Prerequisites
-- [Go 1.24](https://go.dev/dl/)
+- [Go 1.25](https://go.dev/dl/)
 - [golangci-lint](https://golangci-lint.run/welcome/install/)
 - Docker with [buildx](https://docs.docker.com/build/install-buildx/) (for container builds)
 - PostgreSQL (for integration tests, provided via testcontainers)

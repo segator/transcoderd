@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.4.2](https://github.com/segator/transcoderd/compare/v2.4.1...v2.4.2) (2026-04-16)
+
+
+### 🐛 Bug Fixes
+
+* remove progress tracker on completion ([#97](https://github.com/segator/transcoderd/issues/97)) ([6d071ae](https://github.com/segator/transcoderd/commit/6d071aed8ad5f6ee889afced9c086b3f76e4c4cb))
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** update Go to 1.25 and bump all dependencies ([#99](https://github.com/segator/transcoderd/issues/99)) ([e89627a](https://github.com/segator/transcoderd/commit/e89627aa336b4a4ad8e37343ab74a3a6b02d41aa))
+
 ## [2.4.1](https://github.com/segator/transcoderd/compare/v2.4.0...v2.4.1) (2026-04-12)
 
 

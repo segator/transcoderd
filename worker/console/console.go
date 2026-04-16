@@ -117,9 +117,10 @@ func newProgressTracker(id string, notificationType model.NotificationType) (*pr
 		color = text.FgBlue
 	}
 	progressTracker := &progress.Tracker{
-		Message: color.Sprintf("[%s] %s", id, notificationType),
-		Total:   0,
-		Units:   unit,
+		Message:            color.Sprintf("[%s] %s", id, notificationType),
+		Total:              0,
+		Units:              unit,
+		RemoveOnCompletion: true,
 	}
 	return progressTracker, &color
 }

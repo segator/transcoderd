@@ -192,13 +192,19 @@ func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 			// Both PGS (OCR'd to SRT) and extracted unsupported codecs (converted to SRT)
 			// are fed as separate input files. Map from the corresponding input index.
 			subtitleMap := fmt.Sprintf("-map %d -c:s:%d srt", subtInputIndex, outputIndex)
-			subtitleForced := ""
-			subtitleComment := ""
+
+			// Build disposition flags: combine into a single -disposition flag
+			// to avoid FFmpeg overwriting earlier values and to use correct stream specifier (s:N not s:s:N)
+			subtitleDisposition := ""
+			var dispositions []string
 			if subtitle.Forced {
-				subtitleForced = fmt.Sprintf(" -disposition:s:s:%d forced  -disposition:s:s:%d default", outputIndex, outputIndex)
+				dispositions = append(dispositions, "forced", "default")
 			}
 			if subtitle.Comment {
-				subtitleComment = fmt.Sprintf(" -disposition:s:s:%d comment", outputIndex)
+				dispositions = append(dispositions, "comment")
+			}
+			if len(dispositions) > 0 {
+				subtitleDisposition = fmt.Sprintf(" -disposition:s:%d %s", outputIndex, strings.Join(dispositions, "+"))
 			}
 
 			// Clean subtitle title to avoid PGS in title
@@ -206,7 +212,7 @@ func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 			subtitleTitle := re.ReplaceAllString(subtitle.Title, "")
 			subtitleTitle = strings.TrimSpace(strings.ReplaceAll(subtitleTitle, "  ", " "))
 
-			f.SubtitleFilter = append(f.SubtitleFilter, fmt.Sprintf("%s %s %s -metadata:s:s:%d language=%s -metadata:s:s:%d \"title=%s\" -max_interleave_delta 0", subtitleMap, subtitleForced, subtitleComment, outputIndex, subtitle.Language, outputIndex, subtitleTitle))
+			f.SubtitleFilter = append(f.SubtitleFilter, fmt.Sprintf("%s %s -metadata:s:%d language=%s -metadata:s:%d \"title=%s\" -max_interleave_delta 0", subtitleMap, subtitleDisposition, outputIndex, subtitle.Language, outputIndex, subtitleTitle))
 			subtInputIndex++
 			outputIndex++
 		} else {

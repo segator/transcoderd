@@ -154,6 +154,9 @@ func init() {
 }
 
 func calculateTesseractLanguage(language string) string {
+	if language == "" {
+		return "eng"
+	}
 	for _, mapping := range langMapping {
 		for _, mapLang := range mapping.mappingLanguage {
 			if language == mapLang {

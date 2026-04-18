@@ -8,6 +8,9 @@ statik/
 build/coverage.out
 coverage.out
 
+# Test fixtures (large binary files)
+integration/testdata/*.mkv
+
 # act (GitHub Actions local runner)
 .secrets
 .env.act

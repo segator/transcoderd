@@ -42,10 +42,22 @@ func (p *PGSToSrtStepExecutor) actions(jobContext *job.Context) []Action {
 	return pgsStepActions
 }
 
+const minPGSFileSize = 1024
+
 func (p *PGSToSrtStepExecutor) convertPGSToSrt(ctx context.Context, tracker Tracker, jobContext *job.Context, subtitle *ffmpeg.Subtitle) error {
 	pgsConfig := p.pgsConfig
 	inputFilePath := fmt.Sprintf("%s/%d.sup", jobContext.WorkingDir, subtitle.Id)
 	outputFilePath := fmt.Sprintf("%s/%d.srt", jobContext.WorkingDir, subtitle.Id)
+
+	fi, err := os.Stat(inputFilePath)
+	if err != nil {
+		return fmt.Errorf("could not stat PGS file: %w", err)
+	}
+	if fi.Size() < minPGSFileSize {
+		tracker.Logger().Cmdf("Skipping empty PGS track %d: file size %d bytes is below minimum %d", subtitle.Id, fi.Size(), minPGSFileSize)
+		return writeEmptySRT(outputFilePath)
+	}
+
 	language := calculateTesseractLanguage(subtitle.Language)
 
 	PGSToSrtCommand := command.NewCommand(pgsConfig.DotnetPath, pgsConfig.DLLPath,
@@ -103,6 +115,10 @@ func (p *PGSToSrtStepExecutor) convertPGSToSrt(ctx context.Context, tracker Trac
 	}
 
 	if strings.Contains(outLog, "with 0 items.") {
+		if strings.Contains(outLog, "Starting OCR for 0 items") {
+			tracker.Logger().Cmdf("PGS track %d has no displayable segments, skipping", subtitle.Id)
+			return writeEmptySRT(outputFilePath)
+		}
 		return fmt.Errorf("no items converted: %s", pgslog)
 	}
 
@@ -165,4 +181,8 @@ func calculateTesseractLanguage(language string) string {
 		}
 	}
 	return language
+}
+
+func writeEmptySRT(path string) error {
+	return os.WriteFile(path, []byte("1\n00:00:00,000 --> 00:00:00,001\n \n\n"), 0644)
 }

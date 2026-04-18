@@ -53,6 +53,20 @@ func PFlags() {
 	pflag.Bool("noUpdateMode", false, "DON'T USE THIS FLAG, INTERNAL USE")
 	pflag.Bool("noUpdates", false, "Application will not update itself")
 }
+
+// NewNoopUpdater creates an Updater that never checks for updates.
+// Useful for integration tests where network calls are undesirable.
+func NewNoopUpdater() *Updater {
+	interval := time.Hour * 87600
+	return &Updater{
+		currentVersion: semver.MustParse("99.99.99"),
+		assetName:      "noop",
+		noUpdates:      true,
+		checkInterval:  &interval,
+		lastCheckTime:  time.Now(),
+	}
+}
+
 func NewUpdater(currentVersionString string, assetName string, noUpdates bool, tmpPath string, checkInterval *time.Duration) (*Updater, error) {
 	currentVersion, err := semver.Parse(cleanVersion(currentVersionString))
 	if err != nil {

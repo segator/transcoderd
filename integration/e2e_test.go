@@ -1,0 +1,414 @@
+//go:build integration
+// +build integration
+
+package integration
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/network"
+	"github.com/testcontainers/testcontainers-go/wait"
+
+	"transcoder/model"
+	"transcoder/server/repository"
+	"transcoder/server/scheduler"
+)
+
+const (
+	e2eDBName   = "transcoderd_e2e"
+	e2eDBUser   = "test"
+	e2eDBPass   = "test"
+	e2eToken    = "e2e-test-token"
+	e2eTestFile = "testdata/test_pgs_clip.mkv"
+
+	defaultServerImage = "transcoderd:server-test"
+	defaultWorkerImage = "transcoderd:worker-test"
+)
+
+// TestDockerE2E runs a full end-to-end test using real Docker containers
+// for both server and worker, with a real MKV file containing PGS subtitles.
+//
+// Prerequisites:
+//   - Docker running
+//   - Pre-built Docker images (or set E2E_SERVER_IMAGE / E2E_WORKER_IMAGE env vars):
+//     make buildcontainer-server buildcontainer-worker
+//   - Test fixture present: integration/testdata/test_pgs_clip.mkv
+//
+// Run with: go test -tags=integration -v -timeout 30m -run TestDockerE2E ./integration/...
+func TestDockerE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping Docker e2e test in short mode")
+	}
+
+	serverImage := envOrDefault("E2E_SERVER_IMAGE", defaultServerImage)
+	workerImage := envOrDefault("E2E_WORKER_IMAGE", defaultWorkerImage)
+	t.Logf("Using images: server=%s worker=%s", serverImage, workerImage)
+
+	fixtureAbs, err := filepath.Abs(e2eTestFile)
+	if err != nil {
+		t.Fatalf("Failed to resolve fixture path: %v", err)
+	}
+	if _, err := os.Stat(fixtureAbs); os.IsNotExist(err) {
+		t.Skipf("Test fixture not found at %s — download a test MKV with PGS subtitles", fixtureAbs)
+	}
+
+	ctx := context.Background()
+
+	net, err := network.New(ctx)
+	if err != nil {
+		t.Fatalf("Failed to create Docker network: %v", err)
+	}
+	defer func() {
+		if err := net.Remove(ctx); err != nil {
+			t.Logf("Failed to remove network: %v", err)
+		}
+	}()
+
+	t.Log("Starting PostgreSQL container...")
+	pgContainer, err := postgres.Run(ctx,
+		"postgres:16-alpine",
+		postgres.WithDatabase(e2eDBName),
+		postgres.WithUsername(e2eDBUser),
+		postgres.WithPassword(e2eDBPass),
+		network.WithNetwork([]string{"postgres"}, net),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(60*time.Second),
+		),
+	)
+	if err != nil {
+		t.Fatalf("Failed to start postgres: %v", err)
+	}
+	defer func() {
+		if err := pgContainer.Terminate(ctx); err != nil {
+			t.Logf("Failed to terminate postgres: %v", err)
+		}
+	}()
+
+	pgPort := mustMappedPortInt(t, ctx, pgContainer, "5432")
+	t.Logf("PostgreSQL running on port %d", pgPort)
+
+	dbConfig := &repository.SQLServerConfig{
+		Host:     "localhost",
+		Port:     pgPort,
+		User:     e2eDBUser,
+		Password: e2eDBPass,
+		Scheme:   e2eDBName,
+		Driver:   "postgres",
+	}
+	repo, err := repository.NewSQLRepository(dbConfig)
+	if err != nil {
+		t.Fatalf("Failed to create repository: %v", err)
+	}
+	if err := repo.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize DB schema: %v", err)
+	}
+	t.Log("DB schema initialized")
+
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+
+	testVideoRelPath := "test-video.mkv"
+	destPath := filepath.Join(sourceDir, testVideoRelPath)
+	if err := copyFile(fixtureAbs, destPath); err != nil {
+		t.Fatalf("Failed to copy test fixture: %v", err)
+	}
+	fi, err := os.Stat(destPath)
+	if err != nil {
+		t.Fatalf("Failed to stat copied fixture: %v", err)
+	}
+	t.Logf("Test video: %s (%d bytes)", destPath, fi.Size())
+
+	configContent := fmt.Sprintf(`server:
+  database:
+    host: postgres
+    port: 5432
+    user: %s
+    password: %s
+    scheme: %s
+    driver: postgres
+  scheduler:
+    sourcePath: /source
+    deleteOnComplete: false
+    minFileSize: 100
+    scheduleTime: 5s
+    jobTimeout: 10m
+web:
+  token: %s
+  port: 8080
+`, e2eDBUser, e2eDBPass, e2eDBName, e2eToken)
+
+	configFile := filepath.Join(sourceDir, "config.yml")
+	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	t.Log("Starting server container...")
+	serverContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image:        serverImage,
+			ExposedPorts: []string{"8080/tcp"},
+			Cmd:          []string{"--noUpdates"},
+			Mounts: testcontainers.ContainerMounts{
+				testcontainers.BindMount(configFile, "/etc/transcoderd/config.yml"),
+				testcontainers.BindMount(sourceDir, "/source"),
+				testcontainers.BindMount(targetDir, "/target"),
+			},
+			Networks: []string{net.Name},
+			NetworkAliases: map[string][]string{
+				net.Name: {"server"},
+			},
+			WaitingFor: wait.ForHTTP("/api/v1/job/request").
+				WithPort("8080/tcp").
+				WithHeaders(map[string]string{
+					"Authorization": "Bearer " + e2eToken,
+					"workerName":    "healthcheck",
+				}).
+				WithStatusCodeMatcher(func(status int) bool {
+					return status == 204 || status == 200
+				}).
+				WithStartupTimeout(120 * time.Second),
+		},
+		Started: true,
+	})
+	if err != nil {
+		t.Fatalf("Failed to start server container: %v", err)
+	}
+	defer func() {
+		if err := serverContainer.Terminate(ctx); err != nil {
+			t.Logf("Failed to terminate server: %v", err)
+		}
+	}()
+
+	serverPortNum := mustMappedPortInt(t, ctx, serverContainer, "8080")
+	serverURL := fmt.Sprintf("http://localhost:%d", serverPortNum)
+	t.Logf("Server running at %s", serverURL)
+
+	t.Log("Starting worker container...")
+	workerContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image: workerImage,
+			Cmd: []string{
+				"--noUpdates",
+				"--web.token", e2eToken,
+				"--web.domain", "http://server:8080",
+				"--worker.name", "e2e-worker",
+				"--worker.ffmpegConfig.videoPreset", "ultrafast",
+				"--worker.ffmpegConfig.videoCRF", "35",
+				"--worker.ffmpegConfig.videoCodec", "libx265",
+				"--worker.ffmpegConfig.audioCodec", "aac",
+				"--worker.ffmpegConfig.videoProfile", "main10",
+				"--worker.verifyDeltaTime", "5",
+				"--worker.threads", "2",
+			},
+			Networks: []string{net.Name},
+			WaitingFor: wait.ForLog("Starting Worker").
+				WithStartupTimeout(120 * time.Second),
+		},
+		Started: true,
+	})
+	if err != nil {
+		t.Fatalf("Failed to start worker container: %v", err)
+	}
+	defer func() {
+		if err := workerContainer.Terminate(ctx); err != nil {
+			t.Logf("Failed to terminate worker: %v", err)
+		}
+	}()
+	t.Log("Worker container started")
+
+	t.Run("SubmitJob", func(t *testing.T) {
+		jobReq := &model.JobRequest{
+			SourcePath: testVideoRelPath,
+		}
+		body, err := json.Marshal(jobReq)
+		if err != nil {
+			t.Fatalf("Failed to marshal job request: %v", err)
+		}
+
+		req, err := http.NewRequest("POST", serverURL+"/api/v1/job/", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+e2eToken)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Failed to submit job: %v", err)
+		}
+		defer resp.Body.Close()
+
+		respBody, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != 200 {
+			t.Fatalf("Job submission failed with status %d: %s", resp.StatusCode, respBody)
+		}
+
+		var result scheduler.ScheduleJobRequestResult
+		if err := json.Unmarshal(respBody, &result); err != nil {
+			t.Fatalf("Failed to parse response: %v", err)
+		}
+
+		if len(result.ScheduledJobs) == 0 {
+			t.Fatalf("No jobs scheduled. Failed: %v, Skipped: %v", result.FailedJobRequest, result.SkippedFiles)
+		}
+		t.Logf("Job submitted: %s", result.ScheduledJobs[0].Id)
+	})
+
+	jobs, err := repo.GetJobs(ctx)
+	if err != nil || jobs == nil || len(*jobs) == 0 {
+		t.Fatalf("Failed to find submitted job: %v", err)
+	}
+	jobID := (*jobs)[0].Id.String()
+
+	t.Run("WaitForCompletion", func(t *testing.T) {
+		deadline := time.Now().Add(20 * time.Minute)
+		for time.Now().Before(deadline) {
+			job, err := repo.GetJob(ctx, jobID)
+			if err != nil {
+				t.Fatalf("Failed to get job: %v", err)
+			}
+
+			status := job.Events.GetStatus()
+
+			if status == model.CompletedNotificationStatus {
+				t.Logf("Job completed successfully!")
+				t.Logf("  Source: %s (%d bytes)", job.SourcePath, job.SourceSize)
+				t.Logf("  Target: %s (%d bytes)", job.TargetPath, job.TargetSize)
+				if job.SourceSize > 0 {
+					ratio := float64(job.TargetSize) / float64(job.SourceSize) * 100
+					t.Logf("  Size ratio: %.1f%%", ratio)
+				}
+				return
+			}
+
+			if status == model.FailedNotificationStatus {
+				lastEvent := job.Events.GetLatest()
+				dumpContainerLogs(t, ctx, workerContainer, "Worker")
+				t.Fatalf("Job failed: %s", lastEvent.Message)
+			}
+
+			latestEvent := job.Events.GetLatest()
+			t.Logf("  Status: %s/%s — %s", latestEvent.NotificationType, latestEvent.Status, latestEvent.Message)
+			time.Sleep(5 * time.Second)
+		}
+		dumpContainerLogs(t, ctx, workerContainer, "Worker")
+		dumpContainerLogs(t, ctx, serverContainer, "Server")
+		t.Fatal("Job did not complete within timeout")
+	})
+
+	t.Run("VerifyOutput", func(t *testing.T) {
+		job, err := repo.GetJob(ctx, jobID)
+		if err != nil {
+			t.Fatalf("Failed to get job: %v", err)
+		}
+
+		targetPath := filepath.Join(sourceDir, job.TargetPath)
+		tfi, err := os.Stat(targetPath)
+		if os.IsNotExist(err) {
+			targetPath = filepath.Join(targetDir, job.TargetPath)
+			tfi, err = os.Stat(targetPath)
+		}
+		if err != nil {
+			t.Fatalf("Output file not found: %v (checked both source and target dirs)", err)
+		}
+		if tfi.Size() == 0 {
+			t.Fatal("Output file is empty")
+		}
+		t.Logf("Output file: %s (%d bytes)", targetPath, tfi.Size())
+
+		if job.TargetSize > 0 && job.SourceSize > 0 && job.TargetSize >= job.SourceSize {
+			t.Logf("Warning: target (%d) is not smaller than source (%d)", job.TargetSize, job.SourceSize)
+		}
+	})
+
+	t.Run("VerifyEventHistory", func(t *testing.T) {
+		job, err := repo.GetJob(ctx, jobID)
+		if err != nil {
+			t.Fatalf("Failed to get job: %v", err)
+		}
+
+		events := job.Events
+
+		t.Logf("Event history (%d events):", len(events))
+		for i, ev := range events {
+			t.Logf("  %d. [%s] %s: %s", i+1, ev.NotificationType, ev.Status, ev.Message)
+		}
+
+		if len(events) < 5 {
+			t.Errorf("Expected at least 5 events, got %d", len(events))
+		}
+
+		firstEvent := events[0]
+		if firstEvent.Status != model.QueuedNotificationStatus {
+			t.Errorf("First event should be Queued, got %s", firstEvent.Status)
+		}
+
+		lastEvent := events[len(events)-1]
+		if lastEvent.Status != model.CompletedNotificationStatus {
+			t.Errorf("Last event should be Completed, got %s", lastEvent.Status)
+		}
+	})
+}
+
+func envOrDefault(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultVal
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func mustMappedPortInt(t *testing.T, ctx context.Context, c testcontainers.Container, port string) int {
+	t.Helper()
+	p, err := c.MappedPort(ctx, port)
+	if err != nil {
+		t.Fatalf("Failed to get mapped port %s: %v", port, err)
+	}
+	portNum, err := strconv.Atoi(p.Port())
+	if err != nil {
+		t.Fatalf("Failed to parse port %q: %v", p.Port(), err)
+	}
+	return portNum
+}
+
+func dumpContainerLogs(t *testing.T, ctx context.Context, c testcontainers.Container, name string) {
+	t.Helper()
+	logs, err := c.Logs(ctx)
+	if err != nil {
+		t.Logf("Failed to get %s logs: %v", name, err)
+		return
+	}
+	defer logs.Close()
+	logBytes, _ := io.ReadAll(logs)
+	t.Logf("%s logs:\n%s", name, string(logBytes))
+}

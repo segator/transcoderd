@@ -1,12 +1,14 @@
 package ffmpeg
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"gopkg.in/vansante/go-ffprobe.v2"
-	"os"
+	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -116,17 +118,46 @@ func (s *Subtitle) NeedsMKVExtraction() bool {
 }
 
 func ExtractFFProbeData(ctx context.Context, inputFile string) (data *ffprobe.ProbeData, err error) {
-	fileReader, err := os.Open(inputFile)
-	if err != nil {
-		return nil, fmt.Errorf("error opening file %s because %v", inputFile, err)
+	args := []string{
+		"-loglevel", "fatal",
+		"-print_format", "json",
+		"-show_format",
+		"-show_streams",
+		"-show_chapters",
+		inputFile,
 	}
 
-	defer fileReader.Close()
-	data, err = ffprobe.ProbeReader(ctx, fileReader)
-	if err != nil {
-		return nil, fmt.Errorf("error getting data: %v", err)
+	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	var outputBuf, stdErrBuf bytes.Buffer
+	cmd.Stdout = &outputBuf
+	cmd.Stderr = &stdErrBuf
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("error running ffprobe on %s [%s]: %w", inputFile, stdErrBuf.String(), err)
+	}
+
+	jsonBytes := sanitizeFFProbeJSON(outputBuf.Bytes())
+
+	data = &ffprobe.ProbeData{}
+	if err := json.Unmarshal(jsonBytes, data); err != nil {
+		return nil, fmt.Errorf("error parsing ffprobe output: %w", err)
 	}
 	return data, nil
+}
+
+var invertedFieldRegex = regexp.MustCompile(`"inverted"\s*:\s*(\d+)`)
+
+func sanitizeFFProbeJSON(b []byte) []byte {
+	return invertedFieldRegex.ReplaceAllFunc(b, func(match []byte) []byte {
+		submatch := invertedFieldRegex.FindSubmatch(match)
+		if len(submatch) < 2 {
+			return match
+		}
+		if string(submatch[1]) == "0" {
+			return []byte(`"inverted": false`)
+		}
+		return []byte(`"inverted": true`)
+	})
 }
 
 func ffProbeFrameRate(ffprobeFrameRate string) (frameRate int, err error) {

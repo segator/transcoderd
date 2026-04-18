@@ -103,7 +103,8 @@ func (p *PGSToSrtStepExecutor) convertPGSToSrt(ctx context.Context, tracker Trac
 	}
 
 	if strings.Contains(outLog, "with 0 items.") {
-		return fmt.Errorf("no items converted: %s", pgslog)
+		tracker.Logger().Warnf("PGS OCR produced 0 items for track %d (language=%s), continuing with empty subtitle", subtitle.Id, subtitle.Language)
+		return nil
 	}
 
 	subtitles, err := astisub.OpenFile(outputFilePath)

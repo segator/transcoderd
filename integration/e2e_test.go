@@ -335,27 +335,22 @@ web:
 		}
 
 		containerOutputPath := "/source/" + job.TargetPath
-		exitCode, probeOutput, err := serverContainer.Exec(ctx, []string{
-			"ffprobe", "-v", "quiet", "-print_format", "json",
-			"-show_streams", containerOutputPath,
+		probeOutputFile := "/source/ffprobe_result.json"
+		exitCode, execOutput, err := serverContainer.Exec(ctx, []string{
+			"sh", "-c",
+			fmt.Sprintf("ffprobe -v quiet -print_format json -show_streams '%s' > '%s' 2>&1", containerOutputPath, probeOutputFile),
 		})
 		if err != nil {
 			t.Fatalf("Failed to exec ffprobe in server container: %v", err)
 		}
-		probeBytes, _ := io.ReadAll(probeOutput)
 		if exitCode != 0 {
-			containerOutputPath = "/target/" + job.TargetPath
-			exitCode, probeOutput, err = serverContainer.Exec(ctx, []string{
-				"ffprobe", "-v", "quiet", "-print_format", "json",
-				"-show_streams", containerOutputPath,
-			})
-			if err != nil {
-				t.Fatalf("Failed to exec ffprobe in server container: %v", err)
-			}
-			probeBytes, _ = io.ReadAll(probeOutput)
-			if exitCode != 0 {
-				t.Fatalf("ffprobe failed (exit %d): %s", exitCode, string(probeBytes))
-			}
+			execBytes, _ := io.ReadAll(execOutput)
+			t.Fatalf("ffprobe failed (exit %d): %s", exitCode, string(execBytes))
+		}
+
+		probeBytes, err := os.ReadFile(filepath.Join(sourceDir, "ffprobe_result.json"))
+		if err != nil {
+			t.Fatalf("Failed to read ffprobe output file: %v", err)
 		}
 
 		var probeResult struct {
@@ -367,8 +362,7 @@ web:
 				} `json:"tags"`
 			} `json:"streams"`
 		}
-		probeJSON := extractJSON(probeBytes)
-		if err := json.Unmarshal(probeJSON, &probeResult); err != nil {
+		if err := json.Unmarshal(probeBytes, &probeResult); err != nil {
 			t.Fatalf("Failed to parse ffprobe output: %v\nRaw: %s", err, string(probeBytes))
 		}
 
@@ -461,18 +455,6 @@ func mustMappedPortInt(t *testing.T, ctx context.Context, c testcontainers.Conta
 		t.Fatalf("Failed to parse port %q: %v", p.Port(), err)
 	}
 	return portNum
-}
-
-func extractJSON(b []byte) []byte {
-	start := bytes.IndexByte(b, '{')
-	if start < 0 {
-		return b
-	}
-	end := bytes.LastIndexByte(b, '}')
-	if end < start {
-		return b
-	}
-	return b[start : end+1]
 }
 
 func dumpContainerLogs(t *testing.T, ctx context.Context, c testcontainers.Container, name string) {

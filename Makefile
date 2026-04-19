@@ -57,6 +57,12 @@ test-short: ## Run unit tests in short mode
 test-integration: ## Run integration tests (requires Docker)
 	$(GO) test -tags=integration -v -timeout 5m ./integration/...
 
+.PHONY: test-e2e
+test-e2e: ## Run Docker e2e test (requires built images + test fixture)
+	E2E_SERVER_IMAGE=$(IMAGE_NAME):server-$(GIT_BRANCH_NAME) \
+	E2E_WORKER_IMAGE=$(IMAGE_NAME):worker-$(GIT_BRANCH_NAME) \
+	$(GO) test -tags=integration -v -timeout 30m -run TestDockerE2E ./integration/...
+
 .PHONY: test-all
 test-all: test test-integration ## Run all tests (unit + integration)
 

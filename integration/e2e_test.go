@@ -31,7 +31,7 @@ const (
 	e2eDBUser   = "test"
 	e2eDBPass   = "test"
 	e2eToken    = "e2e-test-token"
-	e2eTestFile = "testdata/test_pgs_clip.mkv"
+	e2eTestFile = "testdata/test_pgs_fixture.mkv"
 
 	defaultServerImage = "transcoderd:server-test"
 	defaultWorkerImage = "transcoderd:worker-test"

@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.4.3](https://github.com/segator/transcoderd/compare/v2.4.2...v2.4.3) (2026-04-19)
+
+
+### 🐛 Bug Fixes
+
+* add Dutch (dut/nl → nld) to PGS Tesseract language mapping ([#102](https://github.com/segator/transcoderd/issues/102)) ([d8078a7](https://github.com/segator/transcoderd/commit/d8078a7f0a93bd2451e1cab21253c763b6a4b45c))
+* correct FFmpeg stream specifier and disposition flags for subtitles ([#100](https://github.com/segator/transcoderd/issues/100)) ([b1c4f4c](https://github.com/segator/transcoderd/commit/b1c4f4c826193d244d496dfaf3ee60d18fc8db14))
+* fallback to English when PGS subtitle has empty language tag ([#103](https://github.com/segator/transcoderd/issues/103)) ([c3c0201](https://github.com/segator/transcoderd/commit/c3c02012f132ead79f8591f5ccf888cf06a64d68))
+* handle ffprobe 'inverted' field as integer instead of bool ([#104](https://github.com/segator/transcoderd/issues/104)) ([322131c](https://github.com/segator/transcoderd/commit/322131c09aa3db509541d471ab64038eb743d4ac))
+* skip empty PGS subtitle tracks instead of failing ([#106](https://github.com/segator/transcoderd/issues/106)) ([0c1ee10](https://github.com/segator/transcoderd/commit/0c1ee10af1138c5ce4d4f717496c6c213c5264b0))
+
+
+### ✅ Tests
+
+* Docker-based end-to-end integration test ([#107](https://github.com/segator/transcoderd/issues/107)) ([7d0a324](https://github.com/segator/transcoderd/commit/7d0a3249f1acfea042bcb505b1a1419d55f3412f))
+
 ## [2.4.2](https://github.com/segator/transcoderd/compare/v2.4.1...v2.4.2) (2026-04-16)
 
 

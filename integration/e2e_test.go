@@ -367,7 +367,8 @@ web:
 				} `json:"tags"`
 			} `json:"streams"`
 		}
-		if err := json.Unmarshal(probeBytes, &probeResult); err != nil {
+		probeJSON := extractJSON(probeBytes)
+		if err := json.Unmarshal(probeJSON, &probeResult); err != nil {
 			t.Fatalf("Failed to parse ffprobe output: %v\nRaw: %s", err, string(probeBytes))
 		}
 
@@ -460,6 +461,18 @@ func mustMappedPortInt(t *testing.T, ctx context.Context, c testcontainers.Conta
 		t.Fatalf("Failed to parse port %q: %v", p.Port(), err)
 	}
 	return portNum
+}
+
+func extractJSON(b []byte) []byte {
+	start := bytes.IndexByte(b, '{')
+	if start < 0 {
+		return b
+	}
+	end := bytes.LastIndexByte(b, '}')
+	if end < start {
+		return b
+	}
+	return b[start : end+1]
 }
 
 func dumpContainerLogs(t *testing.T, ctx context.Context, c testcontainers.Container, name string) {

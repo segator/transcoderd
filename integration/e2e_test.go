@@ -333,6 +333,67 @@ web:
 		if job.TargetSize > 0 && job.SourceSize > 0 && job.TargetSize >= job.SourceSize {
 			t.Logf("Warning: target (%d) is not smaller than source (%d)", job.TargetSize, job.SourceSize)
 		}
+
+		containerOutputPath := "/source/" + job.TargetPath
+		exitCode, probeOutput, err := serverContainer.Exec(ctx, []string{
+			"ffprobe", "-v", "quiet", "-print_format", "json",
+			"-show_streams", containerOutputPath,
+		})
+		if err != nil {
+			t.Fatalf("Failed to exec ffprobe in server container: %v", err)
+		}
+		probeBytes, _ := io.ReadAll(probeOutput)
+		if exitCode != 0 {
+			containerOutputPath = "/target/" + job.TargetPath
+			exitCode, probeOutput, err = serverContainer.Exec(ctx, []string{
+				"ffprobe", "-v", "quiet", "-print_format", "json",
+				"-show_streams", containerOutputPath,
+			})
+			if err != nil {
+				t.Fatalf("Failed to exec ffprobe in server container: %v", err)
+			}
+			probeBytes, _ = io.ReadAll(probeOutput)
+			if exitCode != 0 {
+				t.Fatalf("ffprobe failed (exit %d): %s", exitCode, string(probeBytes))
+			}
+		}
+
+		var probeResult struct {
+			Streams []struct {
+				CodecType string `json:"codec_type"`
+				CodecName string `json:"codec_name"`
+				Tags      struct {
+					Language string `json:"language"`
+				} `json:"tags"`
+			} `json:"streams"`
+		}
+		if err := json.Unmarshal(probeBytes, &probeResult); err != nil {
+			t.Fatalf("Failed to parse ffprobe output: %v\nRaw: %s", err, string(probeBytes))
+		}
+
+		t.Logf("Output streams (%d):", len(probeResult.Streams))
+		var hasHEVC, hasAAC, hasSRT bool
+		for i, s := range probeResult.Streams {
+			t.Logf("  %d. %s: %s (lang=%s)", i, s.CodecType, s.CodecName, s.Tags.Language)
+			switch {
+			case s.CodecType == "video" && s.CodecName == "hevc":
+				hasHEVC = true
+			case s.CodecType == "audio" && s.CodecName == "aac":
+				hasAAC = true
+			case s.CodecType == "subtitle" && s.CodecName == "subrip":
+				hasSRT = true
+			}
+		}
+
+		if !hasHEVC {
+			t.Errorf("Output missing HEVC video stream")
+		}
+		if !hasAAC {
+			t.Errorf("Output missing AAC audio stream")
+		}
+		if !hasSRT {
+			t.Errorf("Output missing SRT subtitle stream (PGS should have been converted to SRT)")
+		}
 	})
 
 	t.Run("VerifyEventHistory", func(t *testing.T) {

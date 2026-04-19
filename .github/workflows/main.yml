@@ -61,6 +61,9 @@ jobs:
       - name: Build
         run: devbox run -- make build
 
+      - name: E2E Test
+        run: devbox run -- make test-e2e
+
       - name: Publish
         if: github.event_name != 'pull_request'
         run: make publish

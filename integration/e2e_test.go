@@ -368,6 +368,8 @@ web:
 
 		t.Logf("Output streams (%d):", len(probeResult.Streams))
 		var hasHEVC, hasAAC, hasSRT bool
+		audioLangs := make(map[string]int)
+		subtitleLangs := make(map[string]int)
 		for i, s := range probeResult.Streams {
 			t.Logf("  %d. %s: %s (lang=%s)", i, s.CodecType, s.CodecName, s.Tags.Language)
 			switch {
@@ -375,8 +377,14 @@ web:
 				hasHEVC = true
 			case s.CodecType == "audio" && s.CodecName == "aac":
 				hasAAC = true
+				if lang := s.Tags.Language; lang != "" {
+					audioLangs[lang]++
+				}
 			case s.CodecType == "subtitle" && s.CodecName == "subrip":
 				hasSRT = true
+				if lang := s.Tags.Language; lang != "" {
+					subtitleLangs[lang]++
+				}
 			}
 		}
 
@@ -388,6 +396,21 @@ web:
 		}
 		if !hasSRT {
 			t.Errorf("Output missing SRT subtitle stream (PGS should have been converted to SRT)")
+		}
+
+		// Verify multi-language audio preservation: if the source had multiple audio
+		// languages (e.g. DUAL with English + Spanish), they must all be present in
+		// the output. A regression here means the metadata stream specifiers are
+		// clobbering audio tracks.
+		t.Logf("Audio languages found: %v", audioLangs)
+		t.Logf("Subtitle languages found: %v", subtitleLangs)
+		if len(audioLangs) > 0 {
+			for lang, count := range audioLangs {
+				t.Logf("  Audio: %s (%d track(s))", lang, count)
+			}
+			if sourceAudioLangs := countStreamLanguages(probeResult.Streams, "audio"); len(audioLangs) < sourceAudioLangs {
+				t.Errorf("Audio language count decreased: output has %d language(s) but source probe shows %d — multi-language tracks may have been dropped", len(audioLangs), sourceAudioLangs)
+			}
 		}
 	})
 
@@ -455,6 +478,22 @@ func mustMappedPortInt(t *testing.T, ctx context.Context, c testcontainers.Conta
 		t.Fatalf("Failed to parse port %q: %v", p.Port(), err)
 	}
 	return portNum
+}
+
+func countStreamLanguages(streams []struct {
+	CodecType string `json:"codec_type"`
+	CodecName string `json:"codec_name"`
+	Tags      struct {
+		Language string `json:"language"`
+	} `json:"tags"`
+}, codecType string) int {
+	langs := make(map[string]bool)
+	for _, s := range streams {
+		if s.CodecType == codecType && s.Tags.Language != "" {
+			langs[s.Tags.Language] = true
+		}
+	}
+	return len(langs)
 }
 
 func dumpContainerLogs(t *testing.T, ctx context.Context, c testcontainers.Container, name string) {

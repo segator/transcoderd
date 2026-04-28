@@ -212,7 +212,7 @@ func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 			subtitleTitle := re.ReplaceAllString(subtitle.Title, "")
 			subtitleTitle = strings.TrimSpace(strings.ReplaceAll(subtitleTitle, "  ", " "))
 
-			f.SubtitleFilter = append(f.SubtitleFilter, fmt.Sprintf("%s %s -metadata:s:%d language=%s -metadata:s:%d \"title=%s\" -max_interleave_delta 0", subtitleMap, subtitleDisposition, outputIndex, subtitle.Language, outputIndex, subtitleTitle))
+			f.SubtitleFilter = append(f.SubtitleFilter, fmt.Sprintf("%s %s -metadata:s:s:%d language=%s -metadata:s:s:%d \"title=%s\" -max_interleave_delta 0", subtitleMap, subtitleDisposition, outputIndex, subtitle.Language, outputIndex, subtitleTitle))
 			subtInputIndex++
 			outputIndex++
 		} else {

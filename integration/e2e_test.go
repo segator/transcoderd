@@ -330,12 +330,19 @@ web:
 		}
 		t.Logf("Output file: %s (%d bytes)", targetPath, tfi.Size())
 
+		if dest := os.Getenv("E2E_KEEP_OUTPUT"); dest != "" {
+			_ = copyFile(targetPath, dest)
+		}
+
 		if job.TargetSize > 0 && job.SourceSize > 0 && job.TargetSize >= job.SourceSize {
 			t.Logf("Warning: target (%d) is not smaller than source (%d)", job.TargetSize, job.SourceSize)
 		}
 
 		containerOutputPath := "/source/" + job.TargetPath
+		containerSourcePath := "/source/" + testVideoRelPath
 		probeOutputFile := "/source/ffprobe_result.json"
+		probeSourceFile := "/source/ffprobe_source.json"
+		// Probe output file
 		exitCode, execOutput, err := serverContainer.Exec(ctx, []string{
 			"sh", "-c",
 			fmt.Sprintf("ffprobe -v quiet -print_format json -show_streams '%s' > '%s' 2>&1", containerOutputPath, probeOutputFile),
@@ -364,6 +371,35 @@ web:
 		}
 		if err := json.Unmarshal(probeBytes, &probeResult); err != nil {
 			t.Fatalf("Failed to parse ffprobe output: %v\nRaw: %s", err, string(probeBytes))
+		}
+
+		exitCode, execOutput, err = serverContainer.Exec(ctx, []string{
+			"sh", "-c",
+			fmt.Sprintf("ffprobe -v quiet -print_format json -show_streams '%s' > '%s' 2>&1", containerSourcePath, probeSourceFile),
+		})
+		if err != nil {
+			t.Fatalf("Failed to exec ffprobe on source: %v", err)
+		}
+		if exitCode != 0 {
+			execBytes, _ := io.ReadAll(execOutput)
+			t.Fatalf("ffprobe on source failed (exit %d): %s", exitCode, string(execBytes))
+		}
+
+		sourceProbeBytes, err := os.ReadFile(filepath.Join(sourceDir, "ffprobe_source.json"))
+		if err != nil {
+			t.Fatalf("Failed to read source ffprobe file: %v", err)
+		}
+		var sourceProbeResult struct {
+			Streams []struct {
+				CodecType string `json:"codec_type"`
+				CodecName string `json:"codec_name"`
+				Tags      struct {
+					Language string `json:"language"`
+				} `json:"tags"`
+			} `json:"streams"`
+		}
+		if err := json.Unmarshal(sourceProbeBytes, &sourceProbeResult); err != nil {
+			t.Fatalf("Failed to parse source ffprobe: %v", err)
 		}
 
 		t.Logf("Output streams (%d):", len(probeResult.Streams))
@@ -408,8 +444,8 @@ web:
 			for lang, count := range audioLangs {
 				t.Logf("  Audio: %s (%d track(s))", lang, count)
 			}
-			if sourceAudioLangs := countStreamLanguages(probeResult.Streams, "audio"); len(audioLangs) < sourceAudioLangs {
-				t.Errorf("Audio language count decreased: output has %d language(s) but source probe shows %d — multi-language tracks may have been dropped", len(audioLangs), sourceAudioLangs)
+			if sourceAudioLangs := countStreamLanguages(sourceProbeResult.Streams, "audio"); len(audioLangs) < sourceAudioLangs {
+				t.Errorf("Audio language count decreased: output has %d language(s) but source had %d — multi-language tracks may have been dropped", len(audioLangs), sourceAudioLangs)
 			}
 		}
 	})

@@ -440,13 +440,12 @@ web:
 		// clobbering audio tracks.
 		t.Logf("Audio languages found: %v", audioLangs)
 		t.Logf("Subtitle languages found: %v", subtitleLangs)
-		if len(audioLangs) > 0 {
-			for lang, count := range audioLangs {
-				t.Logf("  Audio: %s (%d track(s))", lang, count)
-			}
-			if sourceAudioLangs := countStreamLanguages(sourceProbeResult.Streams, "audio"); len(audioLangs) < sourceAudioLangs {
-				t.Errorf("Audio language count decreased: output has %d language(s) but source had %d — multi-language tracks may have been dropped", len(audioLangs), sourceAudioLangs)
-			}
+		sourceAudioLangs := countStreamLanguages(sourceProbeResult.Streams, "audio")
+		if sourceAudioLangs > 0 && len(audioLangs) < sourceAudioLangs {
+			t.Errorf("Audio language count decreased: output has %d language(s) but source had %d — multi-language tracks may have been dropped", len(audioLangs), sourceAudioLangs)
+		}
+		for lang, count := range audioLangs {
+			t.Logf("  Audio: %s (%d track(s))", lang, count)
 		}
 
 		if sourceSubLangs := countStreamLanguages(sourceProbeResult.Streams, "subtitle"); sourceSubLangs > 0 {

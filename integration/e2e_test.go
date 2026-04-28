@@ -448,6 +448,12 @@ web:
 				t.Errorf("Audio language count decreased: output has %d language(s) but source had %d — multi-language tracks may have been dropped", len(audioLangs), sourceAudioLangs)
 			}
 		}
+
+		if sourceSubLangs := countStreamLanguages(sourceProbeResult.Streams, "subtitle"); sourceSubLangs > 0 {
+			if len(subtitleLangs) < sourceSubLangs {
+				t.Errorf("Subtitle language count decreased: output has %d language(s) but source had %d — subtitle tracks may have been dropped", len(subtitleLangs), sourceSubLangs)
+			}
+		}
 	})
 
 	t.Run("VerifyEventHistory", func(t *testing.T) {

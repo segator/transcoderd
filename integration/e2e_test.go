@@ -31,20 +31,20 @@ const (
 	e2eDBUser   = "test"
 	e2eDBPass   = "test"
 	e2eToken    = "e2e-test-token"
-	e2eTestFile = "testdata/test_pgs_fixture.mkv"
+	e2eTestFile = "testdata/test_dual_fixture.mkv"
 
 	defaultServerImage = "transcoderd:server-test"
 	defaultWorkerImage = "transcoderd:worker-test"
 )
 
 // TestDockerE2E runs a full end-to-end test using real Docker containers
-// for both server and worker, with a real MKV file containing PGS subtitles.
+// for both server and worker, with a real MKV file containing dual-language audio.
 //
 // Prerequisites:
 //   - Docker running
 //   - Pre-built Docker images (or set E2E_SERVER_IMAGE / E2E_WORKER_IMAGE env vars):
 //     make buildcontainer-server buildcontainer-worker
-//   - Test fixture present: integration/testdata/test_pgs_clip.mkv
+//   - Test fixture present: integration/testdata/test_dual_fixture.mkv
 //
 // Run with: go test -tags=integration -v -timeout 30m -run TestDockerE2E ./integration/...
 func TestDockerE2E(t *testing.T) {
@@ -61,7 +61,7 @@ func TestDockerE2E(t *testing.T) {
 		t.Fatalf("Failed to resolve fixture path: %v", err)
 	}
 	if _, err := os.Stat(fixtureAbs); os.IsNotExist(err) {
-		t.Skipf("Test fixture not found at %s — download a test MKV with PGS subtitles", fixtureAbs)
+		t.Skipf("Test fixture not found at %s — place a dual-language MKV test file here", fixtureAbs)
 	}
 
 	ctx := context.Background()

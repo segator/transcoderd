@@ -74,30 +74,30 @@ docker run -d \
 
 ### Prerequisites
 - [Go 1.25](https://go.dev/dl/)
+- [Mage](https://magefile.org/) (`go install github.com/magefile/mage@latest`)
+- [Dagger](https://docs.dagger.io/install) (for container builds)
 - [golangci-lint](https://golangci-lint.run/welcome/install/)
-- Docker with [buildx](https://docs.docker.com/build/install-buildx/) (for container builds)
+- Docker (for container builds and integration tests)
 - PostgreSQL (for integration tests, provided via testcontainers)
 
-Alternatively, install [Devbox](https://www.jetify.com/devbox) which provides all Go and lint tooling via Nix.
 
 ### Build
 
 ```bash
-make build              # Build Go binaries + Docker containers
-make buildgo            # Build Go binaries only (no Docker)
-make buildgo-server     # Build server binary only -> dist/transcoderd-server
-make buildgo-worker     # Build worker binary only -> dist/transcoderd-worker
+mage build              # Build server + worker Go binaries -> dist/
+mage buildServer        # Build server binary only -> dist/transcoderd-server
+mage buildWorker        # Build worker binary only -> dist/transcoderd-worker
 ```
 
 ### Test
 
 ```bash
-make test               # Unit tests with coverage
-make test-race          # Unit tests with race detector
-make test-short         # Unit tests in short mode
-make test-integration   # Integration tests (requires Docker for testcontainers)
-make test-all           # Unit + integration tests
-make test-coverage      # Run tests and open coverage report in browser
+mage test               # Unit tests with coverage
+mage testRace           # Unit tests with race detector
+mage testShort          # Unit tests in short mode
+mage testIntegration    # Integration tests (requires Docker for testcontainers)
+mage testAll            # Unit + integration tests
+mage testE2E            # Docker e2e test (requires built container images)
 
 # Run a single test
 go test -v -run TestFunctionName ./path/to/package/...
@@ -106,33 +106,41 @@ go test -v -run TestFunctionName ./path/to/package/...
 ### Lint
 
 ```bash
-make lint               # Run golangci-lint
-make lint-fix           # Run golangci-lint with auto-fix
-make fmt                # Run go fmt
+mage lint               # Run golangci-lint
+mage lintFix            # Run golangci-lint with auto-fix
+mage fmt                # Run go fmt
 ```
 
-### Docker
+### Docker (via Dagger)
+
+Container images are built using [Dagger](https://dagger.io/) for content-addressed caching.
 
 ```bash
-make buildcontainer-server   # Build server Docker image (loads locally)
-make buildcontainer-worker   # Build worker Docker image (loads locally)
-make publishcontainer-server # Build and push server image to registry
-make publishcontainer-worker # Build and push worker image to registry
+mage container              # Build server + worker Docker images (loads locally)
+mage containerServer        # Build server Docker image only
+mage containerWorker        # Build worker Docker image only
+mage publish                # Build and push server + worker images to registry
 ```
 
-Cache images for FFmpeg and PGS builder stages (avoids ~50min FFmpeg rebuilds):
+Pre-built builder images for FFmpeg and PGS (avoids ~50min FFmpeg rebuilds):
 
 ```bash
-make buildcache              # Build and push all cache images
-make buildcache-ffmpeg       # Build and push FFmpeg cache image only
-make buildcache-pgs          # Build and push PGS cache image only
+mage publishBuilderFfmpeg   # Build and push FFmpeg builder image
+mage publishBuilderPgs      # Build and push PGS builder image
+```
+
+### Full CI Pipeline
+
+```bash
+mage ci                     # lint -> test -> build -> container -> e2e
 ```
 
 ### CI Pipeline
 
 - **Lint**: runs `golangci-lint` on every push and PR
-- **Build + Test**: runs `make test` and `make buildgo` on every push and PR
-- **Docker Publish**: builds and pushes Docker images on pushes to `main` only (PRs skip Docker)
+- **Build + Test**: runs `mage test` and `mage build` on every push and PR
+- **Docker**: builds container images via Dagger on every push and PR
+- **Docker Publish**: pushes Docker images on pushes to `main` only (PRs skip publish)
 - **Release**: managed by [Release Please](https://github.com/googleapis/release-please) on `main` using conventional commits
 
 ### Project Structure
@@ -141,6 +149,7 @@ make buildcache-pgs          # Build and push PGS cache image only
 cmd/            # Shared CLI config (pflag, viper, mapstructure)
 model/          # Domain types (Job, Event, Worker)
 helper/         # Utilities (command exec, concurrent collections, progress)
+magefiles/      # Mage build targets (Dagger-powered container builds)
 server/         # Server application
   config/       # Server config structs
   repository/   # PostgreSQL repository (interface + SQL impl)

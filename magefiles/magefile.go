@@ -1,4 +1,6 @@
 // Package main provides the Mage build targets for TranscoderD.
+// All build, test, and lint operations run inside Dagger containers for
+// reproducibility and content-addressed caching. Mage is the CLI orchestrator.
 //
 // Usage:
 //
@@ -17,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -58,7 +61,6 @@ func readVersionFile() string {
 }
 
 func projectRoot() string {
-	// magefiles/ lives one level below the project root.
 	dir, _ := os.Getwd()
 	if filepath.Base(dir) == "magefiles" {
 		return filepath.Dir(dir)
@@ -95,107 +97,159 @@ func runCmd(ctx context.Context, name string, args ...string) error {
 	return cmd.Run()
 }
 
+// ---------------------------------------------------------------------------
+// Dagger helpers
+// ---------------------------------------------------------------------------
+
 func daggerClient(ctx context.Context) (*dagger.Client, error) {
 	return dagger.Connect(ctx, dagger.WithLogOutput(os.Stderr))
+}
+
+func projectSource(client *dagger.Client) *dagger.Directory {
+	return client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
+		Exclude: []string{".git", "build", "dist", "magefiles"},
+	})
+}
+
+func goContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container {
+	return client.Container().
+		From("golang:1.25-bookworm").
+		WithMountedCache("/root/.cache/go-build", client.CacheVolume("go-build")).
+		WithMountedCache("/go/pkg/mod", client.CacheVolume("go-mod")).
+		WithEnvVariable("CGO_ENABLED", "0").
+		WithDirectory("/src", src).
+		WithWorkdir("/src")
+}
+
+// lintContainer installs golangci-lint before mounting source for optimal layer caching.
+func lintContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container {
+	return client.Container().
+		From("golang:1.25-bookworm").
+		WithMountedCache("/root/.cache/go-build", client.CacheVolume("go-build")).
+		WithMountedCache("/go/pkg/mod", client.CacheVolume("go-mod")).
+		WithMountedCache("/root/.cache/golangci-lint", client.CacheVolume("golangci-lint")).
+		WithExec([]string{
+			"sh", "-c",
+			"curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.1.6/install.sh | sh -s -- -b /usr/local/bin v2.1.6",
+		}).
+		WithDirectory("/src", src).
+		WithWorkdir("/src")
 }
 
 // ---------------------------------------------------------------------------
 // Build targets
 // ---------------------------------------------------------------------------
 
-// Build builds both server and worker Go binaries into dist/.
+// Build builds both server and worker Go binaries into dist/ via Dagger.
 func Build(ctx context.Context) error {
-	fmt.Println("Building server and worker binaries...")
-	if err := BuildServer(ctx); err != nil {
-		return err
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
 	}
-	return BuildWorker(ctx)
+	defer client.Close()
+
+	src := projectSource(client)
+	for _, component := range []string{"server", "worker"} {
+		if err := buildBinaryWith(ctx, client, src, component); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// BuildServer builds the server binary into dist/transcoderd-server.
+// BuildServer builds the server binary into dist/transcoderd-server via Dagger.
 func BuildServer(ctx context.Context) error {
-	return buildBinary(ctx, "server")
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+	return buildBinaryWith(ctx, client, projectSource(client), "server")
 }
 
-// BuildWorker builds the worker binary into dist/transcoderd-worker.
+// BuildWorker builds the worker binary into dist/transcoderd-worker via Dagger.
 func BuildWorker(ctx context.Context) error {
-	return buildBinary(ctx, "worker")
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+	return buildBinaryWith(ctx, client, projectSource(client), "worker")
 }
 
-func buildBinary(ctx context.Context, component string) error {
-	output := filepath.Join("dist", "transcoderd-"+component)
-	fmt.Printf("Building %s\n", output)
-
-	if err := os.MkdirAll(filepath.Join(projectRoot(), "dist"), 0o755); err != nil {
+func buildBinaryWith(ctx context.Context, client *dagger.Client, src *dagger.Directory, component string) error {
+	output := filepath.Join(projectRoot(), "dist", "transcoderd-"+component)
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, "go", "build",
-		"-ldflags", ldflags("transcoderd-"+component),
-		"-o", output,
-		"./"+component+"/main.go",
-	)
-	cmd.Dir = projectRoot()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-	return cmd.Run()
+	_, err := goContainer(client, src).
+		WithEnvVariable("GOOS", runtime.GOOS).
+		WithEnvVariable("GOARCH", runtime.GOARCH).
+		WithExec([]string{
+			"go", "build",
+			"-ldflags", ldflags("transcoderd-" + component),
+			"-o", "/output/transcoderd-" + component,
+			"./" + component + "/main.go",
+		}).
+		File("/output/transcoderd-"+component).
+		Export(ctx, output)
+	if err != nil {
+		return fmt.Errorf("build %s: %w", component, err)
+	}
+	fmt.Printf("Built %s\n", output)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
 // Test targets
 // ---------------------------------------------------------------------------
 
-// Test runs unit tests with coverage.
+// Test runs unit tests with coverage via Dagger.
 func Test(ctx context.Context) error {
-	fmt.Println("Running unit tests...")
-	if err := os.MkdirAll(filepath.Join(projectRoot(), "build"), 0o755); err != nil {
-		return err
-	}
-	return runCmd(ctx, "go", "test", "-v",
-		"-coverprofile=build/coverage.out", "-covermode=atomic", "./...")
+	return runGoTest(ctx, []string{"go", "test", "-v",
+		"-coverprofile=/tmp/coverage.out", "-covermode=atomic", "./..."}, false)
 }
 
-// TestRace runs unit tests with race detector.
+// TestRace runs unit tests with race detector via Dagger.
 func TestRace(ctx context.Context) error {
-	fmt.Println("Running unit tests with race detector...")
-	if err := os.MkdirAll(filepath.Join(projectRoot(), "build"), 0o755); err != nil {
-		return err
-	}
-	return runCmd(ctx, "go", "test", "-v", "-race",
-		"-coverprofile=build/coverage.out", "-covermode=atomic", "./...")
+	return runGoTest(ctx, []string{"go", "test", "-v", "-race",
+		"-coverprofile=/tmp/coverage.out", "-covermode=atomic", "./..."}, false)
 }
 
-// TestShort runs unit tests in short mode.
+// TestShort runs unit tests in short mode via Dagger.
 func TestShort(ctx context.Context) error {
-	fmt.Println("Running unit tests (short)...")
-	return runCmd(ctx, "go", "test", "-v", "-short", "./...")
+	return runGoTest(ctx, []string{"go", "test", "-v", "-short", "./..."}, false)
 }
 
-// TestIntegration runs integration tests (requires Docker for testcontainers).
+// TestIntegration runs integration tests via Dagger (needs Docker socket for testcontainers).
 func TestIntegration(ctx context.Context) error {
-	fmt.Println("Running integration tests...")
-	return runCmd(ctx, "go", "test", "-tags=integration", "-v", "-timeout", "5m", "./integration/...")
+	return runGoTest(ctx, []string{"go", "test", "-tags=integration", "-v",
+		"-timeout", "5m", "./integration/..."}, true)
 }
 
-// TestE2E runs the Docker e2e test (requires built container images).
+// TestE2E runs the Docker e2e test via Dagger (requires built container images loaded in Docker).
 func TestE2E(ctx context.Context) error {
-	fmt.Println("Running e2e tests...")
-	cmd := exec.CommandContext(ctx, "go", "test",
-		"-tags=integration", "-v", "-timeout", "30m",
-		"-run", "TestDockerE2E", "./integration/...",
-	)
-	cmd.Dir = projectRoot()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("E2E_SERVER_IMAGE=%s:server-%s", imageName, gitBranchName),
-		fmt.Sprintf("E2E_WORKER_IMAGE=%s:worker-%s", imageName, gitBranchName),
-	)
-	return cmd.Run()
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+
+	src := projectSource(client)
+	_, err = goContainer(client, src).
+		WithUnixSocket("/var/run/docker.sock", client.Host().UnixSocket("/var/run/docker.sock")).
+		WithEnvVariable("E2E_SERVER_IMAGE", fmt.Sprintf("%s:server-%s", imageName, gitBranchName)).
+		WithEnvVariable("E2E_WORKER_IMAGE", fmt.Sprintf("%s:worker-%s", imageName, gitBranchName)).
+		WithExec([]string{
+			"go", "test", "-tags=integration", "-v",
+			"-timeout", "30m", "-run", "TestDockerE2E", "./integration/...",
+		}).
+		Sync(ctx)
+	return err
 }
 
-// TestAll runs unit + integration tests.
+// TestAll runs unit + integration tests via Dagger.
 func TestAll(ctx context.Context) error {
 	if err := Test(ctx); err != nil {
 		return err
@@ -203,25 +257,48 @@ func TestAll(ctx context.Context) error {
 	return TestIntegration(ctx)
 }
 
+func runGoTest(ctx context.Context, args []string, needsDocker bool) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+
+	src := projectSource(client)
+	ctr := goContainer(client, src)
+	if needsDocker {
+		ctr = ctr.WithUnixSocket("/var/run/docker.sock", client.Host().UnixSocket("/var/run/docker.sock"))
+	}
+	_, err = ctr.WithExec(args).Sync(ctx)
+	return err
+}
+
 // ---------------------------------------------------------------------------
 // Quality targets
 // ---------------------------------------------------------------------------
 
-// Lint runs golangci-lint.
+// Lint runs golangci-lint via Dagger.
 func Lint(ctx context.Context) error {
-	fmt.Println("Running linter...")
-	return runCmd(ctx, "golangci-lint", "run")
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+
+	src := projectSource(client)
+	_, err = lintContainer(client, src).
+		WithExec([]string{"golangci-lint", "run"}).
+		Sync(ctx)
+	return err
 }
 
-// LintFix runs golangci-lint with auto-fix.
+// LintFix runs golangci-lint with auto-fix (local — modifies files in place).
 func LintFix(ctx context.Context) error {
-	fmt.Println("Running linter with auto-fix...")
 	return runCmd(ctx, "golangci-lint", "run", "--fix")
 }
 
-// Fmt formats Go code.
+// Fmt formats Go code (local — modifies files in place).
 func Fmt(ctx context.Context) error {
-	fmt.Println("Formatting Go code...")
 	return runCmd(ctx, "go", "fmt", "./...")
 }
 
@@ -231,17 +308,13 @@ func Fmt(ctx context.Context) error {
 
 // Container builds both server and worker Docker images via Dagger.
 func Container(ctx context.Context) error {
-	fmt.Println("Building container images via Dagger...")
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
 	}
 	defer client.Close()
 
-	src := client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
-		Exclude: []string{".git", "build", "magefiles"},
-	})
-
+	src := projectSource(client)
 	if err := buildContainerImage(ctx, client, src, "server"); err != nil {
 		return err
 	}
@@ -255,11 +328,7 @@ func ContainerServer(ctx context.Context) error {
 		return fmt.Errorf("dagger connect: %w", err)
 	}
 	defer client.Close()
-
-	src := client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
-		Exclude: []string{".git", "build", "magefiles"},
-	})
-	return buildContainerImage(ctx, client, src, "server")
+	return buildContainerImage(ctx, client, projectSource(client), "server")
 }
 
 // ContainerWorker builds the worker Docker image via Dagger.
@@ -269,26 +338,18 @@ func ContainerWorker(ctx context.Context) error {
 		return fmt.Errorf("dagger connect: %w", err)
 	}
 	defer client.Close()
-
-	src := client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
-		Exclude: []string{".git", "build", "magefiles"},
-	})
-	return buildContainerImage(ctx, client, src, "worker")
+	return buildContainerImage(ctx, client, projectSource(client), "worker")
 }
 
 // Publish builds and pushes both server and worker images via Dagger.
 func Publish(ctx context.Context) error {
-	fmt.Println("Publishing container images via Dagger...")
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
 	}
 	defer client.Close()
 
-	src := client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
-		Exclude: []string{".git", "build", "magefiles"},
-	})
-
+	src := projectSource(client)
 	for _, component := range []string{"server", "worker"} {
 		ctr, err := containerImage(ctx, client, src, component)
 		if err != nil {
@@ -307,16 +368,13 @@ func Publish(ctx context.Context) error {
 
 // PublishBuilderFfmpeg compiles FFmpeg from source and pushes the builder image (~50min).
 func PublishBuilderFfmpeg(ctx context.Context) error {
-	fmt.Println("Publishing FFmpeg builder image via Dagger (~50min)...")
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
 	}
 	defer client.Close()
 
-	ctr := builderFfmpegImage(client)
-
-	addr, err := ctr.Publish(ctx, imageName+":builder-ffmpeg")
+	addr, err := builderFfmpegImage(client).Publish(ctx, imageName+":builder-ffmpeg")
 	if err != nil {
 		return fmt.Errorf("publish builder-ffmpeg: %w", err)
 	}
@@ -326,16 +384,13 @@ func PublishBuilderFfmpeg(ctx context.Context) error {
 
 // PublishBuilderPgs builds the PgsToSrt .NET tool + tessdata and pushes the builder image (~5min).
 func PublishBuilderPgs(ctx context.Context) error {
-	fmt.Println("Publishing PGS builder image via Dagger (~5min)...")
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
 	}
 	defer client.Close()
 
-	ctr := builderPgsImage(client)
-
-	addr, err := ctr.Publish(ctx, imageName+":builder-pgs")
+	addr, err := builderPgsImage(client).Publish(ctx, imageName+":builder-pgs")
 	if err != nil {
 		return fmt.Errorf("publish builder-pgs: %w", err)
 	}
@@ -349,7 +404,6 @@ func PublishBuilderPgs(ctx context.Context) error {
 
 // CI runs the full CI pipeline: lint → test → build → container → e2e.
 func CI(ctx context.Context) error {
-	fmt.Println("Running full CI pipeline...")
 	steps := []struct {
 		name string
 		fn   func(context.Context) error
@@ -390,11 +444,9 @@ func buildContainerImage(ctx context.Context, client *dagger.Client, src *dagger
 		}
 		fmt.Printf("Exported %s → %s\n", tag, tarPath)
 
-		// Load into local Docker daemon
 		if err := runCmd(ctx, "docker", "load", "-i", tarPath); err != nil {
 			fmt.Printf("Warning: docker load failed (Docker may not be available): %v\n", err)
 		} else {
-			// Tag the loaded image
 			if err := runCmd(ctx, "docker", "tag", component+":latest", tag); err != nil {
 				fmt.Printf("Warning: docker tag failed: %v\n", err)
 			}
@@ -404,16 +456,9 @@ func buildContainerImage(ctx context.Context, client *dagger.Client, src *dagger
 }
 
 func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Directory, component string) (*dagger.Container, error) {
-	// Build the Go binary inside Dagger for reproducibility
-	goBinary := client.Container().
-		From("golang:1.25-bookworm").
-		WithDirectory("/src", src).
-		WithWorkdir("/src").
-		WithEnvVariable("CGO_ENABLED", "0").
+	goBinary := goContainer(client, src).
 		WithEnvVariable("GOOS", "linux").
 		WithEnvVariable("GOARCH", "amd64").
-		WithMountedCache("/root/.cache/go-build", client.CacheVolume("go-build")).
-		WithMountedCache("/go/pkg/mod", client.CacheVolume("go-mod")).
 		WithExec([]string{
 			"go", "build",
 			"-ldflags", ldflags("transcoderd-" + component),
@@ -422,11 +467,9 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 		}).
 		File("/output/transcoderd-" + component)
 
-	// Pre-built FFmpeg image (pulled from registry — never rebuilt in normal CI)
 	ffmpegBins := client.Container().
 		From(imageName + ":builder-ffmpeg")
 
-	// Base runtime: debian + FFmpeg binaries
 	base := client.Container().
 		From("debian:trixie-20241223-slim").
 		WithExec([]string{"apt-get", "update"}).
@@ -446,7 +489,6 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 			WithEntrypoint([]string{"/app/transcoderd-server"}), nil
 
 	case "worker":
-		// Pre-built PGS image (pulled from registry)
 		pgsBins := client.Container().
 			From(imageName + ":builder-pgs")
 

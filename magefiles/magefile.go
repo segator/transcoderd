@@ -305,23 +305,16 @@ func Publish(ctx context.Context) error {
 	return nil
 }
 
-// PublishBuilderFfmpeg builds and pushes the FFmpeg builder image via Dagger.
+// PublishBuilderFfmpeg compiles FFmpeg from source and pushes the builder image (~50min).
 func PublishBuilderFfmpeg(ctx context.Context) error {
-	fmt.Println("Publishing FFmpeg builder image via Dagger...")
+	fmt.Println("Publishing FFmpeg builder image via Dagger (~50min)...")
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
 	}
 	defer client.Close()
 
-	src := client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
-		Include: []string{"Dockerfile"},
-	})
-
-	ctr := src.DockerBuild(dagger.DirectoryDockerBuildOpts{
-		Dockerfile: "Dockerfile",
-		Target:     "builder-ffmpeg",
-	})
+	ctr := builderFfmpegImage(client)
 
 	addr, err := ctr.Publish(ctx, imageName+":builder-ffmpeg")
 	if err != nil {
@@ -331,23 +324,16 @@ func PublishBuilderFfmpeg(ctx context.Context) error {
 	return nil
 }
 
-// PublishBuilderPgs builds and pushes the PGS builder image via Dagger.
+// PublishBuilderPgs builds the PgsToSrt .NET tool + tessdata and pushes the builder image (~5min).
 func PublishBuilderPgs(ctx context.Context) error {
-	fmt.Println("Publishing PGS builder image via Dagger...")
+	fmt.Println("Publishing PGS builder image via Dagger (~5min)...")
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
 	}
 	defer client.Close()
 
-	src := client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
-		Include: []string{"Dockerfile"},
-	})
-
-	ctr := src.DockerBuild(dagger.DirectoryDockerBuildOpts{
-		Dockerfile: "Dockerfile",
-		Target:     "builder-pgs",
-	})
+	ctr := builderPgsImage(client)
 
 	addr, err := ctr.Publish(ctx, imageName+":builder-pgs")
 	if err != nil {
@@ -487,6 +473,73 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 	default:
 		return nil, fmt.Errorf("unknown component: %s", component)
 	}
+}
+
+// builderFfmpegImage replicates the Dockerfile builder-ffmpeg stage as a pure Dagger pipeline.
+// Base: ubuntu:noble-20251013 with FFmpeg compiled from source (~50min).
+func builderFfmpegImage(client *dagger.Client) *dagger.Container {
+	return client.Container().
+		From("ubuntu:noble-20251013").
+		WithEnvVariable("DEBIAN_FRONTEND", "noninteractive").
+		WithExec([]string{
+			"bash", "-c",
+			"apt-get update && " +
+				"apt-get -y --no-install-recommends install git build-essential curl ca-certificates libva-dev " +
+				"python3 python-is-python3 ninja-build meson && " +
+				"apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* && " +
+				"update-ca-certificates",
+		}).
+		WithWorkdir("/app").
+		WithExec([]string{
+			"git", "clone", "--depth", "1", "--branch", "v1.59",
+			"https://github.com/markus-perl/ffmpeg-build-script.git",
+		}).
+		WithWorkdir("/app/ffmpeg-build-script").
+		WithExec([]string{
+			"bash", "-c",
+			"SKIPINSTALL=yes ./build-ffmpeg --build --enable-gpl-and-non-free",
+		}).
+		WithExec([]string{"rm", "-rf", "packages"})
+}
+
+// builderPgsImage replicates the Dockerfile builder-pgs stage as a pure Dagger pipeline.
+// Base: dotnet/sdk:8.0.419 with PgsToSrt + tessdata (~5min).
+func builderPgsImage(client *dagger.Client) *dagger.Container {
+	const (
+		tessdataVersion = "ced78752cc61322fb554c280d13360b35b8684e4"
+		pgstosrtVersion = "ef11919491b5c98f9dcdaf13d721596e60efb7ed"
+	)
+
+	return client.Container().
+		From("mcr.microsoft.com/dotnet/sdk:8.0.419").
+		WithWorkdir("/src").
+		WithExec([]string{
+			"bash", "-c",
+			"apt-get -y update && apt-get -y upgrade && " +
+				"apt-get -y install automake ca-certificates g++ libtool libtesseract-dev " +
+				"make pkg-config wget unzip libc6-dev && " +
+				"apt-get clean && rm -rf /var/lib/apt/lists/*",
+		}).
+		WithExec([]string{
+			"bash", "-c",
+			fmt.Sprintf(
+				"wget -O tessdata.zip 'https://github.com/tesseract-ocr/tessdata/archive/%s.zip' && "+
+					"unzip tessdata.zip && rm tessdata.zip && "+
+					"mv tessdata-%s tessdata",
+				tessdataVersion, tessdataVersion,
+			),
+		}).
+		WithExec([]string{
+			"bash", "-c",
+			fmt.Sprintf(
+				"wget -O pgstosrt.zip 'https://github.com/Tentacule/PgsToSrt/archive/%s.zip' && "+
+					"unzip pgstosrt.zip && rm pgstosrt.zip && "+
+					"cd PgsToSrt-%s/src && "+
+					"dotnet restore && "+
+					"dotnet publish -c Release -f net8.0 -o /src/PgsToSrt/out",
+				pgstosrtVersion, pgstosrtVersion,
+			),
+		})
 }
 
 func imageTags(component string) []string {

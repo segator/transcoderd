@@ -49,16 +49,12 @@ jobs:
       - name: Test
         run: devbox run -- mage test
 
-      # Ensure pre-built builder images exist in the registry. These are normally
-      # published via the "Publish builder images" workflow and only need rebuilding
-      # when FFmpeg/PGS dependencies change. This step is a safety net that builds
-      # and pushes them if they are missing (e.g. first run after setup).
       - name: Ensure builder images exist
         run: |
           for target in builder-ffmpeg builder-pgs; do
             if ! docker manifest inspect ghcr.io/segator/transcoderd:${target} > /dev/null 2>&1; then
               echo "Image ${target} not found, building and pushing..."
-              make publish-${target}
+              if [ "$target" = "builder-ffmpeg" ]; then mage publishBuilderFfmpeg; else mage publishBuilderPgs; fi
             else
               echo "Image ${target} already exists, skipping."
             fi

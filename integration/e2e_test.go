@@ -26,25 +26,51 @@ import (
 	"transcoder/server/scheduler"
 )
 
+type probeStream struct {
+	CodecType string `json:"codec_type"`
+	CodecName string `json:"codec_name"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	Tags      struct {
+		Language string `json:"language"`
+		Title    string `json:"title"`
+	} `json:"tags"`
+}
+
+type probeFormat struct {
+	Duration string `json:"duration"`
+}
+
+func (f probeFormat) DurationSeconds() float64 {
+	v, _ := strconv.ParseFloat(f.Duration, 64)
+	return v
+}
+
+type probeData struct {
+	Streams []probeStream `json:"streams"`
+	Format  probeFormat   `json:"format"`
+}
+
 const (
 	e2eDBName   = "transcoderd_e2e"
 	e2eDBUser   = "test"
 	e2eDBPass   = "test"
 	e2eToken    = "e2e-test-token"
-	e2eTestFile = "testdata/test_pgs_fixture.mkv"
+	e2eTestFile = "testdata/e2e_fixture.mkv"
 
 	defaultServerImage = "transcoderd:server-test"
 	defaultWorkerImage = "transcoderd:worker-test"
 )
 
 // TestDockerE2E runs a full end-to-end test using real Docker containers
-// for both server and worker, with a real MKV file containing PGS subtitles.
+// for both server and worker, with a synthetic MKV containing dual-language
+// audio (eng+spa) and PGS bitmap subtitles (2 eng + 2 spa).
 //
 // Prerequisites:
 //   - Docker running
 //   - Pre-built Docker images (or set E2E_SERVER_IMAGE / E2E_WORKER_IMAGE env vars):
 //     make buildcontainer-server buildcontainer-worker
-//   - Test fixture present: integration/testdata/test_pgs_clip.mkv
+//   - Test fixture present: integration/testdata/e2e_fixture.mkv (507KB, committed to git)
 //
 // Run with: go test -tags=integration -v -timeout 30m -run TestDockerE2E ./integration/...
 func TestDockerE2E(t *testing.T) {
@@ -61,7 +87,7 @@ func TestDockerE2E(t *testing.T) {
 		t.Fatalf("Failed to resolve fixture path: %v", err)
 	}
 	if _, err := os.Stat(fixtureAbs); os.IsNotExist(err) {
-		t.Skipf("Test fixture not found at %s — download a test MKV with PGS subtitles", fixtureAbs)
+		t.Fatalf("Test fixture not found at %s — it must be committed to git", fixtureAbs)
 	}
 
 	ctx := context.Background()
@@ -330,15 +356,22 @@ web:
 		}
 		t.Logf("Output file: %s (%d bytes)", targetPath, tfi.Size())
 
+		if dest := os.Getenv("E2E_KEEP_OUTPUT"); dest != "" {
+			_ = copyFile(targetPath, dest)
+		}
+
 		if job.TargetSize > 0 && job.SourceSize > 0 && job.TargetSize >= job.SourceSize {
 			t.Logf("Warning: target (%d) is not smaller than source (%d)", job.TargetSize, job.SourceSize)
 		}
 
 		containerOutputPath := "/source/" + job.TargetPath
+		containerSourcePath := "/source/" + testVideoRelPath
 		probeOutputFile := "/source/ffprobe_result.json"
+		probeSourceFile := "/source/ffprobe_source.json"
+
 		exitCode, execOutput, err := serverContainer.Exec(ctx, []string{
 			"sh", "-c",
-			fmt.Sprintf("ffprobe -v quiet -print_format json -show_streams '%s' > '%s' 2>&1", containerOutputPath, probeOutputFile),
+			fmt.Sprintf("ffprobe -v quiet -print_format json -show_streams -show_format '%s' > '%s' 2>&1", containerOutputPath, probeOutputFile),
 		})
 		if err != nil {
 			t.Fatalf("Failed to exec ffprobe in server container: %v", err)
@@ -353,30 +386,61 @@ web:
 			t.Fatalf("Failed to read ffprobe output file: %v", err)
 		}
 
-		var probeResult struct {
-			Streams []struct {
-				CodecType string `json:"codec_type"`
-				CodecName string `json:"codec_name"`
-				Tags      struct {
-					Language string `json:"language"`
-				} `json:"tags"`
-			} `json:"streams"`
-		}
+		var probeResult probeData
 		if err := json.Unmarshal(probeBytes, &probeResult); err != nil {
 			t.Fatalf("Failed to parse ffprobe output: %v\nRaw: %s", err, string(probeBytes))
 		}
 
+		exitCode, execOutput, err = serverContainer.Exec(ctx, []string{
+			"sh", "-c",
+			fmt.Sprintf("ffprobe -v quiet -print_format json -show_streams -show_format '%s' > '%s' 2>&1", containerSourcePath, probeSourceFile),
+		})
+		if err != nil {
+			t.Fatalf("Failed to exec ffprobe on source: %v", err)
+		}
+		if exitCode != 0 {
+			execBytes, _ := io.ReadAll(execOutput)
+			t.Fatalf("ffprobe on source failed (exit %d): %s", exitCode, string(execBytes))
+		}
+
+		sourceProbeBytes, err := os.ReadFile(filepath.Join(sourceDir, "ffprobe_source.json"))
+		if err != nil {
+			t.Fatalf("Failed to read source ffprobe file: %v", err)
+		}
+		var sourceProbeResult probeData
+		if err := json.Unmarshal(sourceProbeBytes, &sourceProbeResult); err != nil {
+			t.Fatalf("Failed to parse source ffprobe: %v", err)
+		}
+
 		t.Logf("Output streams (%d):", len(probeResult.Streams))
 		var hasHEVC, hasAAC, hasSRT bool
+		audioLangs := make(map[string]int)
+		subtitleLangs := make(map[string]int)
+		var outputVideoWidth, outputVideoHeight int
+		var outputAudioTitles, outputSubTitles []string
 		for i, s := range probeResult.Streams {
-			t.Logf("  %d. %s: %s (lang=%s)", i, s.CodecType, s.CodecName, s.Tags.Language)
+			t.Logf("  %d. %s: %s (lang=%s title=%q)", i, s.CodecType, s.CodecName, s.Tags.Language, s.Tags.Title)
 			switch {
 			case s.CodecType == "video" && s.CodecName == "hevc":
 				hasHEVC = true
+				outputVideoWidth = s.Width
+				outputVideoHeight = s.Height
 			case s.CodecType == "audio" && s.CodecName == "aac":
 				hasAAC = true
+				if lang := s.Tags.Language; lang != "" {
+					audioLangs[lang]++
+				}
+				if s.Tags.Title != "" {
+					outputAudioTitles = append(outputAudioTitles, s.Tags.Title)
+				}
 			case s.CodecType == "subtitle" && s.CodecName == "subrip":
 				hasSRT = true
+				if lang := s.Tags.Language; lang != "" {
+					subtitleLangs[lang]++
+				}
+				if s.Tags.Title != "" {
+					outputSubTitles = append(outputSubTitles, s.Tags.Title)
+				}
 			}
 		}
 
@@ -388,6 +452,87 @@ web:
 		}
 		if !hasSRT {
 			t.Errorf("Output missing SRT subtitle stream (PGS should have been converted to SRT)")
+		}
+
+		// Duration check: output duration must be within 20% of source
+		sourceDuration := sourceProbeResult.Format.DurationSeconds()
+		outputDuration := probeResult.Format.DurationSeconds()
+		t.Logf("Duration: source=%.2fs output=%.2fs", sourceDuration, outputDuration)
+		if sourceDuration > 0 && outputDuration > 0 {
+			ratio := outputDuration / sourceDuration
+			if ratio < 0.8 || ratio > 1.2 {
+				t.Errorf("Duration mismatch: output %.2fs vs source %.2fs (ratio %.2f) — video may be truncated or corrupted", outputDuration, sourceDuration, ratio)
+			}
+		}
+
+		// Video resolution check: must match source
+		var sourceVideoWidth, sourceVideoHeight int
+		for _, s := range sourceProbeResult.Streams {
+			if s.CodecType == "video" {
+				sourceVideoWidth = s.Width
+				sourceVideoHeight = s.Height
+				break
+			}
+		}
+		t.Logf("Resolution: source=%dx%d output=%dx%d", sourceVideoWidth, sourceVideoHeight, outputVideoWidth, outputVideoHeight)
+		if sourceVideoWidth > 0 && outputVideoWidth != sourceVideoWidth {
+			t.Errorf("Video width changed: source=%d output=%d", sourceVideoWidth, outputVideoWidth)
+		}
+		if sourceVideoHeight > 0 && outputVideoHeight != sourceVideoHeight {
+			t.Errorf("Video height changed: source=%d output=%d", sourceVideoHeight, outputVideoHeight)
+		}
+
+		// Per-language assertion: both eng and spa must exist in audio
+		t.Logf("Audio languages found: %v", audioLangs)
+		if audioLangs["eng"] == 0 {
+			t.Errorf("Output missing English audio track")
+		}
+		if audioLangs["spa"] == 0 {
+			t.Errorf("Output missing Spanish audio track")
+		}
+
+		// Per-language assertion: both eng and spa must exist in subtitles
+		t.Logf("Subtitle languages found: %v", subtitleLangs)
+		if subtitleLangs["eng"] == 0 {
+			t.Errorf("Output missing English subtitle track")
+		}
+		if subtitleLangs["spa"] == 0 {
+			t.Errorf("Output missing Spanish subtitle track")
+		}
+
+		// Language count vs source
+		sourceAudioLangs := countStreamLanguages(sourceProbeResult.Streams, "audio")
+		if sourceAudioLangs > 0 && len(audioLangs) < sourceAudioLangs {
+			t.Errorf("Audio language count decreased: output has %d language(s) but source had %d", len(audioLangs), sourceAudioLangs)
+		}
+		sourceSubLangs := countStreamLanguages(sourceProbeResult.Streams, "subtitle")
+		if sourceSubLangs > 0 && len(subtitleLangs) < sourceSubLangs {
+			t.Errorf("Subtitle language count decreased: output has %d language(s) but source had %d", len(subtitleLangs), sourceSubLangs)
+		}
+
+		// Metadata title preservation: audio and subtitle tracks must retain titles
+		t.Logf("Audio titles: %v", outputAudioTitles)
+		t.Logf("Subtitle titles: %v", outputSubTitles)
+		if len(outputAudioTitles) == 0 {
+			t.Errorf("No audio tracks have title metadata — titles were lost during transcoding")
+		}
+		if len(outputSubTitles) == 0 {
+			t.Errorf("No subtitle tracks have title metadata — titles were lost during transcoding")
+		}
+
+		// File playability: decode the entire output to detect corrupt frames
+		exitCode, execOutput, err = serverContainer.Exec(ctx, []string{
+			"sh", "-c",
+			fmt.Sprintf("ffmpeg -v error -i '%s' -f null - 2>&1", containerOutputPath),
+		})
+		if err != nil {
+			t.Fatalf("Failed to run playability check: %v", err)
+		}
+		if exitCode != 0 {
+			execBytes, _ := io.ReadAll(execOutput)
+			t.Errorf("File playability check failed (exit %d) — output has corrupt frames or demux errors:\n%s", exitCode, string(execBytes))
+		} else {
+			t.Log("File playability check passed (full decode, no errors)")
 		}
 	})
 
@@ -455,6 +600,16 @@ func mustMappedPortInt(t *testing.T, ctx context.Context, c testcontainers.Conta
 		t.Fatalf("Failed to parse port %q: %v", p.Port(), err)
 	}
 	return portNum
+}
+
+func countStreamLanguages(streams []probeStream, codecType string) int {
+	langs := make(map[string]bool)
+	for _, s := range streams {
+		if s.CodecType == codecType && s.Tags.Language != "" {
+			langs[s.Tags.Language] = true
+		}
+	}
+	return len(langs)
 }
 
 func dumpContainerLogs(t *testing.T, ctx context.Context, c testcontainers.Container, name string) {

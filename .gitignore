@@ -8,9 +8,10 @@ statik/
 build/coverage.out
 coverage.out
 
-# Large test fixtures (keep test_pgs_fixture.mkv tracked)
+# Large test fixtures (keep small generated fixtures tracked)
 integration/testdata/*.mkv
 !integration/testdata/test_pgs_fixture.mkv
+!integration/testdata/e2e_fixture.mkv
 
 # act (GitHub Actions local runner)
 .secrets

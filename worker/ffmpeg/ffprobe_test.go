@@ -1,9 +1,12 @@
 package ffmpeg
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
+
+	ffprobe "gopkg.in/vansante/go-ffprobe.v2"
 )
 
 func TestSubtitleIsImageTypeSubtitle(t *testing.T) {
@@ -431,6 +434,148 @@ func TestFFProbeFrameRate(t *testing.T) {
 				t.Errorf("ffProbeFrameRate() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeFFProbeData_DualAudio(t *testing.T) {
+	rawJSON := `{
+		"streams": [
+			{
+				"index": 0,
+				"codec_type": "video",
+				"avg_frame_rate": "24/1",
+				"codec_name": "h264"
+			},
+			{
+				"index": 1,
+				"codec_type": "audio",
+				"bit_rate": "384000",
+				"channels": 6,
+				"channel_layout": "5.1",
+				"tags": {"language": "spa", "title": "Spanish"},
+				"disposition": {"default": 1, "forced": 0, "comment": 0}
+			},
+			{
+				"index": 2,
+				"codec_type": "audio",
+				"bit_rate": "768000",
+				"channels": 6,
+				"channel_layout": "5.1",
+				"tags": {"language": "eng", "title": "English"},
+				"disposition": {"default": 0, "forced": 0, "comment": 0}
+			},
+			{
+				"index": 3,
+				"codec_type": "subtitle",
+				"codec_name": "subrip",
+				"tags": {"language": "spa", "title": "Spanish"},
+				"disposition": {"default": 0, "forced": 0, "comment": 0}
+			},
+			{
+				"index": 4,
+				"codec_type": "subtitle",
+				"codec_name": "subrip",
+				"tags": {"language": "eng", "title": "English"},
+				"disposition": {"default": 0, "forced": 0, "comment": 0}
+			}
+		],
+		"format": {
+			"duration": "600.000000"
+		}
+	}`
+
+	var probeData ffprobe.ProbeData
+	if err := json.Unmarshal([]byte(rawJSON), &probeData); err != nil {
+		t.Fatalf("Failed to unmarshal probe data: %v", err)
+	}
+
+	result, err := NormalizeFFProbeData(&probeData)
+	if err != nil {
+		t.Fatalf("NormalizeFFProbeData() error = %v", err)
+	}
+
+	if len(result.Audios) != 2 {
+		t.Fatalf("NormalizeFFProbeData() got %d audio tracks, want 2", len(result.Audios))
+	}
+
+	audioLangs := make(map[string]bool)
+	for _, a := range result.Audios {
+		audioLangs[a.Language] = true
+	}
+	if !audioLangs["spa"] {
+		t.Error("NormalizeFFProbeData() missing Spanish audio track")
+	}
+	if !audioLangs["eng"] {
+		t.Error("NormalizeFFProbeData() missing English audio track")
+	}
+
+	if len(result.Subtitle) != 2 {
+		t.Fatalf("NormalizeFFProbeData() got %d subtitle tracks, want 2", len(result.Subtitle))
+	}
+
+	subLangs := make(map[string]bool)
+	for _, s := range result.Subtitle {
+		subLangs[s.Language] = true
+	}
+	if !subLangs["spa"] {
+		t.Error("NormalizeFFProbeData() missing Spanish subtitle track")
+	}
+	if !subLangs["eng"] {
+		t.Error("NormalizeFFProbeData() missing English subtitle track")
+	}
+}
+
+func TestNormalizeFFProbeData_SameLanguagePrefersHigherBitrate(t *testing.T) {
+	rawJSON := `{
+		"streams": [
+			{
+				"index": 0,
+				"codec_type": "video",
+				"avg_frame_rate": "24/1",
+				"codec_name": "h264"
+			},
+			{
+				"index": 1,
+				"codec_type": "audio",
+				"bit_rate": "384000",
+				"channels": 6,
+				"channel_layout": "5.1",
+				"tags": {"language": "eng", "title": "English AC3"},
+				"disposition": {"default": 1, "forced": 0, "comment": 0}
+			},
+			{
+				"index": 2,
+				"codec_type": "audio",
+				"bit_rate": "768000",
+				"channels": 6,
+				"channel_layout": "5.1",
+				"tags": {"language": "eng", "title": "English DTS"},
+				"disposition": {"default": 0, "forced": 0, "comment": 0}
+			}
+		],
+		"format": {
+			"duration": "600.000000"
+		}
+	}`
+
+	var probeData ffprobe.ProbeData
+	if err := json.Unmarshal([]byte(rawJSON), &probeData); err != nil {
+		t.Fatalf("Failed to unmarshal probe data: %v", err)
+	}
+
+	result, err := NormalizeFFProbeData(&probeData)
+	if err != nil {
+		t.Fatalf("NormalizeFFProbeData() error = %v", err)
+	}
+
+	if len(result.Audios) != 1 {
+		t.Fatalf("NormalizeFFProbeData() got %d audio tracks, want 1 (same language dedup)", len(result.Audios))
+	}
+	if result.Audios[0].Bitrate != 768000 {
+		t.Errorf("NormalizeFFProbeData() kept bitrate %d, want 768000 (higher)", result.Audios[0].Bitrate)
+	}
+	if result.Audios[0].Title != "English DTS" {
+		t.Errorf("NormalizeFFProbeData() kept title %q, want \"English DTS\"", result.Audios[0].Title)
 	}
 }
 

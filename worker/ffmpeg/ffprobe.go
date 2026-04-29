@@ -203,15 +203,17 @@ func NormalizeFFProbeData(data *ffprobe.ProbeData) (container *NormalizedFFProbe
 		if err != nil {
 			panic(err)
 		}
+		language, _ := stream.TagList.GetString("language")
+		title, _ := stream.TagList.GetString("title")
 		newAudio := &Audio{
 			Id:             uint8(stream.Index),
-			Language:       stream.Tags.Language,
+			Language:       language,
 			Channels:       stream.ChannelLayout,
 			ChannelsNumber: uint8(stream.Channels),
 			ChannelLayour:  stream.ChannelLayout,
 			Default:        stream.Disposition.Default == 1,
 			Bitrate:        uint(bitRateInt),
-			Title:          stream.Tags.Title,
+			Title:          title,
 		}
 		betterAudio := betterAudioStreamPerLanguage[newAudio.Language]
 
@@ -223,7 +225,7 @@ func NormalizeFFProbeData(data *ffprobe.ProbeData) (container *NormalizedFFProbe
 				betterAudioStreamPerLanguage[newAudio.Language] = newAudio
 			}
 		} else {
-			betterAudioStreamPerLanguage[stream.Tags.Language] = newAudio
+			betterAudioStreamPerLanguage[newAudio.Language] = newAudio
 		}
 
 	}
@@ -233,13 +235,15 @@ func NormalizeFFProbeData(data *ffprobe.ProbeData) (container *NormalizedFFProbe
 
 	betterSubtitleStreamPerLanguage := make(map[string]*Subtitle)
 	for _, stream := range data.StreamType(ffprobe.StreamSubtitle) {
+		language, _ := stream.TagList.GetString("language")
+		title, _ := stream.TagList.GetString("title")
 		newSubtitle := &Subtitle{
 			Id:       uint8(stream.Index),
-			Language: stream.Tags.Language,
+			Language: language,
 			Forced:   stream.Disposition.Forced == 1,
 			Comment:  stream.Disposition.Comment == 1,
 			Format:   stream.CodecName,
-			Title:    stream.Tags.Title,
+			Title:    title,
 		}
 
 		if newSubtitle.Forced || newSubtitle.Comment {
@@ -249,7 +253,7 @@ func NormalizeFFProbeData(data *ffprobe.ProbeData) (container *NormalizedFFProbe
 		// TODO Filter Languages we don't want
 		betterSubtitle := betterSubtitleStreamPerLanguage[newSubtitle.Language]
 		if betterSubtitle == nil { // TODO Potser perdem subtituls que es necesiten
-			betterSubtitleStreamPerLanguage[stream.Tags.Language] = newSubtitle
+			betterSubtitleStreamPerLanguage[newSubtitle.Language] = newSubtitle
 		} else {
 			// TODO aixo es temporal per fer proves, borrar aquest else!!
 			container.Subtitle = append(container.Subtitle, newSubtitle)

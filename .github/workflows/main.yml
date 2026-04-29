@@ -20,6 +20,12 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: jetify-com/devbox-install-action@v0.12.0
 
+      - name: Install Mage
+        run: go install github.com/magefile/mage@latest
+
+      - name: Install Dagger
+        run: curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sudo sh
+
       - name: Release please
         if: github.event_name != 'pull_request'
         id: release
@@ -41,7 +47,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Test
-        run: devbox run -- make test
+        run: devbox run -- mage test
 
       # Ensure pre-built builder images exist in the registry. These are normally
       # published via the "Publish builder images" workflow and only need rebuilding
@@ -59,20 +65,23 @@ jobs:
           done
 
       - name: Build
-        run: devbox run -- make build
+        run: devbox run -- mage build
+
+      - name: Build Containers
+        run: devbox run -- mage container
 
       - name: E2E Test
-        run: devbox run -- make test-e2e
+        run: devbox run -- mage testE2E
 
       - name: Publish
         if: github.event_name != 'pull_request'
-        run: make publish
+        run: mage publish
 
       - name: Publish release tags
         if: steps.release.outputs.release_created
         run: |
-          PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} make publish
-          PROJECT_VERSION=v${{ steps.release.outputs.major }} make publish
+          PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} mage publish
+          PROJECT_VERSION=v${{ steps.release.outputs.major }} mage publish
 
       - name: Upload release assets
         if: steps.release.outputs.release_created

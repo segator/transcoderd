@@ -38,9 +38,8 @@ go test -tags=integration -v -timeout 5m ./integration/...
 ## CI Pipeline
 
 - **Lint**: `golangci-lint` via `.github/workflows/lint.yml` (Go 1.24)
-- **Build+Test**: `devbox run -- make test && devbox run -- make build` via `.github/workflows/main.yml`
+- **Build+Test**: `mage test && mage build` via `.github/workflows/main.yml`
 - **Release**: Release Please (conventional commits) on push to `main`
-- Dev environment managed by **Devbox** (Nix): `go@1.24.5`, `golangci-lint@latest`
 
 ## Code Style Guidelines
 

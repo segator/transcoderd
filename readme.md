@@ -80,7 +80,6 @@ docker run -d \
 - Docker (for container builds and integration tests)
 - PostgreSQL (for integration tests, provided via testcontainers)
 
-Alternatively, install [Devbox](https://www.jetify.com/devbox) which provides all Go and lint tooling via Nix.
 
 ### Build
 

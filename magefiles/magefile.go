@@ -222,31 +222,25 @@ func TestShort(ctx context.Context) error {
 	return runGoTest(ctx, []string{"go", "test", "-v", "-short", "./..."}, false)
 }
 
-// TestIntegration runs integration tests via Dagger (needs Docker socket for testcontainers).
+// TestIntegration runs integration tests (local — testcontainers needs host Docker networking).
 func TestIntegration(ctx context.Context) error {
-	return runGoTest(ctx, []string{"go", "test", "-tags=integration", "-v",
-		"-timeout", "5m", "./integration/..."}, true)
+	return runCmd(ctx, "go", "test", "-tags=integration", "-v", "-timeout", "5m", "./integration/...")
 }
 
-// TestE2E runs the Docker e2e test via Dagger (requires built container images loaded in Docker).
+// TestE2E runs the Docker e2e test (local — testcontainers needs host Docker networking).
 func TestE2E(ctx context.Context) error {
-	client, err := daggerClient(ctx)
-	if err != nil {
-		return fmt.Errorf("dagger connect: %w", err)
-	}
-	defer client.Close()
-
-	src := projectSource(client)
-	_, err = goContainer(client, src).
-		WithUnixSocket("/var/run/docker.sock", client.Host().UnixSocket("/var/run/docker.sock")).
-		WithEnvVariable("E2E_SERVER_IMAGE", fmt.Sprintf("%s:server-%s", imageName, gitBranchName)).
-		WithEnvVariable("E2E_WORKER_IMAGE", fmt.Sprintf("%s:worker-%s", imageName, gitBranchName)).
-		WithExec([]string{
-			"go", "test", "-tags=integration", "-v",
-			"-timeout", "30m", "-run", "TestDockerE2E", "./integration/...",
-		}).
-		Sync(ctx)
-	return err
+	cmd := exec.CommandContext(ctx, "go", "test",
+		"-tags=integration", "-v", "-timeout", "30m",
+		"-run", "TestDockerE2E", "./integration/...",
+	)
+	cmd.Dir = projectRoot()
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("E2E_SERVER_IMAGE=%s:server-%s", imageName, gitBranchName),
+		fmt.Sprintf("E2E_WORKER_IMAGE=%s:worker-%s", imageName, gitBranchName),
+	)
+	return cmd.Run()
 }
 
 // TestAll runs unit + integration tests via Dagger.

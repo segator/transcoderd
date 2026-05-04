@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.4.4](https://github.com/segator/transcoderd/compare/v2.4.3...v2.4.4) (2026-05-04)
+
+
+### 🐛 Bug Fixes
+
+* restore subtitle metadata stream specifiers to preserve multi-language audio ([#111](https://github.com/segator/transcoderd/issues/111)) ([ffaa7cb](https://github.com/segator/transcoderd/commit/ffaa7cbe46eb2f9291f97513afe051f548720a92))
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/asticode/go-astisub from 0.39.0 to 0.40.0 ([#110](https://github.com/segator/transcoderd/issues/110)) ([16e38fe](https://github.com/segator/transcoderd/commit/16e38fec25b928fe8f1bec27f25e1c2707561c76))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.7.9 to 6.7.10 ([#108](https://github.com/segator/transcoderd/issues/108)) ([9383c6f](https://github.com/segator/transcoderd/commit/9383c6fb9d3bd74b804bd63884fdc0ba9672cba2))
+* **deps:** bump gopkg.in/ini.v1 from 1.67.1 to 1.67.2 ([#113](https://github.com/segator/transcoderd/issues/113)) ([681ca91](https://github.com/segator/transcoderd/commit/681ca91bd20423b7d7c8d25c9f8c68f94921d221))
+
 ## [2.4.3](https://github.com/segator/transcoderd/compare/v2.4.2...v2.4.3) (2026-04-19)
 
 

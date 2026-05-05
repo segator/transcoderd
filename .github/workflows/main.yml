@@ -15,6 +15,9 @@ permissions:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    env:
+      _EXPERIMENTAL_DAGGER_CACHE_CONFIG: type=gha,scope=dagger-${{ github.ref }},mode=max
+      _EXPERIMENTAL_DAGGER_SHUTDOWN_TIMEOUT: 180s
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2

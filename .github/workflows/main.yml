@@ -49,37 +49,37 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Test
-        run: mage test
+        run: mage test:unit
 
       - name: Ensure builder images exist
         run: |
           for target in builder-ffmpeg builder-pgs; do
             if ! docker manifest inspect ghcr.io/segator/transcoderd:${target} > /dev/null 2>&1; then
               echo "Image ${target} not found, building and pushing..."
-              if [ "$target" = "builder-ffmpeg" ]; then mage publishBuilderFfmpeg; else mage publishBuilderPgs; fi
+              if [ "$target" = "builder-ffmpeg" ]; then mage publish:ffmpeg; else mage publish:pgs; fi
             else
               echo "Image ${target} already exists, skipping."
             fi
           done
 
       - name: Build
-        run: mage build
+        run: mage build:all
 
       - name: Build Containers
-        run: mage container
+        run: mage docker:all
 
       - name: E2E Test
-        run: mage testE2E
+        run: mage test:e2e
 
       - name: Publish
         if: github.event_name != 'pull_request'
-        run: mage publish
+        run: mage publish:app
 
       - name: Publish release tags
         if: steps.release.outputs.release_created
         run: |
-          PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} mage publish
-          PROJECT_VERSION=v${{ steps.release.outputs.major }} mage publish
+          PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} mage publish:app
+          PROJECT_VERSION=v${{ steps.release.outputs.major }} mage publish:app
 
       - name: Upload release assets
         if: steps.release.outputs.release_created

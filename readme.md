@@ -73,42 +73,35 @@ docker run -d \
 ## Development
 
 ### Prerequisites
-- [Go 1.25](https://go.dev/dl/)
-- [Mage](https://magefile.org/) (`go install github.com/magefile/mage@latest`)
-- [Dagger](https://docs.dagger.io/install) (for container builds)
-- [golangci-lint](https://golangci-lint.run/welcome/install/)
-- Docker (for container builds and integration tests)
-- PostgreSQL (for integration tests, provided via testcontainers)
+- [mise](https://mise.jdx.dev/) + [direnv](https://direnv.net/) (auto-installs Go, Mage, Dagger on `cd`)
+- Docker
 
 
 ### Build
 
 ```bash
-mage build              # Build server + worker Go binaries -> dist/
-mage buildServer        # Build server binary only -> dist/transcoderd-server
-mage buildWorker        # Build worker binary only -> dist/transcoderd-worker
+mage build:all          # Build server + worker Go binaries -> dist/
+mage build:server       # Build server binary only
+mage build:worker       # Build worker binary only
 ```
 
 ### Test
 
 ```bash
-mage test               # Unit tests with coverage
-mage testRace           # Unit tests with race detector
-mage testShort          # Unit tests in short mode
-mage testIntegration    # Integration tests (requires Docker for testcontainers)
-mage testAll            # Unit + integration tests
-mage testE2E            # Docker e2e test (requires built container images)
-
-# Run a single test
-go test -v -run TestFunctionName ./path/to/package/...
+mage test:unit          # Unit tests with coverage
+mage test:race          # Unit tests with race detector
+mage test:short         # Unit tests in short mode
+mage test:integration   # Integration tests (via Dagger services)
+mage test:all           # Unit + integration tests
+mage test:e2e           # Full end-to-end test (server + worker + postgres in Dagger)
 ```
 
 ### Lint
 
 ```bash
-mage lint               # Run golangci-lint
-mage lintFix            # Run golangci-lint with auto-fix
-mage fmt                # Run go fmt
+mage lint:check         # Run golangci-lint
+mage lint:fix           # Run golangci-lint with auto-fix
+mage lint:fmt           # Run go fmt
 ```
 
 ### Docker (via Dagger)
@@ -116,23 +109,20 @@ mage fmt                # Run go fmt
 Container images are built using [Dagger](https://dagger.io/) for content-addressed caching.
 
 ```bash
-mage container              # Build server + worker Docker images (loads locally)
-mage containerServer        # Build server Docker image only
-mage containerWorker        # Build worker Docker image only
-mage publish                # Build and push server + worker images to registry
+mage docker:all         # Build server + worker Docker images (loads locally)
+mage docker:server      # Build server Docker image only
+mage docker:worker      # Build worker Docker image only
+mage docker:ffmpeg      # Build FFmpeg builder image locally (~50min)
+mage docker:pgs         # Build PGS builder image locally (~5min)
 ```
 
-Pre-built builder images for FFmpeg and PGS (avoids ~50min FFmpeg rebuilds):
+### Publish
 
 ```bash
-mage publishBuilderFfmpeg   # Build and push FFmpeg builder image
-mage publishBuilderPgs      # Build and push PGS builder image
-```
-
-### Full CI Pipeline
-
-```bash
-mage ci                     # lint -> test -> build -> container -> e2e
+mage publish:app        # Push server + worker images to registry
+mage publish:ffmpeg     # Push FFmpeg builder image
+mage publish:pgs        # Push PGS builder image
+mage publish:all        # Push all images
 ```
 
 ### CI Pipeline

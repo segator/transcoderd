@@ -49,8 +49,8 @@ jobs:
 
       - name: Publish FFmpeg builder
         if: inputs.builder == 'all' || inputs.builder == 'ffmpeg'
-        run: mage publishBuilderFfmpeg
+        run: mage publish:ffmpeg
 
       - name: Publish PGS builder
         if: inputs.builder == 'all' || inputs.builder == 'pgs'
-        run: mage publishBuilderPgs
+        run: mage publish:pgs

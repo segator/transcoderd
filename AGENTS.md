@@ -8,22 +8,23 @@ Module name: `transcoder`. License: GPLv3.
 ## Build & Run Commands
 
 ```bash
-make build              # Build both Go binaries + Docker containers
-make buildgo-server     # Build server binary only → dist/transcoderd-server
-make buildgo-worker     # Build worker binary only → dist/transcoderd-worker
-make fmt                # Run go fmt ./...
-make lint               # Run golangci-lint (gocritic + gofmt)
-make lint-fix           # Run golangci-lint --fix
+mage build:all          # Build both server + worker Go binaries → dist/
+mage build:server       # Build server binary only → dist/transcoderd-server
+mage build:worker       # Build worker binary only → dist/transcoderd-worker
+mage lint:fmt           # Run go fmt ./...
+mage lint:check         # Run golangci-lint (gocritic + gofmt)
+mage lint:fix           # Run golangci-lint --fix
 ```
 
 ## Test Commands
 
 ```bash
-make test               # Unit tests with coverage
-make test-race          # Unit tests with race detector
-make test-short         # Unit tests in short mode
-make test-integration   # Integration tests (requires Docker for testcontainers)
-make test-all           # Unit + integration tests
+mage test:unit          # Unit tests with coverage
+mage test:race          # Unit tests with race detector
+mage test:short         # Unit tests in short mode
+mage test:integration   # Integration tests (Dagger services)
+mage test:all           # Unit + integration tests
+mage test:e2e           # Full end-to-end test (Dagger services)
 
 # Run a single test by name
 go test -v -run TestFunctionName ./path/to/package/...

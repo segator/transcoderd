@@ -4,13 +4,13 @@
 //
 // Usage:
 //
-//	mage build         # Build server + worker Go binaries
-//	mage test          # Run unit tests with coverage
-//	mage testE2E       # Run Docker e2e tests
-//	mage lint          # Run golangci-lint
-//	mage container     # Build Docker images via Dagger
-//	mage publish       # Build and push Docker images via Dagger
-//	mage -l            # List all targets
+//	mage build:all       # Build server + worker Go binaries
+//	mage test:unit       # Run unit tests with coverage
+//	mage test:e2e        # Run end-to-end tests
+//	mage lint:check      # Run golangci-lint
+//	mage docker:all      # Build Docker images via Dagger
+//	mage publish:all     # Build and push all Docker images
+//	mage -l              # List all targets
 package main
 
 import (
@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"dagger.io/dagger"
+	"github.com/magefile/mage/mg"
 )
 
 // ---------------------------------------------------------------------------
@@ -37,6 +38,25 @@ var (
 	gitBranchName  = ""
 	buildDate      = ""
 )
+
+const e2eServerConfig = `server:
+  database:
+    host: postgres
+    port: 5432
+    user: test
+    password: test
+    scheme: transcoderd_e2e
+    driver: postgres
+  scheduler:
+    sourcePath: /source
+    deleteOnComplete: false
+    minFileSize: 100
+    scheduleTime: 5s
+    jobTimeout: 10m
+web:
+  token: e2e-test-token
+  port: 8080
+`
 
 func init() {
 	projectVersion = envOrDefault("PROJECT_VERSION", readVersionFile()+"-dev")
@@ -121,7 +141,6 @@ func goContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container
 		WithWorkdir("/src")
 }
 
-// lintContainer installs golangci-lint before mounting source for optimal layer caching.
 func lintContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container {
 	return client.Container().
 		From("golang:1.25-bookworm").
@@ -130,18 +149,33 @@ func lintContainer(client *dagger.Client, src *dagger.Directory) *dagger.Contain
 		WithMountedCache("/root/.cache/golangci-lint", client.CacheVolume("golangci-lint")).
 		WithExec([]string{
 			"sh", "-c",
-			"curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.1.6/install.sh | sh -s -- -b /usr/local/bin v2.1.6",
+			"curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.11.4/install.sh | sh -s -- -b /usr/local/bin v2.11.4",
 		}).
 		WithDirectory("/src", src).
 		WithWorkdir("/src")
 }
 
+func runGoTest(ctx context.Context, args []string) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+
+	src := projectSource(client)
+	_, err = goContainer(client, src).WithExec(args).Sync(ctx)
+	return err
+}
+
 // ---------------------------------------------------------------------------
-// Build targets
+// Build namespace
 // ---------------------------------------------------------------------------
 
-// Build builds both server and worker Go binaries into dist/ via Dagger.
-func Build(ctx context.Context) error {
+// Build contains targets for compiling Go binaries.
+type Build mg.Namespace
+
+// All builds both server and worker Go binaries into dist/ via Dagger.
+func (Build) All(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
@@ -157,8 +191,8 @@ func Build(ctx context.Context) error {
 	return nil
 }
 
-// BuildServer builds the server binary into dist/transcoderd-server via Dagger.
-func BuildServer(ctx context.Context) error {
+// Server builds the server binary into dist/transcoderd-server via Dagger.
+func (Build) Server(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
@@ -167,8 +201,8 @@ func BuildServer(ctx context.Context) error {
 	return buildBinaryWith(ctx, client, projectSource(client), "server")
 }
 
-// BuildWorker builds the worker binary into dist/transcoderd-worker via Dagger.
-func BuildWorker(ctx context.Context) error {
+// Worker builds the worker binary into dist/transcoderd-worker via Dagger.
+func (Build) Worker(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
@@ -202,56 +236,31 @@ func buildBinaryWith(ctx context.Context, client *dagger.Client, src *dagger.Dir
 }
 
 // ---------------------------------------------------------------------------
-// Test targets
+// Test namespace
 // ---------------------------------------------------------------------------
 
-// Test runs unit tests with coverage via Dagger.
-func Test(ctx context.Context) error {
+// Test contains targets for running tests.
+type Test mg.Namespace
+
+// Unit runs unit tests with coverage via Dagger.
+func (Test) Unit(ctx context.Context) error {
 	return runGoTest(ctx, []string{"go", "test", "-v",
-		"-coverprofile=/tmp/coverage.out", "-covermode=atomic", "./..."}, false)
+		"-coverprofile=/tmp/coverage.out", "-covermode=atomic", "./..."})
 }
 
-// TestRace runs unit tests with race detector via Dagger.
-func TestRace(ctx context.Context) error {
+// Race runs unit tests with race detector via Dagger.
+func (Test) Race(ctx context.Context) error {
 	return runGoTest(ctx, []string{"go", "test", "-v", "-race",
-		"-coverprofile=/tmp/coverage.out", "-covermode=atomic", "./..."}, false)
+		"-coverprofile=/tmp/coverage.out", "-covermode=atomic", "./..."})
 }
 
-// TestShort runs unit tests in short mode via Dagger.
-func TestShort(ctx context.Context) error {
-	return runGoTest(ctx, []string{"go", "test", "-v", "-short", "./..."}, false)
+// Short runs unit tests in short mode via Dagger.
+func (Test) Short(ctx context.Context) error {
+	return runGoTest(ctx, []string{"go", "test", "-v", "-short", "./..."})
 }
 
-// TestIntegration runs integration tests (local — testcontainers needs host Docker networking).
-func TestIntegration(ctx context.Context) error {
-	return runCmd(ctx, "go", "test", "-tags=integration", "-v", "-timeout", "5m", "./integration/...")
-}
-
-// TestE2E runs the Docker e2e test (local — testcontainers needs host Docker networking).
-func TestE2E(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "go", "test",
-		"-tags=integration", "-v", "-timeout", "30m",
-		"-run", "TestDockerE2E", "./integration/...",
-	)
-	cmd.Dir = projectRoot()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("E2E_SERVER_IMAGE=%s:server-%s", imageName, gitBranchName),
-		fmt.Sprintf("E2E_WORKER_IMAGE=%s:worker-%s", imageName, gitBranchName),
-	)
-	return cmd.Run()
-}
-
-// TestAll runs unit + integration tests via Dagger.
-func TestAll(ctx context.Context) error {
-	if err := Test(ctx); err != nil {
-		return err
-	}
-	return TestIntegration(ctx)
-}
-
-func runGoTest(ctx context.Context, args []string, needsDocker bool) error {
+// Integration runs integration tests via Dagger with Postgres as a Dagger Service.
+func (Test) Integration(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
@@ -259,20 +268,141 @@ func runGoTest(ctx context.Context, args []string, needsDocker bool) error {
 	defer client.Close()
 
 	src := projectSource(client)
-	ctr := goContainer(client, src)
-	if needsDocker {
-		ctr = ctr.WithUnixSocket("/var/run/docker.sock", client.Host().UnixSocket("/var/run/docker.sock"))
-	}
-	_, err = ctr.WithExec(args).Sync(ctx)
+
+	postgresSvc := client.Container().
+		From("postgres:16-alpine").
+		WithEnvVariable("POSTGRES_DB", "transcoderd_test").
+		WithEnvVariable("POSTGRES_USER", "test").
+		WithEnvVariable("POSTGRES_PASSWORD", "test").
+		WithExposedPort(5432).
+		AsService()
+
+	_, err = goContainer(client, src).
+		WithServiceBinding("postgres", postgresSvc).
+		WithEnvVariable("INTEGRATION_PG_HOST", "postgres").
+		WithEnvVariable("INTEGRATION_PG_PORT", "5432").
+		WithEnvVariable("INTEGRATION_PG_USER", "test").
+		WithEnvVariable("INTEGRATION_PG_PASSWORD", "test").
+		WithEnvVariable("INTEGRATION_PG_DATABASE", "transcoderd_test").
+		WithExec([]string{
+			"go", "test", "-tags=integration", "-v", "-timeout", "5m",
+			"-run", "TestServerWorkerIntegration", "./integration/...",
+		}).
+		Sync(ctx)
 	return err
 }
 
+// E2e runs the full end-to-end test using Dagger Services.
+// Postgres, server, and worker run as Dagger services; the test binary
+// communicates with the server over HTTP only.
+func (Test) E2e(ctx context.Context) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+
+	src := projectSource(client)
+	fixtureFile := client.Host().File(
+		filepath.Join(projectRoot(), "integration", "testdata", "e2e_fixture.mkv"),
+	)
+
+	// 1. Postgres service
+	postgresSvc := client.Container().
+		From("postgres:16-alpine").
+		WithEnvVariable("POSTGRES_DB", "transcoderd_e2e").
+		WithEnvVariable("POSTGRES_USER", "test").
+		WithEnvVariable("POSTGRES_PASSWORD", "test").
+		WithExposedPort(5432).
+		AsService()
+
+	// 2. Server service
+	serverCtr, err := containerImage(ctx, client, src, "server")
+	if err != nil {
+		return fmt.Errorf("build server image: %w", err)
+	}
+	serverSvc := serverCtr.
+		WithServiceBinding("postgres", postgresSvc).
+		WithNewFile("/etc/transcoderd/config.yml", e2eServerConfig).
+		WithFile("/source/e2e_fixture.mkv", fixtureFile).
+		WithExposedPort(8080).
+		WithEnvVariable("CACHE_BUSTER", time.Now().String()).
+		WithExec([]string{"/app/transcoderd-server", "--noUpdates"}).
+		AsService()
+
+	// 3. Worker binary (background process in test runner)
+	goBinary := goContainer(client, src).
+		WithEnvVariable("GOOS", "linux").
+		WithEnvVariable("GOARCH", "amd64").
+		WithEnvVariable("CACHE_BUSTER", buildDate).
+		WithExec([]string{
+			"go", "build",
+			"-ldflags", ldflags("transcoderd-worker"),
+			"-o", "/output/transcoderd-worker",
+			"./worker/main.go",
+		}).
+		File("/output/transcoderd-worker")
+
+	ffmpegBins := client.Container().From(imageName + ":builder-ffmpeg")
+	pgsBins := client.Container().From(imageName + ":builder-pgs")
+
+	// 4. Test runner
+	out, err := goContainer(client, src).
+		WithExec([]string{"apt-get", "update"}).
+		WithExec([]string{"apt-get", "install", "-y", "ca-certificates", "mkvtoolnix", "libtesseract-dev", "wget", "curl"}).
+		WithExec([]string{"update-ca-certificates"}).
+		WithExec([]string{"sh", "-c", "curl -ksSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && chmod +x /tmp/dotnet-install.sh && /tmp/dotnet-install.sh --channel 8.0 --runtime dotnet --install-dir /usr/share/dotnet && ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet && rm /tmp/dotnet-install.sh"}).
+		WithFile("/usr/bin/ffmpeg", ffmpegBins.File("/app/ffmpeg-build-script/workspace/bin/ffmpeg")).
+		WithFile("/usr/bin/ffprobe", ffmpegBins.File("/app/ffmpeg-build-script/workspace/bin/ffprobe")).
+		WithDirectory("/app/tessdata", pgsBins.Directory("/src/tessdata")).
+		WithDirectory("/app", pgsBins.Directory("/src/PgsToSrt/out")).
+		WithFile("/app/transcoderd-worker", goBinary).
+		WithServiceBinding("server", serverSvc).
+		WithEnvVariable("E2E_SERVER_URL", "http://server:8080").
+		WithEnvVariable("E2E_TOKEN", "e2e-test-token").
+		WithEnvVariable("E2E_SOURCE_PATH", "e2e_fixture.mkv").
+		WithEnvVariable("CACHE_BUSTER", time.Now().String()).
+		WithExec([]string{
+			"sh", "-c",
+			"/app/transcoderd-worker" +
+				" --noUpdates" +
+				" --web.token e2e-test-token" +
+				" --web.domain http://server:8080" +
+				" --worker.name e2e-worker" +
+				" --worker.ffmpegConfig.videoPreset ultrafast" +
+				" --worker.ffmpegConfig.videoCRF 35" +
+				" --worker.ffmpegConfig.videoCodec libx265" +
+				" --worker.ffmpegConfig.audioCodec aac" +
+				" --worker.ffmpegConfig.videoProfile main10" +
+				" --worker.verifyDeltaTime 5" +
+				" --worker.threads 2" +
+				" > /tmp/worker.log 2>&1 &" +
+				" go test -tags=integration -v -timeout 25m -run TestE2E ./integration/... 2>&1; EXIT=$?;" +
+				" echo '=== WORKER LOG ==='; cat /tmp/worker.log; exit $EXIT",
+		}).
+		Stdout(ctx)
+	fmt.Println(out)
+	return err
+}
+
+// All runs unit + integration tests via Dagger.
+func (Test) All(ctx context.Context) error {
+	t := Test{}
+	if err := t.Unit(ctx); err != nil {
+		return err
+	}
+	return t.Integration(ctx)
+}
+
 // ---------------------------------------------------------------------------
-// Quality targets
+// Lint namespace
 // ---------------------------------------------------------------------------
 
-// Lint runs golangci-lint via Dagger.
-func Lint(ctx context.Context) error {
+// Lint contains targets for code quality checks.
+type Lint mg.Namespace
+
+// Check runs golangci-lint via Dagger.
+func (Lint) Check(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
@@ -286,22 +416,25 @@ func Lint(ctx context.Context) error {
 	return err
 }
 
-// LintFix runs golangci-lint with auto-fix (local — modifies files in place).
-func LintFix(ctx context.Context) error {
+// Fix runs golangci-lint with auto-fix (local — modifies files in place).
+func (Lint) Fix(ctx context.Context) error {
 	return runCmd(ctx, "golangci-lint", "run", "--fix")
 }
 
 // Fmt formats Go code (local — modifies files in place).
-func Fmt(ctx context.Context) error {
+func (Lint) Fmt(ctx context.Context) error {
 	return runCmd(ctx, "go", "fmt", "./...")
 }
 
 // ---------------------------------------------------------------------------
-// Container targets (Dagger-powered)
+// Docker namespace
 // ---------------------------------------------------------------------------
 
-// Container builds both server and worker Docker images via Dagger.
-func Container(ctx context.Context) error {
+// Docker contains targets for building container images locally.
+type Docker mg.Namespace
+
+// All builds both server and worker Docker images via Dagger.
+func (Docker) All(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
@@ -315,8 +448,8 @@ func Container(ctx context.Context) error {
 	return buildContainerImage(ctx, client, src, "worker")
 }
 
-// ContainerServer builds the server Docker image via Dagger.
-func ContainerServer(ctx context.Context) error {
+// Server builds the server Docker image via Dagger.
+func (Docker) Server(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
@@ -325,8 +458,8 @@ func ContainerServer(ctx context.Context) error {
 	return buildContainerImage(ctx, client, projectSource(client), "server")
 }
 
-// ContainerWorker builds the worker Docker image via Dagger.
-func ContainerWorker(ctx context.Context) error {
+// Worker builds the worker Docker image via Dagger.
+func (Docker) Worker(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
@@ -335,8 +468,75 @@ func ContainerWorker(ctx context.Context) error {
 	return buildContainerImage(ctx, client, projectSource(client), "worker")
 }
 
-// Publish builds and pushes both server and worker images via Dagger.
-func Publish(ctx context.Context) error {
+// Ffmpeg builds the FFmpeg builder image locally (~50min).
+func (Docker) Ffmpeg(ctx context.Context) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+
+	tarPath := filepath.Join(projectRoot(), "dist", "builder-ffmpeg.tar")
+	if err := os.MkdirAll(filepath.Dir(tarPath), 0o755); err != nil {
+		return err
+	}
+	_, err = builderFfmpegImage(client).
+		AsTarball(dagger.ContainerAsTarballOpts{
+			ForcedCompression: dagger.ImageLayerCompressionGzip,
+		}).
+		Export(ctx, tarPath)
+	if err != nil {
+		return fmt.Errorf("export builder-ffmpeg: %w", err)
+	}
+	fmt.Printf("Exported builder-ffmpeg → %s\n", tarPath)
+	return nil
+}
+
+// Pgs builds the PGS builder image locally (~5min).
+func (Docker) Pgs(ctx context.Context) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+
+	tarPath := filepath.Join(projectRoot(), "dist", "builder-pgs.tar")
+	if err := os.MkdirAll(filepath.Dir(tarPath), 0o755); err != nil {
+		return err
+	}
+	_, err = builderPgsImage(client).
+		AsTarball(dagger.ContainerAsTarballOpts{
+			ForcedCompression: dagger.ImageLayerCompressionGzip,
+		}).
+		Export(ctx, tarPath)
+	if err != nil {
+		return fmt.Errorf("export builder-pgs: %w", err)
+	}
+	fmt.Printf("Exported builder-pgs → %s\n", tarPath)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Publish namespace
+// ---------------------------------------------------------------------------
+
+// Publish contains targets for pushing container images to the registry.
+type Publish mg.Namespace
+
+// All pushes all images (server, worker, ffmpeg builder, pgs builder).
+func (Publish) All(ctx context.Context) error {
+	p := Publish{}
+	if err := p.App(ctx); err != nil {
+		return err
+	}
+	if err := p.Ffmpeg(ctx); err != nil {
+		return err
+	}
+	return p.Pgs(ctx)
+}
+
+// App pushes both server and worker images via Dagger.
+func (Publish) App(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
@@ -360,8 +560,8 @@ func Publish(ctx context.Context) error {
 	return nil
 }
 
-// PublishBuilderFfmpeg compiles FFmpeg from source and pushes the builder image (~50min).
-func PublishBuilderFfmpeg(ctx context.Context) error {
+// Ffmpeg compiles FFmpeg from source and pushes the builder image (~50min).
+func (Publish) Ffmpeg(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
@@ -376,8 +576,8 @@ func PublishBuilderFfmpeg(ctx context.Context) error {
 	return nil
 }
 
-// PublishBuilderPgs builds the PgsToSrt .NET tool + tessdata and pushes the builder image (~5min).
-func PublishBuilderPgs(ctx context.Context) error {
+// Pgs builds PgsToSrt + tessdata and pushes the builder image (~5min).
+func (Publish) Pgs(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return fmt.Errorf("dagger connect: %w", err)
@@ -389,32 +589,6 @@ func PublishBuilderPgs(ctx context.Context) error {
 		return fmt.Errorf("publish builder-pgs: %w", err)
 	}
 	fmt.Printf("Published %s\n", addr)
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// CI target
-// ---------------------------------------------------------------------------
-
-// CI runs the full CI pipeline: lint → test → build → container → e2e.
-func CI(ctx context.Context) error {
-	steps := []struct {
-		name string
-		fn   func(context.Context) error
-	}{
-		{"lint", Lint},
-		{"test", Test},
-		{"build", Build},
-		{"container", Container},
-		{"e2e", TestE2E},
-	}
-	for _, s := range steps {
-		fmt.Printf("\n=== CI: %s ===\n", s.name)
-		if err := s.fn(ctx); err != nil {
-			return fmt.Errorf("ci step %q failed: %w", s.name, err)
-		}
-	}
-	fmt.Println("\n✅ CI pipeline passed!")
 	return nil
 }
 
@@ -453,6 +627,7 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 	goBinary := goContainer(client, src).
 		WithEnvVariable("GOOS", "linux").
 		WithEnvVariable("GOARCH", "amd64").
+		WithEnvVariable("CACHE_BUSTER", buildDate).
 		WithExec([]string{
 			"go", "build",
 			"-ldflags", ldflags("transcoderd-" + component),

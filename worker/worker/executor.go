@@ -229,6 +229,9 @@ func (e *JobExecutor) publishTaskEvent(jobContext *job.Context, notificationType
 		Status:           jobContext.LastEvent.Status,
 		Message:          jobContext.LastEvent.Message,
 	}
+	if status == model.CompletedNotificationStatus && notificationType == model.JobNotification && jobContext.TargetMediaProbe != nil {
+		event.TargetProbe = jobContext.TargetMediaProbe
+	}
 	if err := e.client.PublishTaskEvent(event); err != nil {
 		l.Errorf("Error on publishing event %s", err.Error())
 	}

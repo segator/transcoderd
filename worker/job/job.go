@@ -13,13 +13,14 @@ import (
 )
 
 type Context struct {
-	JobId      uuid.UUID     `json:"job_id"`
-	EventId    int           `json:"event_id"`
-	WorkingDir string        `json:"working_dir"`
-	LastEvent  *ContextEvent `json:"last_event"`
-	Source     *VideoData    `json:"source"`
-	Target     *VideoData    `json:"target"`
-	mu         sync.Mutex
+	JobId            uuid.UUID         `json:"job_id"`
+	EventId          int               `json:"event_id"`
+	WorkingDir       string            `json:"working_dir"`
+	LastEvent        *ContextEvent     `json:"last_event"`
+	Source           *VideoData        `json:"source"`
+	Target           *VideoData        `json:"target"`
+	TargetMediaProbe *model.MediaProbe `json:"target_media_probe,omitempty"`
+	mu               sync.Mutex
 }
 
 type VideoData struct {

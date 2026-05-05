@@ -5,282 +5,57 @@ package integration
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strconv"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/network"
-	"github.com/testcontainers/testcontainers-go/wait"
-
 	"transcoder/model"
-	"transcoder/server/repository"
 	"transcoder/server/scheduler"
 )
 
-type probeStream struct {
-	CodecType string `json:"codec_type"`
-	CodecName string `json:"codec_name"`
-	Width     int    `json:"width"`
-	Height    int    `json:"height"`
-	Tags      struct {
-		Language string `json:"language"`
-		Title    string `json:"title"`
-	} `json:"tags"`
-}
-
-type probeFormat struct {
-	Duration string `json:"duration"`
-}
-
-func (f probeFormat) DurationSeconds() float64 {
-	v, _ := strconv.ParseFloat(f.Duration, 64)
-	return v
-}
-
-type probeData struct {
-	Streams []probeStream `json:"streams"`
-	Format  probeFormat   `json:"format"`
-}
-
 const (
-	e2eDBName   = "transcoderd_e2e"
-	e2eDBUser   = "test"
-	e2eDBPass   = "test"
-	e2eToken    = "e2e-test-token"
-	e2eTestFile = "testdata/e2e_fixture.mkv"
-
-	defaultServerImage = "transcoderd:server-test"
-	defaultWorkerImage = "transcoderd:worker-test"
+	e2ePollInterval = 5 * time.Second
+	e2eTimeout      = 20 * time.Minute
 )
 
-// TestDockerE2E runs a full end-to-end test using real Docker containers
-// for both server and worker, with a synthetic MKV containing dual-language
-// audio (eng+spa) and PGS bitmap subtitles (2 eng + 2 spa).
+// TestE2E runs a full end-to-end verification against an already-running
+// server/worker environment using only the HTTP API.
 //
-// Prerequisites:
-//   - Docker running
-//   - Pre-built Docker images (or set E2E_SERVER_IMAGE / E2E_WORKER_IMAGE env vars):
-//     make buildcontainer-server buildcontainer-worker
-//   - Test fixture present: integration/testdata/e2e_fixture.mkv (507KB, committed to git)
-//
-// Run with: go test -tags=integration -v -timeout 30m -run TestDockerE2E ./integration/...
-func TestDockerE2E(t *testing.T) {
+// Required env vars:
+//   - E2E_SERVER_URL (example: http://server:8080)
+//   - E2E_TOKEN
+//   - E2E_SOURCE_PATH (relative path baked into the server container)
+func TestE2E(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Skipping Docker e2e test in short mode")
+		t.Skip("Skipping e2e test in short mode")
 	}
 
-	serverImage := envOrDefault("E2E_SERVER_IMAGE", defaultServerImage)
-	workerImage := envOrDefault("E2E_WORKER_IMAGE", defaultWorkerImage)
-	t.Logf("Using images: server=%s worker=%s", serverImage, workerImage)
-
-	fixtureAbs, err := filepath.Abs(e2eTestFile)
-	if err != nil {
-		t.Fatalf("Failed to resolve fixture path: %v", err)
-	}
-	if _, err := os.Stat(fixtureAbs); os.IsNotExist(err) {
-		t.Fatalf("Test fixture not found at %s — it must be committed to git", fixtureAbs)
+	serverURL := strings.TrimRight(os.Getenv("E2E_SERVER_URL"), "/")
+	token := os.Getenv("E2E_TOKEN")
+	sourcePath := os.Getenv("E2E_SOURCE_PATH")
+	if serverURL == "" || token == "" || sourcePath == "" {
+		t.Skip("E2E env vars not set")
 	}
 
-	ctx := context.Background()
-
-	net, err := network.New(ctx)
-	if err != nil {
-		t.Fatalf("Failed to create Docker network: %v", err)
-	}
-	defer func() {
-		if err := net.Remove(ctx); err != nil {
-			t.Logf("Failed to remove network: %v", err)
-		}
-	}()
-
-	t.Log("Starting PostgreSQL container...")
-	pgContainer, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase(e2eDBName),
-		postgres.WithUsername(e2eDBUser),
-		postgres.WithPassword(e2eDBPass),
-		network.WithNetwork([]string{"postgres"}, net),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(60*time.Second),
-		),
-	)
-	if err != nil {
-		t.Fatalf("Failed to start postgres: %v", err)
-	}
-	defer func() {
-		if err := pgContainer.Terminate(ctx); err != nil {
-			t.Logf("Failed to terminate postgres: %v", err)
-		}
-	}()
-
-	pgPort := mustMappedPortInt(t, ctx, pgContainer, "5432")
-	t.Logf("PostgreSQL running on port %d", pgPort)
-
-	dbConfig := &repository.SQLServerConfig{
-		Host:     "localhost",
-		Port:     pgPort,
-		User:     e2eDBUser,
-		Password: e2eDBPass,
-		Scheme:   e2eDBName,
-		Driver:   "postgres",
-	}
-	repo, err := repository.NewSQLRepository(dbConfig)
-	if err != nil {
-		t.Fatalf("Failed to create repository: %v", err)
-	}
-	if err := repo.Initialize(ctx); err != nil {
-		t.Fatalf("Failed to initialize DB schema: %v", err)
-	}
-	t.Log("DB schema initialized")
-
-	sourceDir := t.TempDir()
-	targetDir := t.TempDir()
-
-	testVideoRelPath := "test-video.mkv"
-	destPath := filepath.Join(sourceDir, testVideoRelPath)
-	if err := copyFile(fixtureAbs, destPath); err != nil {
-		t.Fatalf("Failed to copy test fixture: %v", err)
-	}
-	fi, err := os.Stat(destPath)
-	if err != nil {
-		t.Fatalf("Failed to stat copied fixture: %v", err)
-	}
-	t.Logf("Test video: %s (%d bytes)", destPath, fi.Size())
-
-	configContent := fmt.Sprintf(`server:
-  database:
-    host: postgres
-    port: 5432
-    user: %s
-    password: %s
-    scheme: %s
-    driver: postgres
-  scheduler:
-    sourcePath: /source
-    deleteOnComplete: false
-    minFileSize: 100
-    scheduleTime: 5s
-    jobTimeout: 10m
-web:
-  token: %s
-  port: 8080
-`, e2eDBUser, e2eDBPass, e2eDBName, e2eToken)
-
-	configFile := filepath.Join(sourceDir, "config.yml")
-	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
-		t.Fatalf("Failed to write config: %v", err)
-	}
-
-	t.Log("Starting server container...")
-	serverContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        serverImage,
-			ExposedPorts: []string{"8080/tcp"},
-			Cmd:          []string{"--noUpdates"},
-			Mounts: testcontainers.ContainerMounts{
-				testcontainers.BindMount(configFile, "/etc/transcoderd/config.yml"),
-				testcontainers.BindMount(sourceDir, "/source"),
-				testcontainers.BindMount(targetDir, "/target"),
-			},
-			Networks: []string{net.Name},
-			NetworkAliases: map[string][]string{
-				net.Name: {"server"},
-			},
-			WaitingFor: wait.ForHTTP("/api/v1/job/request").
-				WithPort("8080/tcp").
-				WithHeaders(map[string]string{
-					"Authorization": "Bearer " + e2eToken,
-					"workerName":    "healthcheck",
-				}).
-				WithStatusCodeMatcher(func(status int) bool {
-					return status == 204 || status == 200
-				}).
-				WithStartupTimeout(120 * time.Second),
-		},
-		Started: true,
-	})
-	if err != nil {
-		t.Fatalf("Failed to start server container: %v", err)
-	}
-	defer func() {
-		if err := serverContainer.Terminate(ctx); err != nil {
-			t.Logf("Failed to terminate server: %v", err)
-		}
-	}()
-
-	serverPortNum := mustMappedPortInt(t, ctx, serverContainer, "8080")
-	serverURL := fmt.Sprintf("http://localhost:%d", serverPortNum)
-	t.Logf("Server running at %s", serverURL)
-
-	t.Log("Starting worker container...")
-	workerContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image: workerImage,
-			Cmd: []string{
-				"--noUpdates",
-				"--web.token", e2eToken,
-				"--web.domain", "http://server:8080",
-				"--worker.name", "e2e-worker",
-				"--worker.ffmpegConfig.videoPreset", "ultrafast",
-				"--worker.ffmpegConfig.videoCRF", "35",
-				"--worker.ffmpegConfig.videoCodec", "libx265",
-				"--worker.ffmpegConfig.audioCodec", "aac",
-				"--worker.ffmpegConfig.videoProfile", "main10",
-				"--worker.verifyDeltaTime", "5",
-				"--worker.threads", "2",
-			},
-			Networks: []string{net.Name},
-			WaitingFor: wait.ForLog("Starting Worker").
-				WithStartupTimeout(120 * time.Second),
-		},
-		Started: true,
-	})
-	if err != nil {
-		t.Fatalf("Failed to start worker container: %v", err)
-	}
-	defer func() {
-		if err := workerContainer.Terminate(ctx); err != nil {
-			t.Logf("Failed to terminate worker: %v", err)
-		}
-	}()
-	t.Log("Worker container started")
+	client := &http.Client{Timeout: 30 * time.Second}
+	var jobID string
+	var completedJob *model.Job
 
 	t.Run("SubmitJob", func(t *testing.T) {
-		jobReq := &model.JobRequest{
-			SourcePath: testVideoRelPath,
-		}
+		jobReq := &model.JobRequest{SourcePath: sourcePath}
 		body, err := json.Marshal(jobReq)
 		if err != nil {
 			t.Fatalf("Failed to marshal job request: %v", err)
 		}
 
-		req, err := http.NewRequest("POST", serverURL+"/api/v1/job/", bytes.NewReader(body))
-		if err != nil {
-			t.Fatalf("Failed to create request: %v", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+e2eToken)
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("Failed to submit job: %v", err)
-		}
-		defer resp.Body.Close()
-
-		respBody, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode != 200 {
-			t.Fatalf("Job submission failed with status %d: %s", resp.StatusCode, respBody)
+		respBody, statusCode := doJSONRequest(t, client, http.MethodPost, serverURL+"/api/v1/job/", token, bytes.NewReader(body))
+		if statusCode != http.StatusOK {
+			t.Fatalf("Job submission failed with status %d: %s", statusCode, string(respBody))
 		}
 
 		var result scheduler.ScheduleJobRequestResult
@@ -291,135 +66,73 @@ web:
 		if len(result.ScheduledJobs) == 0 {
 			t.Fatalf("No jobs scheduled. Failed: %v, Skipped: %v", result.FailedJobRequest, result.SkippedFiles)
 		}
-		t.Logf("Job submitted: %s", result.ScheduledJobs[0].Id)
+
+		jobID = result.ScheduledJobs[0].Id.String()
+		if jobID == "" {
+			t.Fatal("Scheduled job ID is empty")
+		}
+
+		t.Logf("Job submitted: %s", jobID)
 	})
 
-	jobs, err := repo.GetJobs(ctx)
-	if err != nil || jobs == nil || len(*jobs) == 0 {
-		t.Fatalf("Failed to find submitted job: %v", err)
-	}
-	jobID := (*jobs)[0].Id.String()
-
 	t.Run("WaitForCompletion", func(t *testing.T) {
-		deadline := time.Now().Add(20 * time.Minute)
+		deadline := time.Now().Add(e2eTimeout)
 		for time.Now().Before(deadline) {
-			job, err := repo.GetJob(ctx, jobID)
-			if err != nil {
-				t.Fatalf("Failed to get job: %v", err)
+			job := getJob(t, client, serverURL, token, jobID)
+			if len(job.Events) == 0 {
+				t.Fatal("Job has no events")
 			}
 
 			status := job.Events.GetStatus()
-
-			if status == model.CompletedNotificationStatus {
-				t.Logf("Job completed successfully!")
-				t.Logf("  Source: %s (%d bytes)", job.SourcePath, job.SourceSize)
-				t.Logf("  Target: %s (%d bytes)", job.TargetPath, job.TargetSize)
-				if job.SourceSize > 0 {
-					ratio := float64(job.TargetSize) / float64(job.SourceSize) * 100
-					t.Logf("  Size ratio: %.1f%%", ratio)
-				}
-				return
-			}
-
-			if status == model.FailedNotificationStatus {
-				lastEvent := job.Events.GetLatest()
-				dumpContainerLogs(t, ctx, workerContainer, "Worker")
-				t.Fatalf("Job failed: %s", lastEvent.Message)
-			}
-
 			latestEvent := job.Events.GetLatest()
-			t.Logf("  Status: %s/%s — %s", latestEvent.NotificationType, latestEvent.Status, latestEvent.Message)
-			time.Sleep(5 * time.Second)
+			if latestEvent != nil {
+				t.Logf("  Status: %s/%s — %s", latestEvent.NotificationType, latestEvent.Status, latestEvent.Message)
+			}
+
+			switch status {
+			case model.CompletedNotificationStatus:
+				completedJob = job
+				return
+			case model.FailedNotificationStatus:
+				if latestEvent == nil {
+					t.Fatal("Job failed without latest event details")
+				}
+				dumpEvents(t, job.Events)
+				t.Fatalf("Job failed: %s", latestEvent.Message)
+			}
+
+			time.Sleep(e2ePollInterval)
 		}
-		dumpContainerLogs(t, ctx, workerContainer, "Worker")
-		dumpContainerLogs(t, ctx, serverContainer, "Server")
-		t.Fatal("Job did not complete within timeout")
+
+		if completedJob == nil {
+			job := getJob(t, client, serverURL, token, jobID)
+			dumpEvents(t, job.Events)
+			t.Fatal("Job did not complete within timeout")
+		}
 	})
 
 	t.Run("VerifyOutput", func(t *testing.T) {
-		job, err := repo.GetJob(ctx, jobID)
-		if err != nil {
-			t.Fatalf("Failed to get job: %v", err)
+		if completedJob == nil {
+			t.Fatal("Completed job not available")
+		}
+		if completedJob.SourceProbe == nil {
+			t.Fatal("Job source_probe is nil")
+		}
+		if completedJob.TargetProbe == nil {
+			t.Fatal("Job target_probe is nil")
 		}
 
-		targetPath := filepath.Join(sourceDir, job.TargetPath)
-		tfi, err := os.Stat(targetPath)
-		if os.IsNotExist(err) {
-			targetPath = filepath.Join(targetDir, job.TargetPath)
-			tfi, err = os.Stat(targetPath)
-		}
-		if err != nil {
-			t.Fatalf("Output file not found: %v (checked both source and target dirs)", err)
-		}
-		if tfi.Size() == 0 {
-			t.Fatal("Output file is empty")
-		}
-		t.Logf("Output file: %s (%d bytes)", targetPath, tfi.Size())
+		sourceProbe := completedJob.SourceProbe
+		targetProbe := completedJob.TargetProbe
 
-		if dest := os.Getenv("E2E_KEEP_OUTPUT"); dest != "" {
-			_ = copyFile(targetPath, dest)
-		}
-
-		if job.TargetSize > 0 && job.SourceSize > 0 && job.TargetSize >= job.SourceSize {
-			t.Logf("Warning: target (%d) is not smaller than source (%d)", job.TargetSize, job.SourceSize)
-		}
-
-		containerOutputPath := "/source/" + job.TargetPath
-		containerSourcePath := "/source/" + testVideoRelPath
-		probeOutputFile := "/source/ffprobe_result.json"
-		probeSourceFile := "/source/ffprobe_source.json"
-
-		exitCode, execOutput, err := serverContainer.Exec(ctx, []string{
-			"sh", "-c",
-			fmt.Sprintf("ffprobe -v quiet -print_format json -show_streams -show_format '%s' > '%s' 2>&1", containerOutputPath, probeOutputFile),
-		})
-		if err != nil {
-			t.Fatalf("Failed to exec ffprobe in server container: %v", err)
-		}
-		if exitCode != 0 {
-			execBytes, _ := io.ReadAll(execOutput)
-			t.Fatalf("ffprobe failed (exit %d): %s", exitCode, string(execBytes))
-		}
-
-		probeBytes, err := os.ReadFile(filepath.Join(sourceDir, "ffprobe_result.json"))
-		if err != nil {
-			t.Fatalf("Failed to read ffprobe output file: %v", err)
-		}
-
-		var probeResult probeData
-		if err := json.Unmarshal(probeBytes, &probeResult); err != nil {
-			t.Fatalf("Failed to parse ffprobe output: %v\nRaw: %s", err, string(probeBytes))
-		}
-
-		exitCode, execOutput, err = serverContainer.Exec(ctx, []string{
-			"sh", "-c",
-			fmt.Sprintf("ffprobe -v quiet -print_format json -show_streams -show_format '%s' > '%s' 2>&1", containerSourcePath, probeSourceFile),
-		})
-		if err != nil {
-			t.Fatalf("Failed to exec ffprobe on source: %v", err)
-		}
-		if exitCode != 0 {
-			execBytes, _ := io.ReadAll(execOutput)
-			t.Fatalf("ffprobe on source failed (exit %d): %s", exitCode, string(execBytes))
-		}
-
-		sourceProbeBytes, err := os.ReadFile(filepath.Join(sourceDir, "ffprobe_source.json"))
-		if err != nil {
-			t.Fatalf("Failed to read source ffprobe file: %v", err)
-		}
-		var sourceProbeResult probeData
-		if err := json.Unmarshal(sourceProbeBytes, &sourceProbeResult); err != nil {
-			t.Fatalf("Failed to parse source ffprobe: %v", err)
-		}
-
-		t.Logf("Output streams (%d):", len(probeResult.Streams))
 		var hasHEVC, hasAAC, hasSRT bool
 		audioLangs := make(map[string]int)
 		subtitleLangs := make(map[string]int)
 		var outputVideoWidth, outputVideoHeight int
 		var outputAudioTitles, outputSubTitles []string
-		for i, s := range probeResult.Streams {
-			t.Logf("  %d. %s: %s (lang=%s title=%q)", i, s.CodecType, s.CodecName, s.Tags.Language, s.Tags.Title)
+
+		for i, s := range targetProbe.Streams {
+			t.Logf("  %d. %s: %s (lang=%s title=%q)", i, s.CodecType, s.CodecName, s.Language, s.Title)
 			switch {
 			case s.CodecType == "video" && s.CodecName == "hevc":
 				hasHEVC = true
@@ -427,19 +140,19 @@ web:
 				outputVideoHeight = s.Height
 			case s.CodecType == "audio" && s.CodecName == "aac":
 				hasAAC = true
-				if lang := s.Tags.Language; lang != "" {
-					audioLangs[lang]++
+				if s.Language != "" {
+					audioLangs[s.Language]++
 				}
-				if s.Tags.Title != "" {
-					outputAudioTitles = append(outputAudioTitles, s.Tags.Title)
+				if s.Title != "" {
+					outputAudioTitles = append(outputAudioTitles, s.Title)
 				}
 			case s.CodecType == "subtitle" && s.CodecName == "subrip":
 				hasSRT = true
-				if lang := s.Tags.Language; lang != "" {
-					subtitleLangs[lang]++
+				if s.Language != "" {
+					subtitleLangs[s.Language]++
 				}
-				if s.Tags.Title != "" {
-					outputSubTitles = append(outputSubTitles, s.Tags.Title)
+				if s.Title != "" {
+					outputSubTitles = append(outputSubTitles, s.Title)
 				}
 			}
 		}
@@ -454,9 +167,8 @@ web:
 			t.Errorf("Output missing SRT subtitle stream (PGS should have been converted to SRT)")
 		}
 
-		// Duration check: output duration must be within 20% of source
-		sourceDuration := sourceProbeResult.Format.DurationSeconds()
-		outputDuration := probeResult.Format.DurationSeconds()
+		sourceDuration := sourceProbe.DurationSeconds
+		outputDuration := targetProbe.DurationSeconds
 		t.Logf("Duration: source=%.2fs output=%.2fs", sourceDuration, outputDuration)
 		if sourceDuration > 0 && outputDuration > 0 {
 			ratio := outputDuration / sourceDuration
@@ -465,9 +177,8 @@ web:
 			}
 		}
 
-		// Video resolution check: must match source
 		var sourceVideoWidth, sourceVideoHeight int
-		for _, s := range sourceProbeResult.Streams {
+		for _, s := range sourceProbe.Streams {
 			if s.CodecType == "video" {
 				sourceVideoWidth = s.Width
 				sourceVideoHeight = s.Height
@@ -482,7 +193,6 @@ web:
 			t.Errorf("Video height changed: source=%d output=%d", sourceVideoHeight, outputVideoHeight)
 		}
 
-		// Per-language assertion: both eng and spa must exist in audio
 		t.Logf("Audio languages found: %v", audioLangs)
 		if audioLangs["eng"] == 0 {
 			t.Errorf("Output missing English audio track")
@@ -491,7 +201,6 @@ web:
 			t.Errorf("Output missing Spanish audio track")
 		}
 
-		// Per-language assertion: both eng and spa must exist in subtitles
 		t.Logf("Subtitle languages found: %v", subtitleLangs)
 		if subtitleLangs["eng"] == 0 {
 			t.Errorf("Output missing English subtitle track")
@@ -500,17 +209,16 @@ web:
 			t.Errorf("Output missing Spanish subtitle track")
 		}
 
-		// Language count vs source
-		sourceAudioLangs := countStreamLanguages(sourceProbeResult.Streams, "audio")
+		sourceAudioLangs := countStreamLanguages(sourceProbe.Streams, "audio")
 		if sourceAudioLangs > 0 && len(audioLangs) < sourceAudioLangs {
 			t.Errorf("Audio language count decreased: output has %d language(s) but source had %d", len(audioLangs), sourceAudioLangs)
 		}
-		sourceSubLangs := countStreamLanguages(sourceProbeResult.Streams, "subtitle")
+
+		sourceSubLangs := countStreamLanguages(sourceProbe.Streams, "subtitle")
 		if sourceSubLangs > 0 && len(subtitleLangs) < sourceSubLangs {
 			t.Errorf("Subtitle language count decreased: output has %d language(s) but source had %d", len(subtitleLangs), sourceSubLangs)
 		}
 
-		// Metadata title preservation: audio and subtitle tracks must retain titles
 		t.Logf("Audio titles: %v", outputAudioTitles)
 		t.Logf("Subtitle titles: %v", outputSubTitles)
 		if len(outputAudioTitles) == 0 {
@@ -519,35 +227,15 @@ web:
 		if len(outputSubTitles) == 0 {
 			t.Errorf("No subtitle tracks have title metadata — titles were lost during transcoding")
 		}
-
-		// File playability: decode the entire output to detect corrupt frames
-		exitCode, execOutput, err = serverContainer.Exec(ctx, []string{
-			"sh", "-c",
-			fmt.Sprintf("ffmpeg -v error -i '%s' -f null - 2>&1", containerOutputPath),
-		})
-		if err != nil {
-			t.Fatalf("Failed to run playability check: %v", err)
-		}
-		if exitCode != 0 {
-			execBytes, _ := io.ReadAll(execOutput)
-			t.Errorf("File playability check failed (exit %d) — output has corrupt frames or demux errors:\n%s", exitCode, string(execBytes))
-		} else {
-			t.Log("File playability check passed (full decode, no errors)")
-		}
 	})
 
 	t.Run("VerifyEventHistory", func(t *testing.T) {
-		job, err := repo.GetJob(ctx, jobID)
-		if err != nil {
-			t.Fatalf("Failed to get job: %v", err)
+		if completedJob == nil {
+			t.Fatal("Completed job not available")
 		}
 
-		events := job.Events
-
-		t.Logf("Event history (%d events):", len(events))
-		for i, ev := range events {
-			t.Logf("  %d. [%s] %s: %s", i+1, ev.NotificationType, ev.Status, ev.Message)
-		}
+		events := completedJob.Events
+		dumpEvents(t, events)
 
 		if len(events) < 5 {
 			t.Errorf("Expected at least 5 events, got %d", len(events))
@@ -565,61 +253,62 @@ web:
 	})
 }
 
-func envOrDefault(key, defaultVal string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return defaultVal
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, in)
-	return err
-}
-
-func mustMappedPortInt(t *testing.T, ctx context.Context, c testcontainers.Container, port string) int {
+func doJSONRequest(t *testing.T, client *http.Client, method, requestURL, token string, body io.Reader) ([]byte, int) {
 	t.Helper()
-	p, err := c.MappedPort(ctx, port)
+
+	req, err := http.NewRequest(method, requestURL, body)
 	if err != nil {
-		t.Fatalf("Failed to get mapped port %s: %v", port, err)
+		t.Fatalf("Failed to create request: %v", err)
 	}
-	portNum, err := strconv.Atoi(p.Port())
+	req.Header.Set("Authorization", "Bearer "+token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("Failed to parse port %q: %v", p.Port(), err)
+		t.Fatalf("Request failed: %v", err)
 	}
-	return portNum
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Failed to read response body: %v", err)
+	}
+
+	return respBody, resp.StatusCode
 }
 
-func countStreamLanguages(streams []probeStream, codecType string) int {
+func getJob(t *testing.T, client *http.Client, serverURL, token, jobID string) *model.Job {
+	t.Helper()
+
+	respBody, statusCode := doJSONRequest(t, client, http.MethodGet, fmt.Sprintf("%s/api/v1/job/%s", serverURL, jobID), token, nil)
+	if statusCode != http.StatusOK {
+		t.Fatalf("Get job failed with status %d: %s", statusCode, string(respBody))
+	}
+
+	var job model.Job
+	if err := json.Unmarshal(respBody, &job); err != nil {
+		t.Fatalf("Failed to parse job response: %v", err)
+	}
+
+	return &job
+}
+
+func countStreamLanguages(streams []model.MediaStream, codecType string) int {
 	langs := make(map[string]bool)
 	for _, s := range streams {
-		if s.CodecType == codecType && s.Tags.Language != "" {
-			langs[s.Tags.Language] = true
+		if s.CodecType == codecType && s.Language != "" {
+			langs[s.Language] = true
 		}
 	}
 	return len(langs)
 }
 
-func dumpContainerLogs(t *testing.T, ctx context.Context, c testcontainers.Container, name string) {
+func dumpEvents(t *testing.T, events model.TaskEvents) {
 	t.Helper()
-	logs, err := c.Logs(ctx)
-	if err != nil {
-		t.Logf("Failed to get %s logs: %v", name, err)
-		return
+	t.Logf("Event history (%d events):", len(events))
+	for i, ev := range events {
+		t.Logf("  %d. [%s] %s: %s", i+1, ev.NotificationType, ev.Status, ev.Message)
 	}
-	defer logs.Close()
-	logBytes, _ := io.ReadAll(logs)
-	t.Logf("%s logs:\n%s", name, string(logBytes))
 }

@@ -28,17 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-
-      - name: Install Mage
-        run: go install github.com/magefile/mage@latest
-
-      - name: Install Dagger
-        run: curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR=/usr/local/bin sudo sh
+      - uses: jdx/mise-action@v2
 
       - name: Login to GHCR
         uses: docker/login-action@v3

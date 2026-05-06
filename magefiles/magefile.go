@@ -381,7 +381,8 @@ func (Test) E2e(ctx context.Context) error {
 				" --worker.verifyDeltaTime 5" +
 				" --worker.threads 2" +
 				" > /tmp/worker.log 2>&1 &" +
-				" go test -tags=integration -v -timeout 25m -run TestE2E ./integration/... 2>&1; EXIT=$?;" +
+				" sleep 3 && echo '=== WORKER STARTUP ===' && cat /tmp/worker.log && echo '=== END WORKER STARTUP ===' &&" +
+				" go test -tags=integration -v -timeout 15m -run TestE2E ./integration/... 2>&1; EXIT=$?;" +
 				" echo '=== WORKER LOG ==='; cat /tmp/worker.log; exit $EXIT",
 		}).
 		Stdout(ctx)

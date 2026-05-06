@@ -16,6 +16,7 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     env:
+      DAGGER_LOG: "1"
       _EXPERIMENTAL_DAGGER_CACHE_CONFIG: type=registry,ref=ghcr.io/segator/transcoderd:dagger-cache-lint,mode=max
       _EXPERIMENTAL_DAGGER_SHUTDOWN_TIMEOUT: 180s
     steps:

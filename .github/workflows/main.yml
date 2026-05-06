@@ -15,10 +15,13 @@ permissions:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    env:
+      _EXPERIMENTAL_DAGGER_CACHE_CONFIG: type=registry,ref=ghcr.io/segator/transcoderd:dagger-cache,mode=max
+      _EXPERIMENTAL_DAGGER_SHUTDOWN_TIMEOUT: 180s
     steps:
       - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
       - uses: docker/setup-buildx-action@v3
-      - uses: jetify-com/devbox-install-action@v0.12.0
 
       - name: Release please
         if: github.event_name != 'pull_request'
@@ -41,38 +44,27 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Test
-        run: devbox run -- make test
-
-      # Ensure pre-built builder images exist in the registry. These are normally
-      # published via the "Publish builder images" workflow and only need rebuilding
-      # when FFmpeg/PGS dependencies change. This step is a safety net that builds
-      # and pushes them if they are missing (e.g. first run after setup).
-      - name: Ensure builder images exist
-        run: |
-          for target in builder-ffmpeg builder-pgs; do
-            if ! docker manifest inspect ghcr.io/segator/transcoderd:${target} > /dev/null 2>&1; then
-              echo "Image ${target} not found, building and pushing..."
-              make publish-${target}
-            else
-              echo "Image ${target} already exists, skipping."
-            fi
-          done
+        run: mage test:unit
 
       - name: Build
-        run: devbox run -- make build
+        run: mage build:all
+
+      - name: Build Containers
+        run: mage docker:all
 
       - name: E2E Test
-        run: devbox run -- make test-e2e
+        timeout-minutes: 30
+        run: mage test:e2e
 
       - name: Publish
         if: github.event_name != 'pull_request'
-        run: make publish
+        run: mage publish:app
 
       - name: Publish release tags
         if: steps.release.outputs.release_created
         run: |
-          PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} make publish
-          PROJECT_VERSION=v${{ steps.release.outputs.major }} make publish
+          PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} mage publish:app
+          PROJECT_VERSION=v${{ steps.release.outputs.major }} mage publish:app
 
       - name: Upload release assets
         if: steps.release.outputs.release_created

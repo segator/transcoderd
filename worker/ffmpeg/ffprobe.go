@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"transcoder/model"
 )
 
 type Video struct {
@@ -263,4 +264,31 @@ func NormalizeFFProbeData(data *ffprobe.ProbeData) (container *NormalizedFFProbe
 		container.Subtitle = append(container.Subtitle, value)
 	}
 	return container, nil
+}
+
+// ProbeDataToMediaProbe converts raw ffprobe.ProbeData into a model.MediaProbe
+// suitable for API responses and DB storage. Unlike NormalizeFFProbeData, this
+// preserves all streams with full codec info (name, resolution, language).
+func ProbeDataToMediaProbe(data *ffprobe.ProbeData) *model.MediaProbe {
+	if data == nil {
+		return nil
+	}
+	probe := &model.MediaProbe{
+		DurationSeconds: data.Format.Duration().Seconds(),
+	}
+	for _, stream := range data.Streams {
+		language, _ := stream.TagList.GetString("language")
+		title, _ := stream.TagList.GetString("title")
+		ms := model.MediaStream{
+			Index:     stream.Index,
+			CodecType: stream.CodecType,
+			CodecName: stream.CodecName,
+			Width:     stream.Width,
+			Height:    stream.Height,
+			Language:  language,
+			Title:     title,
+		}
+		probe.Streams = append(probe.Streams, ms)
+	}
+	return probe
 }

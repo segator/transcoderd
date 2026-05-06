@@ -123,7 +123,7 @@ func runCmd(ctx context.Context, name string, args ...string) error {
 
 func daggerClient(ctx context.Context) (*dagger.Client, error) {
 	opts := []dagger.ClientOpt{}
-	if os.Getenv("DAGGER_LOG") == "1" {
+	if os.Getenv("DAGGER_LOG") != "0" {
 		opts = append(opts, dagger.WithLogOutput(os.Stderr))
 	}
 	return dagger.Connect(ctx, opts...)
@@ -138,8 +138,8 @@ func projectSource(client *dagger.Client) *dagger.Directory {
 func goContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container {
 	return client.Container().
 		From("golang:1.25-bookworm").
-		WithMountedCache("/root/.cache/go-build", client.CacheVolume("go-build")).
-		WithMountedCache("/go/pkg/mod", client.CacheVolume("go-mod")).
+		WithMountedCache("/root/.cache/go-build", client.CacheVolume("go-build"), dagger.ContainerWithMountedCacheOpts{Sharing: dagger.CacheSharingModeShared}).
+		WithMountedCache("/go/pkg/mod", client.CacheVolume("go-mod"), dagger.ContainerWithMountedCacheOpts{Sharing: dagger.CacheSharingModeShared}).
 		WithEnvVariable("CGO_ENABLED", "0").
 		WithDirectory("/src", src).
 		WithWorkdir("/src")

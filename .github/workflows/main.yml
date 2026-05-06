@@ -46,17 +46,6 @@ jobs:
       - name: Test
         run: mage test:unit
 
-      - name: Ensure builder images exist
-        run: |
-          for target in builder-ffmpeg builder-pgs; do
-            if ! docker manifest inspect ghcr.io/segator/transcoderd:${target} > /dev/null 2>&1; then
-              echo "Image ${target} not found, building and pushing..."
-              if [ "$target" = "builder-ffmpeg" ]; then mage publish:ffmpeg; else mage publish:pgs; fi
-            else
-              echo "Image ${target} already exists, skipping."
-            fi
-          done
-
       - name: Build
         run: mage build:all
 

@@ -122,7 +122,11 @@ func runCmd(ctx context.Context, name string, args ...string) error {
 // ---------------------------------------------------------------------------
 
 func daggerClient(ctx context.Context) (*dagger.Client, error) {
-	return dagger.Connect(ctx, dagger.WithLogOutput(os.Stderr))
+	opts := []dagger.ClientOpt{}
+	if os.Getenv("DAGGER_LOG") == "1" {
+		opts = append(opts, dagger.WithLogOutput(os.Stderr))
+	}
+	return dagger.Connect(ctx, opts...)
 }
 
 func projectSource(client *dagger.Client) *dagger.Directory {
@@ -343,8 +347,8 @@ func (Test) E2e(ctx context.Context) error {
 		}).
 		File("/output/transcoderd-worker")
 
-	ffmpegBins := client.Container().From(imageName + ":builder-ffmpeg")
-	pgsBins := client.Container().From(imageName + ":builder-pgs")
+	ffmpegBins := builderFfmpegImage(client)
+	pgsBins := builderPgsImage(client)
 
 	// 4. Test runner
 	out, err := goContainer(client, src).
@@ -636,8 +640,7 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 		}).
 		File("/output/transcoderd-" + component)
 
-	ffmpegBins := client.Container().
-		From(imageName + ":builder-ffmpeg")
+	ffmpegBins := builderFfmpegImage(client)
 
 	base := client.Container().
 		From("debian:trixie-20241223-slim").
@@ -658,8 +661,7 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 			WithEntrypoint([]string{"/app/transcoderd-server"}), nil
 
 	case "worker":
-		pgsBins := client.Container().
-			From(imageName + ":builder-pgs")
+		pgsBins := builderPgsImage(client)
 
 		return base.
 			WithDirectory("/app/tessdata", pgsBins.Directory("/src/tessdata")).

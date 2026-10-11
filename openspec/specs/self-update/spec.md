@@ -1,47 +1,47 @@
-# Actualización de binarios
+# Binary self-update
 
 ## Purpose
 
-Documenta la comprobación de versiones publicadas y la sustitución automática de los binarios del servidor y del worker cuando está habilitada.
+Define how server and worker binaries discover newer project releases, honor the update settings, and replace their executables when automatic updates are enabled.
 
 ## Requirements
 
-### Requirement: Comparación de versiones
-Cada proceso SHALL consultar la versión de la última publicación del proyecto y SHALL compararla semánticamente con su versión actual según el intervalo configurado.
+### Requirement: Release comparison
+Each process SHALL query the project's latest GitHub release and compare its semantic version with the running version, subject to `updateCheckInterval`, whose registered default is 15 minutes.
 
-#### Scenario: Versión más reciente
-- **WHEN** la publicación más reciente tiene una versión superior a la ejecutada
-- **THEN** el proceso identifica que hay una actualización disponible
+#### Scenario: Newer release
+- **WHEN** the latest release has a greater semantic version
+- **THEN** the process identifies an available update
 
-#### Scenario: Comprobación dentro del intervalo
-- **WHEN** aún no ha transcurrido `updateCheckInterval`
-- **THEN** se omite una nueva consulta remota
+#### Scenario: Check interval not elapsed
+- **WHEN** the last successful query is still within `updateCheckInterval`
+- **THEN** another remote query is not made
 
-### Requirement: Modo sin actualizaciones
-La opción `noUpdates` SHALL impedir la sustitución del binario aunque exista una versión superior.
+### Requirement: Updates disabled
+The `noUpdates` setting SHALL prevent executable replacement even when a newer release exists.
 
-#### Scenario: Actualizaciones deshabilitadas
-- **WHEN** `noUpdates` está activado y existe una publicación más reciente
-- **THEN** el proceso registra el aviso y continúa sin aplicar esa publicación
+#### Scenario: New release with updates disabled
+- **WHEN** `noUpdates` is true and a newer release is found
+- **THEN** the process logs the availability and continues without applying it
 
-### Requirement: Supervisión y sustitución
-Con actualizaciones habilitadas, el proceso supervisor SHALL obtener el recurso de la publicación cuyo nombre corresponda al binario y SHALL sustituir el ejecutable antes de arrancar de nuevo la aplicación.
+### Requirement: Supervisor replacement
+With updates enabled, the supervisor SHALL select the release asset whose name matches the running server or worker binary, download it to temporary storage, and apply it to the executable before running the application.
 
-#### Scenario: Recurso coincidente
-- **WHEN** una versión superior incluye el recurso del servidor o worker correspondiente
-- **THEN** el supervisor descarga ese recurso y aplica la actualización del ejecutable
+#### Scenario: Matching asset exists
+- **WHEN** a newer release contains the corresponding binary asset
+- **THEN** the supervisor downloads and applies it before starting the service
 
-#### Scenario: Recurso ausente
-- **WHEN** la publicación no contiene el recurso correspondiente
-- **THEN** la actualización devuelve un error y no arranca con ese recurso
+#### Scenario: Matching asset absent
+- **WHEN** the release has no matching asset
+- **THEN** the update reports an error instead of applying an unrelated asset
 
-### Requirement: Comprobaciones durante el servicio
-El worker SHALL comprobar actualizaciones antes de solicitar un nuevo trabajo. El servidor SHALL comprobarlas periódicamente solo cuando no haya peticiones HTTP activas.
+### Requirement: Update checks during service
+The worker SHALL check for an update before requesting a new job when it is ready to accept work. The server SHALL check periodically while no HTTP requests are active.
 
-#### Scenario: Servidor ocupado
-- **WHEN** vence la comprobación periódica y hay una petición HTTP activa
-- **THEN** el servidor pospone la consulta de actualización
+#### Scenario: Server has active requests
+- **WHEN** the server's periodic check is due but an HTTP request is active
+- **THEN** it skips that check
 
-#### Scenario: Worker disponible
-- **WHEN** el worker admite trabajo y alcanza su ciclo de consulta
-- **THEN** comprueba si necesita actualizarse antes de pedir una asignación
+#### Scenario: Worker is ready for work
+- **WHEN** the worker reaches a job-request cycle and accepts new work
+- **THEN** it checks for an update before asking for an assignment

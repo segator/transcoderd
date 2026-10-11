@@ -1,51 +1,103 @@
-# Tratamiento de subtítulos
+# Subtitle handling
 
 ## Purpose
 
-Define qué pistas de subtítulos conserva el worker y cómo convierte las que no se pueden copiar directamente al contenedor de salida.
+Define which subtitle streams the worker retains, which streams require extraction or OCR, and how converted text is included in the encoded Matroska file.
 
 ## Requirements
 
-### Requirement: Selección de pistas de subtítulos
-El worker SHALL conservar las pistas marcadas como forzadas o de comentario y SHALL incluir al menos una pista ordinaria por idioma detectado. Las pistas copiables SHALL pasar al resultado sin recodificación.
+### Requirement: Subtitle stream selection
+The worker SHALL retain forced and commentary subtitle streams and SHALL retain at least one ordinary stream for each source language. A selected subtitle whose format can be copied into the output SHALL be copied without text conversion.
 
-#### Scenario: Pista ordinaria de un idioma
-- **WHEN** el origen contiene una pista de subtítulos ordinaria de un idioma
-- **THEN** la pista queda seleccionada para la salida
+#### Scenario: Ordinary language stream
+- **WHEN** the source has an ordinary subtitle stream for a language
+- **THEN** that language has a selected subtitle stream in the output
 
-#### Scenario: Pista forzada
-- **WHEN** una pista está marcada como forzada
-- **THEN** la pista se incluye con la disposición forzada en la salida
+#### Scenario: Forced and commentary streams
+- **WHEN** source subtitles are marked forced or commentary
+- **THEN** those streams remain selected in addition to ordinary language streams
 
-### Requirement: Extracción de pistas especiales
-Si el origen contiene subtítulos PGS o un formato que requiere extracción, el worker SHALL extraer esas pistas antes de la codificación del medio.
+### Requirement: Identify streams requiring extraction
+The worker SHALL extract PGS image subtitles and text streams whose detected format is empty, `none`, or `mov_text` before encoding. It SHALL skip the extraction phase when no selected subtitle needs it.
 
-#### Scenario: Pista PGS
-- **WHEN** se detecta una pista PGS
-- **THEN** el worker la extrae como `.sup` y la envía a la fase OCR
+#### Scenario: PGS stream
+- **WHEN** a selected subtitle format contains `pgs`
+- **THEN** the worker extracts that stream as a `.sup` file for OCR
 
-#### Scenario: Códec de texto no utilizable directamente
-- **WHEN** una pista tiene formato vacío, `none` o `mov_text`
-- **THEN** el worker la extrae y la convierte a `.srt` antes de codificar el medio
+#### Scenario: Unsupported text codec
+- **WHEN** a selected text stream is reported as empty, `none`, or `mov_text`
+- **THEN** the worker extracts the stream and converts it to SRT
 
-### Requirement: Conversión OCR de PGS
-El worker SHALL convertir las pistas PGS extraídas a SRT con los datos de idioma y OCR configurados, y SHALL normalizar intervalos de subtítulo cuya hora final sea anterior a la inicial.
+#### Scenario: No special subtitles
+- **WHEN** no subtitle requires extraction
+- **THEN** the worker advances from download directly to media encoding
 
-#### Scenario: OCR con segmentos
-- **WHEN** una pista PGS contiene segmentos legibles y la herramienta OCR termina correctamente
-- **THEN** se produce un archivo SRT optimizado para incorporarlo al resultado
+### Requirement: OCR configuration
+For each extracted PGS stream, the worker SHALL invoke PgsToSrt with the configured .NET path, assembly path, Tesseract data path, Tesseract version, and Leptonica settings. The registered defaults SHALL be `dotnet`, `./PgsToSrt.dll`, `./tessdata`, version `5`, `leptonica`, and version `6`.
 
-#### Scenario: Pista vacía
-- **WHEN** una pista `.sup` es demasiado pequeña o la herramienta indica que no hay segmentos visibles
-- **THEN** se crea un SRT vacío válido y la cadena puede continuar
+#### Scenario: Default OCR tools
+- **WHEN** no OCR tool paths or versions are overridden
+- **THEN** the PGS conversion uses the registered tool locations and versions
 
-### Requirement: Incorporación de SRT convertido
-El worker SHALL añadir los SRT convertidos como entradas del codificador y SHALL mantener el idioma y las disposiciones de las pistas originales cuando construye la salida.
+#### Scenario: Configured OCR tools
+- **WHEN** `worker.pgsConfig` provides different tool paths or versions
+- **THEN** those values are passed to the PGS conversion
 
-#### Scenario: PGS forzado convertido
-- **WHEN** se convierte una pista PGS forzada
-- **THEN** el SRT resultante se incorpora a la salida con la marca forzada
+### Requirement: Parallel PGS conversion
+The worker SHALL use `worker.pgsConfig.parallelJobs` as the number of concurrent OCR actions within a PGS phase. Its registered default SHALL be the ceiling of one quarter of the detected CPU count.
 
-#### Scenario: Subtítulo de texto extraído
-- **WHEN** una pista de texto se ha extraído y convertido
-- **THEN** el SRT correspondiente se incorpora a la salida
+#### Scenario: Multiple PGS streams
+- **WHEN** a job has several selected PGS streams and `parallelJobs` is set to `2`
+- **THEN** at most two OCR actions for that phase run concurrently
+
+### Requirement: OCR language selection
+The worker SHALL derive the OCR language from the subtitle language metadata, mapping recognized language aliases to Tesseract names and using English when the source language is empty.
+
+#### Scenario: Empty language
+- **WHEN** a PGS stream has no language code
+- **THEN** OCR uses `eng`
+
+#### Scenario: Spanish language alias
+- **WHEN** a PGS stream language is `es` or `esp`
+- **THEN** OCR uses `spa`
+
+### Requirement: PGS conversion and empty tracks
+The worker SHALL produce an SRT for each selected PGS stream. It SHALL create an empty valid SRT when the `.sup` file is under 1024 bytes or the OCR tool reports zero displayable segments. For OCR output, it SHALL correct cues whose end time precedes their start time.
+
+#### Scenario: PGS with text
+- **WHEN** OCR completes with subtitle items
+- **THEN** an optimized SRT is available for encoding
+
+#### Scenario: Empty PGS track
+- **WHEN** the extracted track is too small or contains no displayable segments
+- **THEN** an empty valid SRT is written and processing continues
+
+#### Scenario: Reversed cue times
+- **WHEN** an OCR cue ends before it starts
+- **THEN** its end time is moved to two seconds after its start
+
+### Requirement: Extracted text conversion
+A selected unsupported text stream SHALL be converted from the extracted file to SRT before the media encoding phase. Failure of that conversion SHALL fail the subtitle phase.
+
+#### Scenario: Extracted text converts
+- **WHEN** FFmpeg successfully converts an extracted text stream
+- **THEN** its SRT becomes an additional input to media encoding
+
+#### Scenario: Conversion fails
+- **WHEN** conversion exits unsuccessfully
+- **THEN** the subtitle phase fails and the job is not reported complete
+
+### Requirement: SRT output metadata and dispositions
+Converted SRT streams SHALL be included as separate encoding inputs. The worker SHALL carry their source language into the output, mark forced converted streams as forced and default, retain commentary disposition, and remove `PGS` from converted subtitle titles.
+
+#### Scenario: Forced PGS converted
+- **WHEN** a forced PGS stream is converted
+- **THEN** its SRT output carries forced and default dispositions
+
+#### Scenario: Commentary stream converted
+- **WHEN** a commentary stream requires conversion
+- **THEN** its output is marked as commentary
+
+#### Scenario: PGS title
+- **WHEN** a converted subtitle title contains `PGS`
+- **THEN** the generated output title omits that label

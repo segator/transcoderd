@@ -1,36 +1,36 @@
-# Distribución
+# Distribution
 
 ## Purpose
 
-Describe los ejecutables y contenedores que el proyecto entrega para ejecutar el servidor y el worker con sus dependencias de medios.
+Define the separately built server and worker executables and images, including the media tools supplied to the worker image.
 
 ## Requirements
 
-### Requirement: Binarios separados
-La compilación SHALL producir ejecutables separados `transcoderd-server` y `transcoderd-worker`, con nombre, versión, commit y fecha de compilación incorporados.
+### Requirement: Separate Go binaries
+The build SHALL produce `transcoderd-server` and `transcoderd-worker` executables with application name, version, commit, and build date injected at build time.
 
-#### Scenario: Construcción de Go
-- **WHEN** se ejecuta la construcción de ambos binarios
-- **THEN** aparecen `dist/transcoderd-server` y `dist/transcoderd-worker`
+#### Scenario: Build both binaries
+- **WHEN** the Go build target for both applications runs
+- **THEN** `dist/transcoderd-server` and `dist/transcoderd-worker` are produced
 
-#### Scenario: Consulta de versión
-- **WHEN** se ejecuta un binario con `--version`
-- **THEN** muestra su información de versión y termina
+#### Scenario: Request binary version
+- **WHEN** either binary is run with `--version`
+- **THEN** it prints version information and exits
 
-### Requirement: Imágenes de servidor y worker
-La distribución en contenedores SHALL proporcionar objetivos separados `server` y `worker`. El worker SHALL incluir las herramientas de análisis, codificación, extracción y OCR que usa su cadena de ejecución.
+### Requirement: Separate container targets
+The Docker build SHALL expose `server` and `worker` targets with their corresponding binaries as entry points. The worker image SHALL include FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract data required by the media pipeline.
 
-#### Scenario: Imagen de servidor
-- **WHEN** se construye el objetivo `server`
-- **THEN** su punto de entrada ejecuta `transcoderd-server`
+#### Scenario: Server image
+- **WHEN** the `server` target is built
+- **THEN** its entry point runs `transcoderd-server`
 
-#### Scenario: Imagen de worker
-- **WHEN** se construye el objetivo `worker`
-- **THEN** su punto de entrada ejecuta `transcoderd-worker` con las herramientas de medios disponibles
+#### Scenario: Worker image
+- **WHEN** the `worker` target is built
+- **THEN** its entry point runs `transcoderd-worker` with the bundled media tools available
 
-### Requirement: Etiquetas de distribución
-Los objetivos de publicación SHALL etiquetar las imágenes con el nombre de aplicación, el rol `server` o `worker` y la versión solicitada.
+### Requirement: Versioned image tags
+Publishing SHALL tag server and worker images with their role and requested version under `ghcr.io/segator/transcoderd`.
 
-#### Scenario: Publicación versionada
-- **WHEN** se publica una versión de ambas imágenes
-- **THEN** existen etiquetas `ghcr.io/segator/transcoderd:server-<version>` y `ghcr.io/segator/transcoderd:worker-<version>`
+#### Scenario: Versioned publish
+- **WHEN** both images are published for a version
+- **THEN** `server-<version>` and `worker-<version>` tags are available

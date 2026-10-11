@@ -1,47 +1,106 @@
-# Codificación y verificación
+# Media encoding and verification
 
 ## Purpose
 
-Recoge la transformación de vídeo y audio que realiza el worker, su selección de pistas y la comprobación del archivo generado antes de subirlo.
+Define the observable video and audio output produced by a worker, the configurable encoding policy, and the checks performed before an encoded file is uploaded.
 
 ## Requirements
 
-### Requirement: Análisis del origen
-Antes de codificar, el worker SHALL obtener duración, frecuencia de fotogramas y pistas de vídeo, audio y subtítulos del archivo descargado.
+### Requirement: Probe source and output media
+The worker SHALL probe a fully downloaded source before encoding and SHALL probe the encoded file before verification. It SHALL use the first video stream reported for the source and the container duration for duration comparison.
 
-#### Scenario: Origen descargado
-- **WHEN** termina una descarga íntegra
-- **THEN** el worker analiza el medio y dispone de sus pistas para las fases siguientes
+#### Scenario: Valid downloaded source
+- **WHEN** a source download passes its size and SHA-256 checks
+- **THEN** the worker obtains the source video stream, duration, frame rate, audio streams, and subtitle streams before encoding
 
-### Requirement: Selección de audio
-Para cada idioma de audio, el worker SHALL seleccionar la pista con más canales o, en caso de empate, con mayor tasa de bits, y SHALL codificar las pistas elegidas con el códec y calidad de audio configurados.
+#### Scenario: Encoded file created
+- **WHEN** the encoder exits successfully
+- **THEN** the worker probes the output and calculates its SHA-256 checksum before verification and upload
 
-#### Scenario: Dos pistas del mismo idioma
-- **WHEN** hay dos pistas del mismo idioma con diferente número de canales
-- **THEN** se elige la de más canales para el archivo de salida
+### Requirement: Video encoder settings
+The worker SHALL map the selected source video stream and encode it with `videoCodec`, `videoCRF`, `videoProfile`, and `videoPreset`. The registered defaults SHALL be `libx265`, `21`, `main10`, and `medium`, respectively.
 
-#### Scenario: Canales iguales
-- **WHEN** dos pistas del mismo idioma tienen los mismos canales y distinta tasa de bits
-- **THEN** se elige la de mayor tasa de bits
+#### Scenario: Default video settings
+- **WHEN** no video encoder overrides are supplied
+- **THEN** the encoding request uses `libx265`, CRF `21`, profile `main10`, and preset `medium`
 
-### Requirement: Codificación de vídeo
-El worker SHALL crear un archivo `.mkv` codificando la pista de vídeo seleccionada con el códec, CRF, perfil, preset y opciones adicionales configurados. SHALL limitar la escala a un máximo de 1920 píxeles de ancho sin aumentar medios menores.
+#### Scenario: Video setting overridden
+- **WHEN** `worker.ffmpegConfig.videoCRF` or another registered video encoder setting is supplied
+- **THEN** the worker passes the configured value to the corresponding encoder option
 
-#### Scenario: Vídeo de más de 1920 píxeles de ancho
-- **WHEN** el origen supera 1920 píxeles de ancho
-- **THEN** la salida se escala conservando la relación de aspecto
+### Requirement: Video pixel format and scaling
+The worker SHALL request `yuv420p10le` output and SHALL scale video to at most 1920 pixels wide without enlarging a narrower source, preserving its aspect ratio.
 
-#### Scenario: Vídeo menor
-- **WHEN** el origen no supera 1920 píxeles de ancho
-- **THEN** la salida no se amplía por la regla de escala
+#### Scenario: Wide source
+- **WHEN** a source video is wider than 1920 pixels
+- **THEN** the output is scaled down with its aspect ratio preserved
 
-### Requirement: Inspección del resultado
-Después de codificar, el worker SHALL analizar el archivo generado y SHALL comprobar que la diferencia absoluta de duración no excede `verifyDeltaTime` antes de subirlo.
+#### Scenario: Narrow source
+- **WHEN** a source video is narrower than 1920 pixels
+- **THEN** the scaling rule does not enlarge its width
 
-#### Scenario: Diferencia de duración aceptable
-- **WHEN** la diferencia de duración está dentro del límite configurado
-- **THEN** el resultado puede pasar a la fase de subida
+### Requirement: Audio stream selection
+For each audio language, the worker SHALL select the stream with the most channels; when channel counts are equal, it SHALL select the stream with the greater bit rate. Only selected streams SHALL be mapped for audio encoding.
 
-#### Scenario: Diferencia excesiva
-- **WHEN** la diferencia absoluta supera el límite
-- **THEN** la verificación falla y el resultado no se sube como trabajo completado
+#### Scenario: Different channel counts
+- **WHEN** two audio streams have the same language and different channel counts
+- **THEN** the stream with more channels is selected
+
+#### Scenario: Equal channel counts
+- **WHEN** two audio streams have the same language and channel count but different bit rates
+- **THEN** the stream with the greater bit rate is selected
+
+### Requirement: Audio encoder settings and metadata
+The worker SHALL encode each selected audio stream with `audioCodec` and `audioVBR`, whose registered defaults are `libfdk_aac` and `5`. It SHALL set the output audio title from the source language and channel layout.
+
+#### Scenario: Default audio settings
+- **WHEN** no audio encoder overrides are supplied
+- **THEN** selected audio streams use `libfdk_aac` with VBR quality `5`
+
+#### Scenario: Audio setting overridden
+- **WHEN** `worker.ffmpegConfig.audioCodec` or `worker.ffmpegConfig.audioVBR` is supplied
+- **THEN** the worker passes the configured codec or VBR value for each selected audio stream
+
+#### Scenario: Audio title
+- **WHEN** a selected stream has a language and channel layout
+- **THEN** its output title contains both values
+
+### Requirement: Output container and chapters
+The worker SHALL produce a Matroska (`.mkv`) file in its job workspace, based on the downloaded source basename with an `-encoded` suffix. It SHALL omit source chapters from that output.
+
+#### Scenario: MP4 source
+- **WHEN** the downloaded source basename is `movie.mp4`
+- **THEN** the encoded workspace file is named `movie-encoded.mkv`
+
+#### Scenario: Source chapters
+- **WHEN** the source contains chapter metadata
+- **THEN** the encoded file does not copy those chapters
+
+### Requirement: Additional FFmpeg arguments and thread setting
+The worker SHALL pass `worker.ffmpegConfig.extraArgs` to FFmpeg before the input arguments and SHALL use `worker.ffmpegConfig.threads` for FFmpeg's thread option when that nested setting is provided.
+
+#### Scenario: Additional arguments
+- **WHEN** `worker.ffmpegConfig.extraArgs` contains FFmpeg options
+- **THEN** those options are included in the encoding invocation before the input files
+
+#### Scenario: Explicit encoder threads
+- **WHEN** `worker.ffmpegConfig.threads` is set to `4`
+- **THEN** the encoding invocation requests four FFmpeg threads
+
+### Requirement: Duration verification
+Before upload, the worker SHALL reject an encoded file when the absolute difference between source and output durations exceeds `worker.verifyDeltaTime` seconds. The registered default SHALL be 60 seconds.
+
+#### Scenario: Duration within limit
+- **WHEN** the duration difference is at most the configured threshold
+- **THEN** the output can advance to upload
+
+#### Scenario: Duration beyond limit
+- **WHEN** the duration difference exceeds the configured threshold
+- **THEN** verification fails and the worker does not report the job as completed
+
+### Requirement: Encoding failure
+The worker SHALL mark the encoding phase as failed if FFmpeg fails or if the encoded file cannot be probed or hashed, and SHALL not upload that output as a completed job.
+
+#### Scenario: FFmpeg exits unsuccessfully
+- **WHEN** FFmpeg returns an error or nonzero exit code
+- **THEN** the encoding phase fails and the worker reports a job failure

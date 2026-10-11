@@ -72,7 +72,7 @@ docker run -d \
 
 ## Development
 
-The current behavior contracts are in [OpenSpec](./openspec/specs/). Start with the [baseline map and known gaps](./openspec/BASELINE.md) before changing a capability; contributor guidance is in [AGENTS.md](./AGENTS.md).
+The current behavior contracts are in [OpenSpec](./openspec/specs/). Start with the [baseline map and known gaps](./openspec/BASELINE.md), [configuration reference](./openspec/CONFIGURATION.md), and [HTTP protocol reference](./openspec/PROTOCOL.md) before changing a capability; contributor guidance is in [AGENTS.md](./AGENTS.md).
 
 ### Prerequisites
 - [Go 1.25](https://go.dev/dl/)

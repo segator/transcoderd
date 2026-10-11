@@ -1,62 +1,73 @@
-# Incorporación de trabajos
+# Job intake
 
 ## Purpose
 
-Describe cómo una petición sobre un archivo o un directorio de la biblioteca se convierte en trabajos persistidos, y cuándo se permite volver a encolarlos.
+Define how a request for one file or a directory becomes persisted jobs, how destination paths are derived, and when an existing job may be queued again.
 
 ## Requirements
 
-### Requirement: Solicitud de incorporación
-La API SHALL aceptar `POST /api/v1/job/` con JSON que contenga `sourcePath` y SHALL devolver las colecciones `scheduled`, `failed` y `skipped` de la operación.
+### Requirement: Job submission API
+The server SHALL accept `POST /api/v1/job/` with a JSON `sourcePath` and SHALL return a JSON result with `scheduled`, `failed`, and `skipped` collections.
 
-#### Scenario: Ruta ausente
-- **WHEN** la petición omite `sourcePath` o lo deja vacío
-- **THEN** la API devuelve HTTP 400
+#### Scenario: Missing source path
+- **WHEN** `sourcePath` is absent or empty
+- **THEN** the API returns HTTP 400
 
-#### Scenario: Solicitud procesada
-- **WHEN** se presenta una ruta válida para el planificador
-- **THEN** la API devuelve HTTP 200 con los resultados por archivo
+#### Scenario: Submission processed
+- **WHEN** the scheduler processes the requested path
+- **THEN** the API returns HTTP 200 with per-file results
 
-### Requirement: Descubrimiento de archivos
-El planificador SHALL recorrer la ruta solicitada bajo la raíz configurada y SHALL evaluar los archivos por tamaño mínimo y extensión admitida.
+### Requirement: File discovery
+The scheduler SHALL walk the requested path beneath `server.scheduler.sourcePath` and evaluate files against the configured minimum byte size and supported extension list. A directory request SHALL allow multiple files to be evaluated in one response.
 
-#### Scenario: Directorio con medios válidos
-- **WHEN** la ruta solicitada contiene archivos con extensión admitida y tamaño suficiente
-- **THEN** el planificador intenta crear un trabajo para cada archivo elegible
+#### Scenario: Directory with eligible media
+- **WHEN** a requested directory contains files with supported extensions and sufficient size
+- **THEN** the scheduler attempts to create a job for each eligible file
 
-#### Scenario: Archivo no elegible
-- **WHEN** un archivo está por debajo del tamaño mínimo o su extensión no está admitida
-- **THEN** la respuesta incluye el archivo y el motivo en `failed`
+#### Scenario: File too small
+- **WHEN** a file is smaller than `server.scheduler.minFileSize`
+- **THEN** the file and its reason appear in `failed`
 
-### Requirement: Identidad y destino del trabajo
-Cada trabajo nuevo SHALL recibir un identificador UUID, guardar rutas relativas de origen y destino, guardar el tamaño de origen y comenzar en estado `queued`. El destino SHALL usar la extensión `.mkv` y evitar sobrescribir un origen cuyo nombre de destino sería idéntico.
+#### Scenario: Unsupported extension
+- **WHEN** a file's extension is not supported
+- **THEN** the file and its reason appear in `failed`
 
-#### Scenario: Origen con otro contenedor
-- **WHEN** un archivo elegible termina en `.avi`
-- **THEN** la ruta de destino generada termina en `.mkv`
+### Requirement: New job identity and state
+A new job SHALL receive a UUID, a source path relative to the configured media root, a relative destination path, the source size, and an initial `Job/queued` event.
 
-#### Scenario: Nombre de destino idéntico al origen
-- **WHEN** la conversión del nombre deja la misma ruta que el origen
-- **THEN** el destino recibe el sufijo `_encoded.mkv`
+#### Scenario: New eligible file
+- **WHEN** an eligible source has no existing job
+- **THEN** the server stores a new job and its first queued event
 
-### Requirement: Reincorporación de trabajos existentes
-Un trabajo existente SHALL volver a `queued` solo cuando la petición incluya el indicador de fuerza correspondiente a su estado `completed`, `failed` o `canceled`, o cuando una operación interna fuerce la recuperación de un trabajo `assigned` o `started`.
+### Requirement: Destination naming
+The scheduler SHALL generate a `.mkv` destination path, replacing recognized video codec labels with `x265` and recognized audio codec labels with `AAC`. If that generated path equals the source path, it SHALL add `_encoded.mkv` to avoid using the same file as input and output.
 
-#### Scenario: Trabajo completado con fuerza
-- **WHEN** se solicita un origen completado con `forceCompleted: true`
-- **THEN** se añade un nuevo evento `Job/queued` al mismo trabajo
+#### Scenario: Codec labels in the name
+- **WHEN** the source path is `shows/episode.x264.dts.avi`
+- **THEN** the generated destination path is `shows/episode.x265.AAC.mkv`
 
-#### Scenario: Trabajo existente sin fuerza aplicable
-- **WHEN** se solicita de nuevo un origen ya registrado sin un indicador compatible con su estado
-- **THEN** el planificador informa de la imposibilidad de reencolarlo en `failed`
+#### Scenario: Name otherwise unchanged
+- **WHEN** the source path is `movies/film.mkv` and no codec label changes
+- **THEN** the destination path is `movies/film_encoded.mkv`
 
-### Requirement: Cancelación de trabajos asignados
-La API SHALL aceptar `DELETE /api/v1/job/{jobid}` y el servidor SHALL registrar `Job/canceled` para un trabajo `assigned` o `started` identificado por ese UUID.
+### Requirement: Requeue an existing job
+A persisted job SHALL return to `queued` through a user request only when the request provides the force flag matching its `completed`, `failed`, or `canceled` state. Internal timeout recovery is specified in `maintenance-and-recovery`.
 
-#### Scenario: Trabajo iniciado
-- **WHEN** se solicita cancelar un trabajo en estado `started`
-- **THEN** se añade un evento `Job/canceled` con motivo de cancelación por usuario
+#### Scenario: Completed job forced
+- **WHEN** an existing completed source is submitted with `forceCompleted: true`
+- **THEN** the same job receives a new `Job/queued` event
 
-#### Scenario: Trabajo completado
-- **WHEN** se solicita cancelar un trabajo ya `completed`
-- **THEN** el servidor devuelve un error y no añade un nuevo evento de cancelación
+#### Scenario: Existing job without applicable force
+- **WHEN** an existing source is submitted without a flag applicable to its state
+- **THEN** the request reports that file in `failed` without creating a second job
+
+### Requirement: Cancel assigned work
+The server SHALL accept `DELETE /api/v1/job/{jobid}` and SHALL append a `Job/canceled` event with a user-cancellation reason when the identified job is `assigned` or `started`.
+
+#### Scenario: Started job
+- **WHEN** a cancellation request names a started job
+- **THEN** a `Job/canceled` event is recorded with a user-cancellation reason
+
+#### Scenario: Completed job
+- **WHEN** a cancellation request names an already completed job
+- **THEN** the server returns an error without appending a cancellation event

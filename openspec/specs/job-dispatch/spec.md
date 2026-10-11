@@ -1,51 +1,58 @@
-# Asignación de trabajos
+# Job dispatch
 
 ## Purpose
 
-Establece el contrato de solicitud de trabajo, asignación a un worker y control de la admisión de nuevas tareas en el worker.
+Define how an available job is assigned to a worker, when a worker requests work, and how that worker begins execution.
 
 ## Requirements
 
-### Requirement: Solicitud del siguiente trabajo
-La API SHALL servir `GET /api/v1/job/request` a workers identificados con la cabecera `workerName`. Un trabajo disponible SHALL producir un identificador y el último `eventID` de asignación.
+### Requirement: Request an available job
+The server SHALL serve `GET /api/v1/job/request` to a caller with a `workerName` header. An available queued job SHALL produce an assignment event and a response containing the job `id` and assignment `eventID`.
 
-#### Scenario: Trabajo en cola
-- **WHEN** un worker solicita trabajo y existe un trabajo `queued`
-- **THEN** el servidor añade un evento `Job/assigned` con el nombre del worker y responde HTTP 200 con `id` y `eventID`
+#### Scenario: Queued job exists
+- **WHEN** a worker requests work and a queued job exists
+- **THEN** the server records `Job/assigned` with that worker's name and returns HTTP 200 with `id` and `eventID`
 
-#### Scenario: Cola vacía
-- **WHEN** no existe ningún trabajo `queued`
-- **THEN** la API responde HTTP 204
+#### Scenario: Queue is empty
+- **WHEN** no job is queued
+- **THEN** the API returns HTTP 204
 
-#### Scenario: Nombre de worker ausente
-- **WHEN** falta la cabecera `workerName`
-- **THEN** la API responde HTTP 403
+#### Scenario: Missing worker name
+- **WHEN** the `workerName` header is absent
+- **THEN** the API returns HTTP 403
 
-### Requirement: Coordinación periódica del worker
-El worker SHALL publicar presencia y consultar trabajos periódicamente mientras esté activo.
+### Requirement: Single-server assignment ordering
+The server SHALL choose the oldest queued job by its status event time and SHALL avoid assigning the same queued job twice when it receives concurrent requests in one server process.
 
-#### Scenario: Worker activo
-- **WHEN** transcurre el intervalo de coordinación de cinco segundos
-- **THEN** el worker envía un evento de presencia e intenta solicitar trabajo si acepta nuevas tareas
+#### Scenario: Two queued jobs
+- **WHEN** a worker requests work while two jobs are queued with different event times
+- **THEN** the job with the earlier queued event is assigned first
 
-### Requirement: Admisión local de trabajos
-El worker SHALL rechazar nuevos trabajos mientras esté pausado; sin una ventana horaria configurada SHALL limitar a dos sus trabajos activos. Con una ventana configurada SHALL aceptar solicitudes solo dentro del intervalo local indicado.
+### Requirement: Periodic worker coordination
+An active worker SHALL send a presence event approximately every five seconds and SHALL attempt a job request approximately every five seconds when it accepts new work.
 
-#### Scenario: Worker pausado
-- **WHEN** el worker está pausado
-- **THEN** no solicita un nuevo trabajo
+#### Scenario: Worker remains active
+- **WHEN** the coordination interval elapses
+- **THEN** the worker sends a presence event and evaluates whether to request work
 
-#### Scenario: Límite ordinario alcanzado
-- **WHEN** no hay ventana horaria configurada y el worker ya tiene dos trabajos activos
-- **THEN** no solicita otro trabajo
+### Requirement: Local admission policy
+A paused worker SHALL not request jobs. Without a configured time window, a worker SHALL stop requesting jobs when it has two active jobs. With a configured window, it SHALL request jobs only while local time elapsed since midnight lies between `startAfter` and `stopAfter`.
 
-#### Scenario: Fuera de la ventana
-- **WHEN** el reloj local queda fuera de `startAfter` y `stopAfter`
-- **THEN** el worker no solicita trabajo
+#### Scenario: Worker paused
+- **WHEN** the worker is paused
+- **THEN** it does not request another job
 
-### Requirement: Inicio de una asignación
-El worker SHALL preparar un contexto temporal para el trabajo asignado y publicar `Job/started` antes de ejecutar la descarga.
+#### Scenario: Ordinary active-job limit
+- **WHEN** no time window is configured and two jobs are active
+- **THEN** the worker does not request another job
 
-#### Scenario: Asignación recibida
-- **WHEN** el worker recibe `id` y `eventID` de un trabajo asignado
-- **THEN** crea el directorio del trabajo, publica `Job/started` y encola la descarga
+#### Scenario: Outside configured window
+- **WHEN** local time is outside the configured interval
+- **THEN** the worker does not request a job
+
+### Requirement: Begin assigned work
+A worker receiving an assignment SHALL create a per-job temporary directory, publish `Job/started` using the assignment's event sequence, and queue the download phase.
+
+#### Scenario: Assignment received
+- **WHEN** the worker receives a job `id` and `eventID`
+- **THEN** it initializes the workspace, reports `Job/started`, and queues download

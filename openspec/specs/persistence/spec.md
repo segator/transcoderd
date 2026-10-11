@@ -1,51 +1,66 @@
-# Persistencia y estado
+# Persistence and status
 
 ## Purpose
 
-Establece los datos duraderos que necesita el servidor para conservar trabajos, eventos y presencia de workers, y los datos temporales de progreso.
+Define the durable job, event, and worker-presence data required by the server, along with the temporary progress data used for monitoring.
 
 ## Requirements
 
-### Requirement: Evolución de la base de datos
-El servidor SHALL aplicar, en orden de versión, las migraciones SQL pendientes al arrancar y SHALL registrar cada versión aplicada.
+### Requirement: Database migrations
+At startup, the server SHALL create the schema-version record if needed, apply pending embedded SQL migrations in version order, and record each applied version.
 
-#### Scenario: Base de datos nueva
-- **WHEN** no hay versiones registradas
-- **THEN** se crea el registro de versiones y se aplican las migraciones disponibles
+#### Scenario: New database
+- **WHEN** no schema version has been recorded
+- **THEN** the server creates version tracking and applies available migrations
 
-#### Scenario: Versión ya aplicada
-- **WHEN** una migración ya figura en el registro de versiones
-- **THEN** no se vuelve a ejecutar al siguiente arranque
+#### Scenario: Existing database
+- **WHEN** a migration version is already recorded
+- **THEN** the server does not apply that migration again
 
-### Requirement: Registro duradero del trabajo
-El servidor SHALL guardar para cada trabajo su identificador, rutas de origen y destino y tamaños, y SHALL mantener su historial de eventos asociado.
+#### Scenario: Migration fails
+- **WHEN** a pending migration fails
+- **THEN** database initialization fails and the server does not start its scheduler and API
 
-#### Scenario: Trabajo nuevo
-- **WHEN** se incorpora un archivo elegible que no existe en la base de datos
-- **THEN** se guarda el trabajo y su primer evento `Job/queued`
+### Requirement: Durable job record
+The server SHALL store each job's UUID, relative source and destination paths, source size, destination size, and associated event history.
 
-#### Scenario: Consulta interna por identificador
-- **WHEN** el servidor consulta un trabajo existente por UUID
-- **THEN** recupera sus datos, historial y estado más reciente
+#### Scenario: Eligible new source
+- **WHEN** an eligible source has no existing job
+- **THEN** the server stores its job record and initial `Job/queued` event
 
-### Requirement: Estado proyectado
-El servidor SHALL actualizar el estado actual de cada trabajo a partir de las notificaciones insertadas para permitir seleccionar trabajos por fase y estado.
+#### Scenario: Completed output
+- **WHEN** completion processing finds the encoded destination
+- **THEN** the persisted destination size reflects that file
 
-#### Scenario: Asignación registrada
-- **WHEN** se inserta un evento `Job/assigned`
-- **THEN** el estado proyectado del trabajo refleja la asignación
+### Requirement: Query job history and status
+Internal server operations SHALL be able to load a job by UUID or source path with its ordered events and latest status, and SHALL be able to select jobs by current phase and state.
 
-#### Scenario: Finalización registrada
-- **WHEN** se inserta un evento `Job/completed`
-- **THEN** el estado proyectado refleja la finalización
+#### Scenario: Existing UUID
+- **WHEN** the server loads a persisted job by UUID
+- **THEN** it obtains the job data, event history, and latest projected status
 
-### Requirement: Presencia y progreso de workers
-El servidor SHALL actualizar el último contacto y dirección de un worker por su nombre, y SHALL conservar el progreso activo de cada fase hasta recibir un estado final o limpiarlo por antigüedad.
+#### Scenario: Queued selection
+- **WHEN** the dispatcher selects the next queued job
+- **THEN** it uses the persisted current status to find an eligible job
 
-#### Scenario: Presencia repetida
-- **WHEN** un worker existente envía otro `Ping`
-- **THEN** se actualizan su dirección y fecha de último contacto
+### Requirement: Project current job status
+Each accepted notification SHALL update the job's current projected status so that scheduling and monitoring can use the latest phase, status, message, worker, and event time.
 
-#### Scenario: Progreso de una fase
-- **WHEN** se recibe un progreso activo
-- **THEN** quedan disponibles su porcentaje, ETA, worker y fecha de actualización en el almacenamiento de progreso
+#### Scenario: Assignment recorded
+- **WHEN** a `Job/assigned` event is inserted
+- **THEN** the current projection identifies the assigned worker and state
+
+#### Scenario: Failure recorded
+- **WHEN** a `Job/failed` event is inserted
+- **THEN** the current projection contains the failure state and message
+
+### Requirement: Worker presence and temporary progress
+The server SHALL update a worker's address and last-seen time by worker name. It SHALL retain active phase progress with percentage, ETA, worker, and update time until a final state or maintenance cleanup removes it.
+
+#### Scenario: Repeated presence
+- **WHEN** an existing worker sends another `Ping`
+- **THEN** its address and last-seen time are updated
+
+#### Scenario: Active phase progress
+- **WHEN** a progressing event arrives
+- **THEN** its current value is available in progress storage

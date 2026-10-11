@@ -1,58 +1,73 @@
-# Eventos y progreso
+# Events and progress
 
 ## Purpose
 
-Define el intercambio de eventos entre workers y servidor, el historial del ciclo de vida de los trabajos y los datos temporales de progreso.
+Define the worker-to-server event protocol, durable job history, finalization behavior, and temporary progress reporting.
 
 ## Requirements
 
-### Requirement: Publicación de eventos
-La API SHALL recibir `POST /api/v1/event` con un sobre `eventType` y `eventData`, y SHALL reconocer eventos `Ping`, `Notification` y `Progress`.
+### Requirement: Event envelope
+The server SHALL accept `POST /api/v1/event` containing `eventType` and `eventData`. It SHALL recognize `Ping`, `Notification`, and `Progress` event types, and SHALL reject an unknown event type.
 
-#### Scenario: Presencia del worker
-- **WHEN** se recibe un evento `Ping` válido
-- **THEN** se registra o actualiza la presencia del worker y la API responde HTTP 200
+#### Scenario: Valid presence event
+- **WHEN** a valid `Ping` event is submitted
+- **THEN** the worker's presence is updated and the API returns HTTP 200
 
-#### Scenario: Tipo desconocido
-- **WHEN** se recibe un tipo de evento distinto de los admitidos
-- **THEN** el servidor rechaza el evento con un error
+#### Scenario: Unknown event type
+- **WHEN** an event type other than the three recognized values is submitted
+- **THEN** the API returns an error
 
-### Requirement: Historial secuencial de notificaciones
-Cada notificación de un trabajo SHALL conservar su tipo de fase, estado, worker, mensaje y número de evento. El servidor SHALL aceptar un número de evento únicamente cuando siga al último número guardado para ese trabajo.
+### Requirement: Sequential notification history
+A job notification SHALL carry a phase type, status, worker name, message, and integer `eventID`. The server SHALL store it only when its `eventID` immediately follows the last stored event for that job.
 
-#### Scenario: Siguiente notificación
-- **WHEN** llega una notificación con `eventID` inmediatamente posterior al último del trabajo
-- **THEN** el servidor la guarda y actualiza el estado proyectado del trabajo
+#### Scenario: Next notification
+- **WHEN** a notification uses the next expected event number
+- **THEN** the server stores it and updates the job's current status projection
 
-#### Scenario: Número fuera de secuencia
-- **WHEN** llega una notificación con un `eventID` repetido o saltado
-- **THEN** el servidor devuelve un error y no la añade al historial
+#### Scenario: Duplicate or skipped number
+- **WHEN** a notification repeats an event number or skips ahead
+- **THEN** the server rejects it without appending it to the history
 
-### Requirement: Finalización del trabajo
-Al recibir una notificación `Job/completed`, el servidor SHALL leer el archivo de destino, actualizar su tamaño persistido y, si está configurado, eliminar el archivo de origen.
+### Requirement: Phase and job status reporting
+The worker SHALL report `started` and `completed` notifications for each executed phase. A failed action SHALL generate a failed phase notification and a `Job/failed` notification containing the error.
 
-#### Scenario: Archivo de destino presente
-- **WHEN** el worker notifica `Job/completed` y el destino existe
-- **THEN** el tamaño del destino queda registrado en el trabajo
+#### Scenario: Encoding phase succeeds
+- **WHEN** the FFmpeg action completes
+- **THEN** the worker reports `FFMPEG/completed` and advances to output verification
 
-#### Scenario: Eliminación habilitada
-- **WHEN** `deleteOnComplete` está activado y el destino existe
-- **THEN** el servidor intenta eliminar el archivo de origen tras registrar el tamaño del destino
+#### Scenario: Encoding phase fails
+- **WHEN** the FFmpeg action fails
+- **THEN** the worker reports `FFMPEG/failed` and `Job/failed`, then cleans the job workspace
 
-### Requirement: Progreso temporal
-El servidor SHALL guardar los eventos `Progress` con estado `progressing` por identificador de progreso y tipo de fase, y SHALL retirar esa entrada al recibir un estado final.
+### Requirement: Finalize a completed job
+On `Job/completed`, the server SHALL inspect the destination file, persist its size, and attempt to remove the source if `deleteOnComplete` is enabled.
 
-#### Scenario: Progreso en curso
-- **WHEN** llega `Progress/progressing` con porcentaje y ETA
-- **THEN** la entrada de progreso se inserta o actualiza
+#### Scenario: Destination exists
+- **WHEN** the worker reports `Job/completed` and the destination exists
+- **THEN** the destination size is recorded for the job
 
-#### Scenario: Progreso terminado
-- **WHEN** llega `Progress/done` o `Progress/failure`
-- **THEN** la entrada de progreso correspondiente se elimina
+#### Scenario: Source deletion enabled
+- **WHEN** `deleteOnComplete` is enabled after a destination is found
+- **THEN** the server attempts to remove the source file
 
-### Requirement: Notificación de fallos de fase
-El worker SHALL publicar el fallo de la fase y un fallo de trabajo cuando una acción de la cadena falla, y SHALL limpiar su espacio temporal del trabajo.
+### Requirement: Temporary progress
+A `Progress` event in state `progressing` SHALL create or update a progress entry keyed by progress ID and phase. A `done` or `failure` state SHALL remove that entry.
 
-#### Scenario: Error de codificación
-- **WHEN** falla la acción de codificación
-- **THEN** el worker publica `FFMPEG/failed`, publica `Job/failed` con el error y limpia el contexto temporal
+#### Scenario: Phase in progress
+- **WHEN** the server receives a progressing event with percentage and ETA
+- **THEN** it stores the current progress value and update time
+
+#### Scenario: Phase ends
+- **WHEN** the server receives a done or failure event for that progress ID and phase
+- **THEN** the active progress entry is removed
+
+### Requirement: Worker progress frequency
+The worker SHALL update its local console during actions and SHALL publish server progress no more often than approximately every 15 seconds while a phase progresses, with a final done or failure event when the action ends.
+
+#### Scenario: Frequent local updates
+- **WHEN** an action emits multiple local updates within 15 seconds
+- **THEN** the worker does not publish a server progress event for every update
+
+#### Scenario: Action ends
+- **WHEN** the tracked action completes or fails
+- **THEN** the worker publishes a final progress state

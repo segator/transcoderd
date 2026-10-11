@@ -1,51 +1,77 @@
-# Configuración y ejecución
+# Configuration and runtime
 
 ## Purpose
 
-Define cómo arrancan el servidor y los workers, cómo reciben su configuración y qué servicios necesitan para prestar el servicio de transcodificación.
+Define how the server and worker receive configuration, start their dependencies, expose control access, and shut down. The full setting inventory and FFmpeg mapping are in `openspec/CONFIGURATION.md`.
 
 ## Requirements
 
-### Requirement: Configuración de los procesos
-Cada binario SHALL aceptar opciones de línea de comandos y un archivo YAML de configuración, con valores predeterminados para las opciones registradas. SHALL permitir variables de entorno con el prefijo `TR_`.
+### Requirement: Configuration inputs
+Both binaries SHALL accept registered CLI flags and YAML configuration, and SHALL enable environment lookup with the `TR_` prefix. A supplied CLI flag SHALL override the corresponding file value.
 
-#### Scenario: Arranque sin archivo YAML
-- **WHEN** no existe un archivo de configuración en las rutas de búsqueda
-- **THEN** el proceso continúa con los valores de las opciones registradas y registra un aviso
+#### Scenario: No configuration file
+- **WHEN** no configuration file exists in the searched paths
+- **THEN** the process logs a warning and continues with registered defaults
 
-#### Scenario: Opciones explícitas
-- **WHEN** se proporciona una opción de línea de comandos para una clave configurada
-- **THEN** el proceso utiliza ese valor para la clave
+#### Scenario: CLI override
+- **WHEN** a registered CLI flag and YAML specify different values for the same key
+- **THEN** the value supplied on the command line is used
 
-### Requirement: Arranque del servidor
-El servidor SHALL inicializar la base de datos antes de poner en marcha el planificador y la API HTTP. La ruta raíz de los archivos fuente SHALL ser absoluta.
+### Requirement: Shared web configuration
+The server SHALL listen on `web.port`, which defaults to `8080`. Workers SHALL use `web.domain`, which defaults to `http://localhost:8080`, as the base URL for server requests. Control requests SHALL use the configured `web.token`, whose registered default is `admin`.
 
-#### Scenario: Base de datos no inicializable
-- **WHEN** la inicialización de PostgreSQL falla
-- **THEN** el servidor no inicia el planificador ni la API HTTP
+#### Scenario: Custom server port
+- **WHEN** `web.port` is configured to a different port
+- **THEN** the server listens on that port
 
-#### Scenario: Servicios inicializados
-- **WHEN** la configuración y la base de datos son válidas
-- **THEN** el servidor inicia el planificador y escucha en el puerto HTTP configurado
+#### Scenario: Worker base URL
+- **WHEN** `web.domain` points to a remote server
+- **THEN** the worker sends job and event requests to that base URL
 
-### Requirement: Arranque del worker
-El worker SHALL identificarse ante el servidor mediante un evento inicial antes de aceptar trabajos y SHALL crear un espacio temporal propio basado en su nombre.
+### Requirement: Bearer protection for control routes
+The server SHALL require `Authorization: Bearer <web.token>` on job creation, job cancellation, job requests, and worker events.
 
-#### Scenario: Servidor inaccesible al inicio
-- **WHEN** falla el primer evento de presencia del worker
-- **THEN** el worker no inicia la coordinación de trabajos
+#### Scenario: Missing or incorrect token
+- **WHEN** one of the four control routes receives no bearer token or a different token
+- **THEN** the API returns HTTP 401
 
-#### Scenario: Arranque correcto
-- **WHEN** el primer evento de presencia se acepta
-- **THEN** el worker prepara su espacio temporal, sus ejecutores y la coordinación con el servidor
+#### Scenario: Matching token
+- **WHEN** a control route receives the configured bearer token
+- **THEN** the request reaches that route's handler
 
-### Requirement: Parada por señal
-Ambos procesos SHALL responder a las señales de terminación deteniendo sus servicios asociados.
+### Requirement: Server startup dependencies
+The server SHALL require an absolute `server.scheduler.sourcePath` and SHALL initialize PostgreSQL before starting the scheduler and HTTP API. The registered defaults for `sourcePath`, `scheduleTime`, `jobTimeout`, and `minFileSize` SHALL be `/data/current`, `5m`, `24h`, and 100,000,000 bytes.
 
-#### Scenario: Señal de terminación del servidor
-- **WHEN** el servidor recibe una señal de terminación
-- **THEN** cancela su contexto de ejecución y solicita el cierre de la API HTTP y del planificador
+#### Scenario: Relative media root
+- **WHEN** the configured source root is relative
+- **THEN** server startup fails before the HTTP API starts
 
-#### Scenario: Señal de terminación del worker
-- **WHEN** el worker recibe una señal de terminación
-- **THEN** cancela la coordinación y detiene los ejecutores y la consola
+#### Scenario: Database initialization failure
+- **WHEN** PostgreSQL initialization fails
+- **THEN** the scheduler and HTTP API do not start
+
+#### Scenario: Successful startup
+- **WHEN** the media root is absolute and database initialization succeeds
+- **THEN** the scheduler starts and the API begins listening
+
+### Requirement: Worker startup dependencies
+The worker SHALL send an initial presence event before accepting jobs and SHALL create a workspace under `worker.temporalPath` named for `worker.name`. The registered defaults SHALL be the OS temporary directory and the host name.
+
+#### Scenario: Initial presence fails
+- **WHEN** the initial presence event cannot be published
+- **THEN** job coordination does not start
+
+#### Scenario: Initial presence succeeds
+- **WHEN** the initial presence event succeeds
+- **THEN** the worker prepares its workspace, execution pipeline, and server coordinator
+
+### Requirement: Shutdown signals
+Both processes SHALL respond to interruption or termination by canceling their service context and stopping their active services.
+
+#### Scenario: Server termination
+- **WHEN** the server receives a termination signal
+- **THEN** it cancels scheduling and requests graceful HTTP shutdown
+
+#### Scenario: Worker termination
+- **WHEN** the worker receives a termination signal
+- **THEN** it stops coordination, step executors, and console rendering

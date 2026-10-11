@@ -1,10 +1,13 @@
-# Línea base de OpenSpec
+# OpenSpec baseline
 
-Estas specs describen el comportamiento observable de la versión revisada del repositorio. Se incorporaron directamente a `openspec/specs/` como inventario inicial; no representan una propuesta de funcionalidad nueva. Cada requisito tiene al menos un escenario verificable. Las correcciones futuras deben usar deltas en `openspec/changes/` y sincronizarse al archivar.
+These main specs inventory the behavior of the reviewed repository. They were added directly under `openspec/specs/` because this is the initial description of the existing system, not a proposal to ship new functionality. Future behavior changes belong in `openspec/changes/` as delta specs and must be synchronized when archived.
 
-| Capacidad | Fuente principal |
+The specs state observable behavior and the configuration values that affect it. [`CONFIGURATION.md`](CONFIGURATION.md) gives the full current settings reference and example worker YAML. [`PROTOCOL.md`](PROTOCOL.md) documents HTTP routes and wire payloads. Exact command construction and internal control flow remain in the source code.
+
+| Capability | Primary evidence |
 | --- | --- |
 | `configuration-and-runtime` | `cmd/`, `server/main.go`, `worker/main.go`, `server/config/`, `worker/config/` |
+| `distribution` | `Makefile`, `Dockerfile`, `version/`, `.github/workflows/` |
 | `job-intake` | `server/web/web.go`, `server/scheduler/scheduler.go`, `model/model.go` |
 | `job-dispatch` | `server/scheduler/scheduler.go`, `worker/worker/coordinator.go`, `worker/worker/executor.go` |
 | `events-and-progress` | `server/scheduler/scheduler.go`, `server/repository/repository.go`, `worker/worker/progress.go` |
@@ -14,19 +17,22 @@ Estas specs describen el comportamiento observable de la versión revisada del r
 | `persistence` | `server/repository/repository.go`, `server/repository/resources/database/` |
 | `maintenance-and-recovery` | `server/scheduler/scheduler.go`, `worker/job/job.go`, `worker/worker/executor.go` |
 | `self-update` | `update/update.go`, `server/web/web.go`, `worker/worker/coordinator.go` |
-| `distribution` | `Makefile`, `Dockerfile`, `version/`, `.github/workflows/` |
 
-## Desviaciones conocidas
+## Known implementation gaps
 
-Estas observaciones no se convierten en requisitos normativos. Son puntos a corregir o aclarar mediante cambios posteriores, con pruebas específicas:
+These observations are not normative requirements. They need separate fixes or explicit product decisions, each with a regression test:
 
-- `CancelJob` añade `Job/canceled` a trabajos `assigned` o `started`, pero después devuelve un error de estado desconocido; la API puede responder HTTP 500 pese a haber registrado la cancelación. Los trabajos `queued` tampoco se cancelan por esta ruta.
-- Las rutas de descarga, checksum y subida no usan el middleware de Bearer aplicado a las cuatro rutas de control. Descarga y subida comprueban `workerName` y asignación; checksum solo busca el UUID y la suma disponible.
-- Una subida inválida responde HTTP 400, pero el cierre diferido del stream renombra el archivo `.upload` al destino incluso tras el fallo; la limpieza puede eliminar el destino previo. No hay garantía de preservación del archivo anterior.
-- La fase de codificación no asigna `Target.Size` al contexto. La comparación de tamaños de `ffmpegVerifyStep.go` no verifica efectivamente si la salida creció.
-- Cuando se configura una ventana `startAfter`/`stopAfter`, `AcceptJobs` decide por horario y deja de aplicar el límite ordinario de dos trabajos activos.
-- `skipped` figura en la respuesta de incorporación, pero el planificador actual clasifica los archivos no elegibles en `failed`; no produce `ErrorFileSkipped` en este flujo.
+- `CancelJob` appends `Job/canceled` for assigned or started jobs, then returns an unknown-state error. The API can answer HTTP 500 despite recording cancellation. Queued jobs are not canceled through that route.
+- Download, checksum, and upload routes do not use the bearer middleware used by the four control routes. Download and upload check `workerName` against the assignment; checksum only looks up the UUID and a published checksum.
+- An invalid upload returns HTTP 400, but deferred stream close still renames the `.upload` file to the destination. Cleanup can remove the previous destination. The old file is not guaranteed to be preserved.
+- The encoding phase does not set `Target.Size` in the job context. The output-size comparison in `ffmpegVerifyStep.go` therefore does not effectively reject a larger output.
+- The registered `worker.threads` flag is never wired to `worker.ffmpegConfig.threads`, which supplies FFmpeg's `-threads` option. Without the nested setting, the current invocation uses `-threads 0`.
+- When `startAfter` or `stopAfter` defines a time window, `AcceptJobs` decides by the window and no longer applies the ordinary two-active-job limit.
+- The intake response includes `skipped`, but the current scheduler classifies ineligible files under `failed`; this path does not produce `ErrorFileSkipped`.
+- Several entries in the accepted-extension list include trailing spaces, so ordinary `.mov`, `.ogx`, `.asf`, and `.vob` files fail the extension check; matching is also case-sensitive.
+- Job intake joins the submitted `sourcePath` with the media root but does not reject traversal segments or verify that the resolved path remains inside the root.
+- Viper enables a `TR_` environment prefix, but does not configure a nested-key replacer. The `envconfig` struct tags are not read by the Viper setup, so nested environment-variable spellings are not a verified interface.
 
-## Comprobación
+## Verification boundary
 
-La estructura de esta línea base se valida con `openspec validate --all --strict`. Los tests unitarios cubren partes del planificador, análisis de medios, contexto y pasos; las pruebas de integración con PostgreSQL y el E2E Docker están bajo el tag `integration`. La validación estructural no prueba por sí sola el comportamiento del sistema: cada modificación futura requiere pruebas correspondientes al escenario afectado.
+`openspec validate --all --strict` checks document structure. Go unit tests cover parts of scheduling, media inspection, context persistence, and steps. PostgreSQL integration tests and Docker end-to-end tests use the `integration` build tag. Structural validation does not prove behavior; each future code change needs tests for the scenarios it affects.

@@ -1,21 +1,23 @@
 schema: spec-driven
 
 context: |
-  TranscoderD es un sistema distribuido de transcodificación con servidor, workers y PostgreSQL.
-  El módulo Go es transcoder y la versión requerida es Go 1.25.
-  openspec/specs/ documenta las capacidades existentes; openspec/BASELINE.md registra el alcance y las desviaciones conocidas.
-  Escribe los artefactos en español. Conserva los encabezados estructurales de OpenSpec y los verbos normativos SHALL/MUST en inglés.
+  TranscoderD is a distributed video transcoding system with server, workers, and PostgreSQL.
+  Its Go module is transcoder and it requires Go 1.25.
+  openspec/specs/ describes current behavior; openspec/BASELINE.md records scope and known gaps.
+  openspec/CONFIGURATION.md and openspec/PROTOCOL.md provide the current settings and HTTP reference.
+  Write all OpenSpec artifacts in English and retain the structural headings and SHALL/MUST terminology.
 rules:
   specs:
-    - Describe comportamiento observable y escenarios contrastables con el código; no conviertas errores conocidos en requisitos deseados.
-    - Cuando cambie una capacidad, conserva su ruta exacta en openspec/specs/.
+    - Describe observable behavior with scenarios supported by code or tests; do not turn known bugs into desired requirements.
+    - Include configuration defaults and their output effects when they form part of a capability's contract.
+    - Preserve the exact capability path under openspec/specs/ when changing an existing capability.
   tasks:
-    - Incluye pruebas para el comportamiento modificado y validación estricta de OpenSpec.
+    - Include tests for changed behavior and strict OpenSpec validation.
 operations:
   apply:
     guidance:
-      - Actualiza la delta spec si la implementación cambia el contrato observado.
-      - Ejecuta las pruebas Go relevantes y openspec validate --all --strict antes de cerrar el cambio.
+      - Update the delta spec if implementation changes the observable contract.
+      - Run relevant Go tests and openspec validate --all --strict before completing the change.
   archive:
     guidance:
-      - Comprueba que la spec principal represente el comportamiento entregado.
+      - Confirm the main specs describe the behavior actually delivered.

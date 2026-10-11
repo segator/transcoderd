@@ -7,9 +7,9 @@ Module name: `transcoder`. License: GPLv3.
 
 ## OpenSpec
 
-- The current behavior contract lives in [`openspec/specs/`](openspec/specs/). Read the relevant capability before changing observable behavior. [`openspec/BASELINE.md`](openspec/BASELINE.md) maps capabilities to code and records known implementation gaps.
+- The current behavior contract lives in [`openspec/specs/`](openspec/specs/). Read the relevant capability before changing observable behavior. [`openspec/BASELINE.md`](openspec/BASELINE.md) maps capabilities to code and records known implementation gaps. [`openspec/CONFIGURATION.md`](openspec/CONFIGURATION.md) and [`openspec/PROTOCOL.md`](openspec/PROTOCOL.md) give the current settings and HTTP wire format.
 - Use the generated OpenSpec skills in `.agents/skills/` for changes: explore or propose, review the proposal and delta specs, apply, check the result against the specs, then archive. Keep active deltas in `openspec/changes/<change>/specs/`; archive completed changes so `openspec/specs/` reflects the shipped behavior.
-- Add or modify a requirement only for an observable contract change. Keep implementation details in design/tasks or code, and preserve each capability's existing path. Write artifacts in Spanish, retaining OpenSpec headings and `SHALL`/`MUST` markers.
+- Add or modify a requirement only for an observable contract change. Document configuration defaults and output effects in the relevant spec; keep exact command construction and internal control flow in design/tasks or reference docs. Preserve each capability's existing path. Write all OpenSpec artifacts in English, retaining the `SHALL`/`MUST` markers.
 - When implementation and a spec disagree, investigate the code and tests, record the discrepancy in `openspec/BASELINE.md`, and resolve it through a change. Do not silently rewrite a spec to hide a regression.
 - Validate spec changes with `openspec validate --all --strict` (or `npx -y @fission-ai/openspec@latest validate --all --strict` when the CLI is not installed). Run relevant Go tests as well.
 

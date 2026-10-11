@@ -2,8 +2,16 @@
 
 ## Project Overview
 
-TranscoderD is a distributed video transcoding system (server/worker architecture) written in **Go 1.24**.
+TranscoderD is a distributed video transcoding system (server/worker architecture) written in **Go 1.25**.
 Module name: `transcoder`. License: GPLv3.
+
+## OpenSpec
+
+- The current behavior contract lives in [`openspec/specs/`](openspec/specs/). Read the relevant capability before changing observable behavior. [`openspec/BASELINE.md`](openspec/BASELINE.md) maps capabilities to code and records known implementation gaps. [`openspec/CONFIGURATION.md`](openspec/CONFIGURATION.md) and [`openspec/PROTOCOL.md`](openspec/PROTOCOL.md) give the current settings and HTTP wire format.
+- Use the generated OpenSpec skills in `.agents/skills/` for changes: explore or propose, review the proposal and delta specs, apply, check the result against the specs, then archive. Keep active deltas in `openspec/changes/<change>/specs/`; archive completed changes so `openspec/specs/` reflects the shipped behavior.
+- Add or modify a requirement only for an observable contract change. Document configuration defaults and output effects in the relevant spec; keep exact command construction and internal control flow in design/tasks or reference docs. Preserve each capability's existing path. Write all OpenSpec artifacts in English, retaining the `SHALL`/`MUST` markers.
+- When implementation and a spec disagree, investigate the code and tests, record the discrepancy in `openspec/BASELINE.md`, and resolve it through a change. Do not silently rewrite a spec to hide a regression.
+- Validate spec changes with `openspec validate --all --strict` (or `npx -y @fission-ai/openspec@latest validate --all --strict` when the CLI is not installed). Run relevant Go tests as well.
 
 ## Build & Run Commands
 
@@ -23,6 +31,7 @@ make test               # Unit tests with coverage
 make test-race          # Unit tests with race detector
 make test-short         # Unit tests in short mode
 make test-integration   # Integration tests (requires Docker for testcontainers)
+make test-e2e           # Docker end-to-end test (requires built images)
 make test-all           # Unit + integration tests
 
 # Run a single test by name
@@ -37,10 +46,10 @@ go test -tags=integration -v -timeout 5m ./integration/...
 
 ## CI Pipeline
 
-- **Lint**: `golangci-lint` via `.github/workflows/lint.yml` (Go 1.24)
-- **Build+Test**: `devbox run -- make test && devbox run -- make build` via `.github/workflows/main.yml`
+- **Lint**: `golangci-lint` via `.github/workflows/lint.yml` (Go 1.25)
+- **Build+Test+E2E**: `devbox run -- make test`, `devbox run -- make build`, and `devbox run -- make test-e2e` via `.github/workflows/main.yml` (E2E requires Docker images)
 - **Release**: Release Please (conventional commits) on push to `main`
-- Dev environment managed by **Devbox** (Nix): `go@1.24.5`, `golangci-lint@latest`
+- Dev environment managed by **Devbox** (Nix): `go@1.25.0`, `golangci-lint@latest`
 
 ## Code Style Guidelines
 
@@ -172,5 +181,5 @@ Binaries are built with ldflags injecting version info:
 
 ### Docker
 
-Multi-stage Dockerfile: `builder-ffmpeg` → `base` (debian) → `server` / `worker` targets.
+Multi-stage Dockerfile: `builder-ffmpeg` and `builder-pgs` provide binaries and OCR assets; `base` (Debian) feeds the `server` and `worker` targets.
 Images published to `ghcr.io/segator/transcoderd:{server,worker}-{version}`.

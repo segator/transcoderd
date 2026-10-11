@@ -1,0 +1,21 @@
+schema: spec-driven
+
+context: |
+  TranscoderD es un sistema distribuido de transcodificación con servidor, workers y PostgreSQL.
+  El módulo Go es transcoder y la versión requerida es Go 1.25.
+  openspec/specs/ documenta las capacidades existentes; openspec/BASELINE.md registra el alcance y las desviaciones conocidas.
+  Escribe los artefactos en español. Conserva los encabezados estructurales de OpenSpec y los verbos normativos SHALL/MUST en inglés.
+rules:
+  specs:
+    - Describe comportamiento observable y escenarios contrastables con el código; no conviertas errores conocidos en requisitos deseados.
+    - Cuando cambie una capacidad, conserva su ruta exacta en openspec/specs/.
+  tasks:
+    - Incluye pruebas para el comportamiento modificado y validación estricta de OpenSpec.
+operations:
+  apply:
+    guidance:
+      - Actualiza la delta spec si la implementación cambia el contrato observado.
+      - Ejecuta las pruebas Go relevantes y openspec validate --all --strict antes de cerrar el cambio.
+  archive:
+    guidance:
+      - Comprueba que la spec principal represente el comportamiento entregado.

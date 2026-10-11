@@ -34,6 +34,28 @@ Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDelta
 
 The four control routes (`POST /api/v1/job/`, `DELETE /api/v1/job/{jobid}`, `GET /api/v1/job/request`, and `POST /api/v1/event`) check `Authorization: Bearer <web.token>`. The media routes do not use that middleware; see `BASELINE.md`.
 
+### Example server YAML
+
+```yaml
+web:
+  port: 8080
+  token: replace-this-token
+server:
+  database:
+    driver: postgres
+    host: postgres
+    port: 5432
+    user: transcoder
+    password: replace-this-password
+    scheme: transcoderd
+  scheduler:
+    sourcePath: /media
+    scheduleTime: 5m
+    jobTimeout: 24h
+    minFileSize: 100000000
+    deleteOnComplete: false
+```
+
 ## Worker and FFmpeg settings
 
 | Key | Registered default | Effect |
@@ -57,6 +79,27 @@ The four control routes (`POST /api/v1/job/`, `DELETE /api/v1/job/{jobid}`, `GET
 `worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered in `worker/main.go` but not copied to the latter. With no nested `threads` value, the current command asks FFmpeg for `-threads 0`. This is an observed wiring gap, not a deliberate policy that agents should preserve.
 
 The FFmpeg command maps the first video stream, uses `yuv420p10le`, scales width to `min(1920, input width)` while preserving aspect ratio, and writes an `-encoded.mkv` file. It maps one selected audio stream per language, choosing channel count first and bit rate second. It disables chapter copying. `extraArgs` is included before input arguments, so the meaning of an option depends on FFmpeg's option-placement rules.
+
+### Current FFmpeg invocation
+
+The command below is a schematic transcription of `worker/step/ffmpegStep.go`, with paths and stream indices left as placeholders. It is an implementation reference; the requirements in `specs/media-encoding/` describe the behavior that must remain stable.
+
+```text
+ffmpeg -fflags +genpts -nostats <extraArgs> -progress pipe:1 -hide_banner \
+  -threads <ffmpegConfig.threads> -analyzeduration 2147483647 -probesize 2147483647 \
+  -i <downloaded-source> [-i <converted-subtitle.srt> ...] \
+  -max_muxing_queue_size 9999 \
+  -map 0:<video-stream> -avoid_negative_ts make_zero -copyts -map_chapters -1 \
+  -flags +global_header \
+  -filter:v "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease" \
+  -pix_fmt yuv420p10le -c:v <videoCodec> -crf <videoCRF> \
+  -profile:v <videoProfile> -preset <videoPreset> \
+  [-map 0:<audio-stream> -metadata:s:a:<index> "title=<language> (<layout>)" \
+    -c:a:<index> <audioCodec> -vbr <audioVBR> ...] \
+  [subtitle mappings and dispositions] <workspace>/<source-stem>-encoded.mkv -y
+```
+
+The output is probed again and hashed with SHA-256. Duration verification uses `worker.verifyDeltaTime` before upload. The code also attempts an output-size check, but currently does not populate the target size; see `BASELINE.md`.
 
 ### Example worker YAML
 

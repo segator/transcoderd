@@ -115,26 +115,43 @@ make fmt                # Run go fmt
 
 ### Docker
 
+The server and worker images reuse a published FFmpeg builder image; the worker
+also reuses a PGS builder image. The default FFmpeg builder tag is
+`builder-ffmpeg-9.0.2-av1`; it contains FFmpeg 9.0.2
+with `libsvtav1`, `libaom-av1`, and `av1_nvenc`. The worker still defaults to
+HEVC (`libx265`). AV1 job settings and production quality/throughput tuning are
+separate work.
+
 ```bash
+make build-builder-ffmpeg   # Compile the FFmpeg builder and load it locally
 make buildcontainer-server   # Build server Docker image (loads locally)
 make buildcontainer-worker   # Build worker Docker image (loads locally)
 make publishcontainer-server # Build and push server image to registry
 make publishcontainer-worker # Build and push worker image to registry
 ```
 
-Cache images for FFmpeg and PGS builder stages (avoids ~50min FFmpeg rebuilds):
+The FFmpeg builder uses the pinned upstream build script with CUDA development
+tools; compiling it locally does not require a GPU. It defaults to four parallel
+jobs; set `FFMPEG_BUILD_JOBS=6` or another value to match available memory. To
+publish builder images after verifying them:
 
 ```bash
-make buildcache              # Build and push all cache images
-make buildcache-ffmpeg       # Build and push FFmpeg cache image only
-make buildcache-pgs          # Build and push PGS cache image only
+make publish-builder-ffmpeg
+make publish-builder-pgs
 ```
+
+Running `av1_nvenc` also requires a compatible NVIDIA GPU and driver exposed
+to the worker container. On a Docker host configured with the NVIDIA Container
+Toolkit, use `--gpus all`. The worker image has also been tested on an RTX 5080
+under WSL2 using direct device and driver mounts. See
+[AV1/NVENC validation](docs/av1-nvenc-validation.md) for the exact command,
+results, and limits of the preliminary quality comparison.
 
 ### CI Pipeline
 
 - **Lint**: runs `golangci-lint` on every push and PR
-- **Build + Test**: runs `make test` and `make buildgo` on every push and PR
-- **Docker Publish**: builds and pushes Docker images on pushes to `main` only (PRs skip Docker)
+- **Build + Test + E2E**: runs Go tests, builds both Docker images, and runs Docker E2E on pushes and PRs
+- **Docker Publish**: pushes server and worker images on `main`; a missing versioned builder is built and published once before the application build
 - **Release**: managed by [Release Please](https://github.com/googleapis/release-please) on `main` using conventional commits
 
 ### Project Structure

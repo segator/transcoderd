@@ -1,6 +1,5 @@
 GO ?= go
 GOFMT ?= $(GO)fmt
-FIRST_GOPATH := $(firstword $(subst :, ,$(shell $(GO) env GOPATH)))
 GOOPTS ?=
 GOOS ?= $(shell $(GO) env GOHOSTOS)
 GOARCH ?= $(shell $(GO) env GOHOSTARCH)
@@ -8,6 +7,9 @@ GIT_COMMIT_SHA := $(shell git rev-parse --short HEAD)
 GIT_BRANCH_NAME := $(shell git rev-parse --abbrev-ref HEAD | sed 's/[^a-zA-Z0-9._-]/-/g')
 BUILD_DATE := $(shell date +%Y-%m-%dT%H:%M:%SZ)
 IMAGE_NAME ?= ghcr.io/segator/transcoderd
+FFMPEG_BUILDER_TAG ?= builder-ffmpeg-9.0.2-av1
+FFMPEG_IMAGE ?= $(IMAGE_NAME):$(FFMPEG_BUILDER_TAG)
+FFMPEG_BUILD_JOBS ?= 4
 PROJECT_VERSION ?= $(shell cat version.txt)-dev
 CACHE ?= true
 
@@ -87,17 +89,29 @@ buildgo-%:
 		-o dist/transcoderd-$* $*/main.go
 
 # ---------------------------------------------------------------------------
-# Docker — pre-built builder images (FFmpeg ~50min, PGS ~5min)
+# Docker — pre-built builder images (FFmpeg is slow to compile, PGS ~5min)
 #
 # These are published once and reused by all CI builds via FROM in Dockerfile.
-# Rebuild only when FFmpeg version or PGS dependencies change:
+# Use a new FFmpeg tag when FFmpeg or its build dependencies change.
 #   make publish-builder-ffmpeg
 #   make publish-builder-pgs
 # ---------------------------------------------------------------------------
+.PHONY: print-ffmpeg-builder-image
+print-ffmpeg-builder-image:
+	@printf '%s\n' '$(FFMPEG_IMAGE)'
+
+.PHONY: build-builder-ffmpeg
+build-builder-ffmpeg: ## Compile and load the FFmpeg builder image locally
+	docker buildx build --load \
+		--build-arg FFMPEG_BUILD_JOBS=$(FFMPEG_BUILD_JOBS) \
+		-t $(FFMPEG_IMAGE) \
+		-f Dockerfile --target builder-ffmpeg .
+
 .PHONY: publish-builder-ffmpeg
-publish-builder-ffmpeg: ## Build & push FFmpeg builder image (~50min)
+publish-builder-ffmpeg: ## Build & push the versioned FFmpeg builder image
 	docker buildx build --push \
-		-t $(IMAGE_NAME):builder-ffmpeg \
+		--build-arg FFMPEG_BUILD_JOBS=$(FFMPEG_BUILD_JOBS) \
+		-t $(FFMPEG_IMAGE) \
 		-f Dockerfile --target builder-ffmpeg .
 
 .PHONY: publish-builder-pgs
@@ -115,6 +129,7 @@ publish-builder-pgs: ## Build & push PGS builder image (~5min)
 .PHONY: buildcontainer-%
 buildcontainer-%:
 	docker buildx build --load \
+		--build-arg FFMPEG_IMAGE=$(FFMPEG_IMAGE) \
 		$(if $(filter false,$(CACHE)),--no-cache,) \
 		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION) \
 		-t $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \
@@ -123,6 +138,7 @@ buildcontainer-%:
 .PHONY: publishcontainer-%
 publishcontainer-%:
 	docker buildx build --push \
+		--build-arg FFMPEG_IMAGE=$(FFMPEG_IMAGE) \
 		$(if $(filter false,$(CACHE)),--no-cache,) \
 		-t $(IMAGE_NAME):$*-$(PROJECT_VERSION) \
 		-t $(IMAGE_NAME):$*-$(GIT_BRANCH_NAME) \

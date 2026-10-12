@@ -150,22 +150,26 @@ screening tool; validate it with full-title conversions. Already efficient H.265
 sources may show little gain after a quality-preserving transcode and can be
 left untouched.
 
-For the RTX 5080's two encoders, separately measure one versus two independent
-NVENC jobs on long windows, including total wall time and per-job quality/bytes.
-Also test a GPU decode/scale pipeline against the CPU decode baseline where
-source formats and color conversion allow it. Keep these throughput experiments
-separate from the rate/quality sweep. NVIDIA's
-[NVENC programming guide](https://docs.nvidia.com/video-technologies/video-codec-sdk/13.1/nvenc-video-encoder-api-prog-guide/index.html)
-notes that split-frame encoding can trade quality for a single job's speed;
-multiple independent jobs can use aggregate encode capacity without changing
-the split-frame setting. Measure end-to-end elapsed time, not just encoder fps.
+For the RTX 5080, measure aggregate NVENC throughput with two independent
+encoding jobs. Split-frame encoding is out of scope: every NVENC run keeps
+`-split_encode_mode disabled`, and the lab does not compare split-frame modes.
+The driver schedules the independent sessions across the GPU's encoder
+resources; the lab does not pin a session to a particular physical encoder.
+Compare the same two long source windows encoded one after the other and then
+concurrently, recording total wall time and per-job output bytes while keeping
+the matched-quality settings fixed. Keep this throughput experiment separate
+from the rate/quality sweep. Also test a GPU
+decode/scale pipeline against the CPU decode baseline where source formats and
+color conversion allow it. Measure end-to-end elapsed time, not just encoder
+fps.
 
 Run the serial-versus-two-session comparison on two long representative files
 after selecting the matched-quality NVENC preset and CQ. It encodes the same
-two source windows first one at a time, then concurrently, recording the total
-wall time and checking output frame counts. Repeat three times on an otherwise
-idle machine; monitor thermals and GPU encoder utilization separately. This
-does not change the chosen quality setting.
+two source windows first one at a time, then as two independent FFmpeg/NVENC
+processes concurrently, recording total wall time and checking output frame
+counts. Split-frame remains disabled in both conditions. Repeat three times on
+an otherwise idle machine; monitor thermals and GPU encoder utilization
+separately. This does not change the chosen quality setting.
 
 ```bash
 python3 scripts/av1_lab.py throughput \

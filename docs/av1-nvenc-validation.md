@@ -75,16 +75,30 @@ To reproduce the comparison, extract the reference and run the encoders and
 VMAF filter with the same 192 frames:
 
 ```bash
+mkdir -p build
+cd build
+curl --fail --location \
+  https://download.blender.org/demo/movies/tears-of-steel_teaser.mp4.zip \
+  -o tears-of-steel_teaser.mp4.zip
+unzip tears-of-steel_teaser.mp4.zip
 ffmpeg -ss 10 -i tears-of-steel_teaser.mp4 -t 8 -an \
   -c:v ffv1 -level 3 reference.mkv
 ffmpeg -i reference.mkv -an -pix_fmt p010le -c:v av1_nvenc \
   -preset p7 -tune uhq -rc vbr -cq 20 -b:v 0 \
   -multipass fullres -bf 4 -b_ref_mode middle \
   -split_encode_mode disabled nvenc.mkv
+ffmpeg -i reference.mkv -an -pix_fmt p010le -c:v av1_nvenc \
+  -preset p5 -tune hq -rc vbr -cq 21 -b:v 0 \
+  -multipass fullres -bf 4 -b_ref_mode middle \
+  -split_encode_mode disabled nvenc-p5.mkv
 ffmpeg -i reference.mkv -an -pix_fmt yuv420p10le -c:v libsvtav1 \
   -preset 4 -crf 10 svt.mkv
 ffmpeg -i nvenc.mkv -i reference.mkv \
   -lavfi libvmaf=log_fmt=json:log_path=nvenc-vmaf.json -f null -
+ffmpeg -i nvenc-p5.mkv -i reference.mkv \
+  -lavfi libvmaf=log_fmt=json:log_path=nvenc-p5-vmaf.json -f null -
+ffmpeg -i svt.mkv -i reference.mkv \
+  -lavfi libvmaf=log_fmt=json:log_path=svt-vmaf.json -f null -
 ```
 
 Run the NVENC command inside a GPU-enabled worker container, as above, to test

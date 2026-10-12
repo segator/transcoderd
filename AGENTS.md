@@ -182,4 +182,5 @@ Binaries are built with ldflags injecting version info:
 ### Docker
 
 Multi-stage Dockerfile: `builder-ffmpeg` and `builder-pgs` provide binaries and OCR assets; `base` (Debian) feeds the `server` and `worker` targets.
+The FFmpeg builder uses a versioned GHCR tag selected by `FFMPEG_BUILDER_TAG` in the Makefile. Build it locally with `make build-builder-ffmpeg` and publish it with `make publish-builder-ffmpeg` after verification. The current builder compiles FFmpeg 9.0.2 with software AV1 and NVENC encoders, while the worker's default video settings still target HEVC. Keep `openspec/specs/distribution/` and the FFmpeg configuration reference in sync when changing this image.
 Images published to `ghcr.io/segator/transcoderd:{server,worker}-{version}`.

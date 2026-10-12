@@ -78,6 +78,8 @@ server:
 
 `worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered in `worker/main.go` but not copied to the latter. With no nested `threads` value, the current command asks FFmpeg for `-threads 0`. This is an observed wiring gap, not a deliberate policy that agents should preserve.
 
+The worker image bundles FFmpeg 9.0.2 with `libsvtav1`, `libaom-av1`, and `av1_nvenc` available for future AV1 experiments. The job pipeline still uses HEVC-oriented defaults (`libx265`, CRF `21`, profile `main10`, preset `medium`, and `yuv420p10le`). Setting `videoCodec` alone does not establish a validated AV1 mode; encoder-specific profiles, presets, quality settings, and GPU access need separate work.
+
 The FFmpeg command maps the first video stream, uses `yuv420p10le`, scales width to `min(1920, input width)` while preserving aspect ratio, and writes an `-encoded.mkv` file. It maps one selected audio stream per language, choosing channel count first and bit rate second. It disables chapter copying. `extraArgs` is included before input arguments, so the meaning of an option depends on FFmpeg's option-placement rules.
 
 ### Current FFmpeg invocation

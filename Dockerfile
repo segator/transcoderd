@@ -1,31 +1,40 @@
-# Pre-built builder images — pulled from the registry instead of rebuilding.
-# Override with --build-arg to rebuild from scratch (or use --target builder-ffmpeg).
-# To publish new builder images: make publish-builder-ffmpeg / make publish-builder-pgs
-ARG FFMPEG_IMAGE=ghcr.io/segator/transcoderd:builder-ffmpeg
+# Pre-built builder images are pulled from the registry. Build the versioned
+# FFmpeg builder locally with --target builder-ffmpeg before publishing it.
+ARG FFMPEG_IMAGE=ghcr.io/segator/transcoderd:builder-ffmpeg-9.0.2-av1
 ARG PGS_IMAGE=ghcr.io/segator/transcoderd:builder-pgs
 
 # =============================================================================
-# Stage: builder-ffmpeg
-# Compiles FFmpeg from source (~50min). Published as a standalone image so CI
-# never has to rebuild it. To rebuild: make publish-builder-ffmpeg
+# Stage: ffmpeg-compile
+# Compiles FFmpeg 9.0.2 with software AV1 encoders and NVIDIA NVENC support.
 # =============================================================================
-FROM ubuntu:noble-20251013 AS builder-ffmpeg
+FROM nvidia/cuda:13.3.1-devel-ubuntu24.04 AS ffmpeg-compile
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
     && apt-get -y --no-install-recommends install git build-essential curl ca-certificates libva-dev \
-        python3 python-is-python3 ninja-build meson \
+        python3 python-is-python3 ninja-build meson xz-utils file \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* \
     && update-ca-certificates
 
 WORKDIR /app
 
-ARG FFMPEG_BUILD_SCRIPT_VERSION=v1.59
+ARG FFMPEG_BUILD_SCRIPT_VERSION=v9.0.10
+ARG FFMPEG_BUILD_JOBS=4
 RUN git clone --depth 1 --branch ${FFMPEG_BUILD_SCRIPT_VERSION} https://github.com/markus-perl/ffmpeg-build-script.git && \
     cd ffmpeg-build-script && \
-    SKIPINSTALL=yes ./build-ffmpeg --build --enable-gpl-and-non-free && \
+    NUMJOBS=${FFMPEG_BUILD_JOBS} CUDA_COMPUTE_CAPABILITY=75 SKIPINSTALL=yes \
+        ./build-ffmpeg --build --enable-gpl-and-non-free && \
+    workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' libsvtav1 ' && \
+    workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' libaom-av1 ' && \
+    workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' av1_nvenc ' && \
+    workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' libx265 ' && \
+    workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' libfdk_aac ' && \
     rm -rf packages
+
+# Publish only the executables, not the CUDA development toolkit or source tree.
+FROM scratch AS builder-ffmpeg
+COPY --from=ffmpeg-compile /app/ffmpeg-build-script/workspace/bin/ff* /app/ffmpeg-build-script/workspace/bin/
 
 # =============================================================================
 # Stage: builder-pgs
@@ -70,7 +79,10 @@ COPY --from=ffmpeg-bins /app/ffmpeg-build-script/workspace/bin/ff* /usr/bin/
 
 RUN ldd /usr/bin/ffmpeg && \
     ldd /usr/bin/ffprobe && \
-    ldd /usr/bin/ffplay
+    ldd /usr/bin/ffplay && \
+    ffmpeg -version | head -n 1 | grep -Fq 'ffmpeg version 9.0.2' && \
+    ffmpeg -hide_banner -encoders | grep -Eq ' libsvtav1 ' && \
+    ffmpeg -hide_banner -encoders | grep -Eq ' av1_nvenc '
 
 # =============================================================================
 # Stage: server
@@ -86,6 +98,8 @@ FROM ${PGS_IMAGE} AS pgs-bins
 
 FROM base AS worker
 WORKDIR /app
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
 COPY --from=pgs-bins /src/tessdata /app/tessdata
 COPY --from=pgs-bins /src/PgsToSrt/out /app
 RUN apt-get update && \

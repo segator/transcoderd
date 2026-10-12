@@ -34,3 +34,10 @@ Publishing SHALL tag server and worker images with their role and requested vers
 #### Scenario: Versioned publish
 - **WHEN** both images are published for a version
 - **THEN** `server-<version>` and `worker-<version>` tags are available
+
+### Requirement: AV1-capable FFmpeg in the worker image
+The worker image SHALL bundle FFmpeg 9.0.2 with the `libsvtav1`, `libaom-av1`, and `av1_nvenc` video encoders available. It SHALL retain the `libx265` video and `libfdk_aac` audio encoders required by the current default job settings.
+
+#### Scenario: Inspect bundled FFmpeg
+- **WHEN** the worker image is built and its FFmpeg encoder list is inspected
+- **THEN** FFmpeg reports version 9.0.2 and lists `libsvtav1`, `libaom-av1`, `av1_nvenc`, `libx265`, and `libfdk_aac`

@@ -150,33 +150,13 @@ screening tool; validate it with full-title conversions. Already efficient H.265
 sources may show little gain after a quality-preserving transcode and can be
 left untouched.
 
-For the RTX 5080, measure aggregate NVENC throughput with two independent
-encoding jobs. Split-frame encoding is out of scope: every NVENC run keeps
-`-split_encode_mode disabled`, and the lab does not compare split-frame modes.
-The driver schedules the independent sessions across the GPU's encoder
-resources; the lab does not pin a session to a particular physical encoder.
-Compare the same two long source windows encoded one after the other and then
-concurrently, recording total wall time and per-job output bytes while keeping
-the matched-quality settings fixed. Keep this throughput experiment separate
-from the rate/quality sweep. Also test a GPU
-decode/scale pipeline against the CPU decode baseline where source formats and
-color conversion allow it. Measure end-to-end elapsed time, not just encoder
-fps.
-
-Run the serial-versus-two-session comparison on two long representative files
-after selecting the matched-quality NVENC preset and CQ. It encodes the same
-two source windows first one at a time, then as two independent FFmpeg/NVENC
-processes concurrently, recording total wall time and checking output frame
-counts. Split-frame remains disabled in both conditions. Repeat three times on
-an otherwise idle machine; monitor thermals and GPU encoder utilization
-separately. This does not change the chosen quality setting.
-
-```bash
-python3 scripts/av1_lab.py throughput \
-  --input benchmark-input/film.mkv --input benchmark-input/episode.mkv \
-  --ffmpeg build/ffmpeg9-av1 --profile nvenc-p7 --quality 22 \
-  --window 300 --repeats 3 --output build/av1-lab/throughput
-```
+All NVENC runs keep `-split_encode_mode disabled`; split-frame modes are not a
+test variable. Measure encode duration for each NVENC and SVT-AV1 run
+sequentially under the same conditions. This answers whether NVENC's quality
+and size trade-off is worthwhile for the library without adding multi-session
+throughput as a separate experiment. If source formats and color conversion
+allow it, a GPU decode/scale pipeline can be measured separately from CPU
+decode; record end-to-end elapsed time rather than encoder fps alone.
 
 ## Public pilot on the RTX 5080
 
@@ -194,11 +174,8 @@ timing run per candidate at mean VMAF 95:
 At these two points NVENC was faster and produced fewer bytes, but the coarse
 quality brackets and short windows cannot establish the winner for films or
 series. The `report` command correctly withheld a library forecast: these are
-only two H.264 titles, and there is no H.265 source sample yet. A three-repeat
-throughput pilot on the 39.9-second teaser plus a 60-second animation window
-measured 16.0–16.3 seconds serially versus 12.9–13.0 seconds with two NVENC
-sessions (median 1.25× throughput gain). Longer sources and the private
-library are needed for a sustained estimate.
+only two H.264 titles, and there is no H.265 source sample yet. Longer sources
+and the private library are needed for a sustained estimate.
 
 ## Acceptance criteria
 
@@ -211,8 +188,8 @@ library are needed for a sustained estimate.
 3. NVENC and SVT choices are confirmed by measured encodes near the same
    quality target, with a sensitivity table for storage premium and target quality.
 4. Storage and serial encode-hour forecasts include a range across titles;
-   one/two-session GPU throughput and full-title validation refine the time
-   estimate before a library-wide decision.
+   full-title validation refines the time estimate before a library-wide
+   decision.
 5. Final recommendation states which classes to convert, which to skip, the
    selected settings, expected storage change, elapsed time, and playback
    compatibility findings.

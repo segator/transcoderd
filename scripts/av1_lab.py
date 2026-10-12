@@ -2,7 +2,6 @@
 """Read-only source inventory and reproducible AV1 rate/quality/time lab."""
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import csv
 import hashlib
 import json
@@ -389,58 +388,6 @@ def report(args):
         print("Projection excludes mux overhead changes, stream conversions, concurrency effects, and uncovered classes.")
 
 
-def throughput(args):
-    if args.profile not in PROFILES or not args.profile.startswith("nvenc"):
-        raise ValueError("Throughput mode requires nvenc-p5 or nvenc-p7")
-    paths = media_paths(args.input)
-    if not paths:
-        raise ValueError("No video input")
-    paths = (paths * 2)[:2]
-    output = Path(args.output).resolve()
-    output.mkdir(parents=True, exist_ok=True)
-    tasks = []
-    for index, path in enumerate(paths):
-        remaining = metadata(path, args.ffprobe)["duration_seconds"] - args.start
-        if remaining <= 0:
-            raise ValueError(f"Start {args.start}s is beyond {path}")
-        duration = min(args.window, remaining)
-        tasks.append((index, path, duration))
-    results = []
-    for repeat in range(args.repeats):
-        by_mode = {}
-        for mode, workers in (("serial", 1), ("parallel", 2)):
-            def one(task):
-                index, path, duration = task
-                encoded = output / f"{mode}-{repeat}-{index}.mkv"
-                log = output / f"{mode}-{repeat}-{index}.log"
-                seconds = ffmpeg_run(encode_args(args.ffmpeg, path, args.start, duration, encoded,
-                                                  args.profile, args.quality, args.threads), log)
-                return {"source": str(path), "encoded": str(encoded), "encode_seconds": seconds,
-                        "window_seconds": duration}
-            began = time.monotonic()
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                jobs = list(pool.map(one, tasks))
-            wall_seconds = time.monotonic() - began
-            for result in jobs:
-                encoded = Path(result.pop("encoded"))
-                result["frames"] = frames(encoded, args.ffprobe)
-                result["video_bytes"] = video_packet_bytes(encoded, args.ffprobe)
-                if not args.keep_encodes:
-                    encoded.unlink()
-            by_mode[mode] = {"wall_seconds": wall_seconds, "jobs": jobs}
-        for serial, parallel in zip(by_mode["serial"]["jobs"], by_mode["parallel"]["jobs"]):
-            if serial["frames"] != parallel["frames"]:
-                raise RuntimeError("Serial/parallel output frame counts differ")
-        result = {"repeat": repeat + 1, "profile": args.profile, "quality": args.quality,
-                  "serial": by_mode["serial"], "parallel": by_mode["parallel"]}
-        append_jsonl(output / "throughput.jsonl", result)
-        results.append(result)
-        print(f"Repeat {repeat + 1}: serial {by_mode['serial']['wall_seconds']:.1f}s, "
-              f"two sessions {by_mode['parallel']['wall_seconds']:.1f}s")
-    speedups = [r["serial"]["wall_seconds"] / r["parallel"]["wall_seconds"] for r in results]
-    print(f"Median two-session throughput speedup: {statistics.median(speedups):.2f}x; see {output / 'throughput.jsonl'}")
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -474,24 +421,9 @@ def main():
     rep.add_argument("--max-gpu-premium", type=float, default=15, help="Largest NVENC byte premium vs best SVT, percent")
     rep.add_argument("--min-sample-titles", type=int, default=3, help="Distinct measured titles required per source class")
     rep.set_defaults(func=report)
-    parallel = sub.add_parser("throughput", help="Compare two NVENC jobs serially and concurrently")
-    parallel.add_argument("--input", action="append", required=True, help="One or two files, repeatable")
-    parallel.add_argument("--output", default="build/av1-lab/throughput")
-    parallel.add_argument("--ffmpeg", default="ffmpeg")
-    parallel.add_argument("--ffprobe", default="ffprobe")
-    parallel.add_argument("--profile", default="nvenc-p7")
-    parallel.add_argument("--quality", type=float, default=22)
-    parallel.add_argument("--start", type=float, default=0)
-    parallel.add_argument("--window", type=float, default=300)
-    parallel.add_argument("--repeats", type=int, default=3)
-    parallel.add_argument("--threads", type=int, default=0)
-    parallel.add_argument("--keep-encodes", action="store_true")
-    parallel.set_defaults(func=throughput)
     args = parser.parse_args()
     if args.action == "run" and (args.window <= 0 or args.windows <= 0 or args.repeats <= 0):
         parser.error("--window, --windows and --repeats must be positive")
-    if args.action == "throughput" and (args.window <= 0 or args.repeats <= 0):
-        parser.error("--window and --repeats must be positive")
     args.func(args)
 
 

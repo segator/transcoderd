@@ -49,12 +49,30 @@ test point, not an established optimum.
 
 ## Provisional quality and size comparison
 
-Source: an eight-second segment (10–18 seconds) of Blender's
-[Tears of Steel teaser](https://download.blender.org/demo/movies/tears-of-steel_teaser.mp4.zip),
-1920×800 at 24 fps. The high-bitrate H.264 source was decoded to a lossless
-FFV1 reference. All outputs contain video only and use 10-bit 4:2:0. VMAF was
-measured against the *decoded H.264 source*, not the original camera footage.
-Results for this one mixed live-action/CG segment:
+Source: Blender's
+[Tears of Steel teaser](https://download.blender.org/demo/movies/tears-of-steel_teaser.mp4.zip).
+The MP4 is 275,771,230 bytes (275.8 MB, including audio), 1920×800, 24 fps,
+39.917 seconds, and 958 video frames. Its 8-bit H.264 video stream averages
+about 55.0 Mb/s. We decoded it to a lossless FFV1 reference, then encoded
+video-only 10-bit 4:2:0 outputs. The VMAF reference is the *decoded H.264
+source*, not the original camera footage. The FFmpeg `libvmaf` filter used its
+default `vmaf_v0.6.1` model, `n_subsample=1`, and arithmetic-mean pooling. It
+scored every frame of each output against the corresponding reference frame.
+
+### Entire 39.917-second teaser: 958 frames
+
+| Encoder settings | Video file size | Mean VMAF |
+| --- | ---: | ---: |
+| NVENC AV1 `p7`, `uhq`, full-resolution multipass, CQ 20.5, split disabled | 30.296 MB | 98.010 |
+| NVENC AV1 `p5`, `hq`, full-resolution multipass, CQ 21, split disabled | 30.799 MB | 97.940 |
+| SVT-AV1 preset 4, CRF 10 | 36.640 MB | 97.984 |
+
+On the full teaser, the tested `p7/uhq` combination produced the smallest file
+and the highest mean VMAF of these three points. Its encode completed in about
+six seconds in the worker container; this short run does not establish sustained
+throughput or power use.
+
+### Eight-second excerpt: frames 10–18 seconds, 192 frames
 
 | Encoder settings | Video file size | VMAF |
 | --- | ---: | ---: |
@@ -62,14 +80,15 @@ Results for this one mixed live-action/CG segment:
 | NVENC AV1 `p5`, `hq`, full-resolution multipass, CQ 21, split disabled | 7.155 MB | 98.349 |
 | SVT-AV1 preset 4, CRF 10 | 6.251 MB | 97.797 |
 
-The two NVENC points have nearly equal size, yet `p5/hq` scored higher on this
-sample. SVT-AV1 used about 13% less space than `p7/uhq` at nearly equal VMAF.
-The CUDA/NVENC encode completed at about 4.9× real time for this short segment;
-startup, input decoding, and the short duration limit the usefulness of that
-throughput number. These observations do not establish a universal preset or
-GPU-versus-CPU winner. They need more varied footage, matched-rate comparisons,
-visual inspection, power measurements, and longer runs before setting production
-defaults. Converting an 8-bit source to 10-bit does not recover source detail.
+The excerpt favored different settings: at nearly equal size, `p5/hq` scored
+higher than `p7/uhq`; SVT-AV1 used about 13% less space at nearly equal VMAF.
+This reversal shows why neither the preset name nor a short excerpt identifies
+a universal quality-to-size winner. NVIDIA identifies `p7` as its highest-quality
+NVENC preset, but the best measured setting depends on content, tuning, rate
+control, and the quality criterion. The two tests need more varied footage,
+matched-rate curves, visual inspection, power measurements, and longer runs
+before setting production defaults. Converting an 8-bit source to 10-bit does
+not recover source detail.
 
 To reproduce the comparison, extract the reference and run the encoders and
 VMAF filter with the same 192 frames:
@@ -101,6 +120,9 @@ ffmpeg -i svt.mkv -i reference.mkv \
   -lavfi libvmaf=log_fmt=json:log_path=svt-vmaf.json -f null -
 ```
 
-Run the NVENC command inside a GPU-enabled worker container, as above, to test
-the distributed image. The comparison files and source media are local test
-artifacts and are not committed to the repository.
+For the full-teaser comparison, omit `-ss 10 -t 8` when creating the FFV1
+reference, set the `p7/uhq` CQ to `20.5`, and score each full output against
+that full reference. Its VMAF JSON contains 958 per-frame entries; the excerpt
+JSON contains 192. Run the NVENC commands inside a GPU-enabled worker
+container, as above, to test the distributed image. The comparison files and
+source media are local test artifacts and are not committed to the repository.

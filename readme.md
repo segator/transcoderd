@@ -119,7 +119,8 @@ The server and worker images reuse a published FFmpeg builder image; the worker
 also reuses a PGS builder image. The default FFmpeg builder tag is
 `builder-ffmpeg-9.0.2-av1`; it contains FFmpeg 9.0.2
 with `libsvtav1`, `libaom-av1`, and `av1_nvenc`. The worker still defaults to
-HEVC (`libx265`). AV1 job settings and CPU/GPU comparisons are separate work.
+HEVC (`libx265`). AV1 job settings and production quality/throughput tuning are
+separate work.
 
 ```bash
 make build-builder-ffmpeg   # Compile the FFmpeg builder and load it locally
@@ -140,7 +141,11 @@ make publish-builder-pgs
 ```
 
 Running `av1_nvenc` also requires a compatible NVIDIA GPU and driver exposed
-to the worker container, for example with Docker's `--gpus all` option.
+to the worker container. On a Docker host configured with the NVIDIA Container
+Toolkit, use `--gpus all`. The worker image has also been tested on an RTX 5080
+under WSL2 using direct device and driver mounts. See
+[AV1/NVENC validation](docs/av1-nvenc-validation.md) for the exact command,
+results, and limits of the preliminary quality comparison.
 
 ### CI Pipeline
 

@@ -23,7 +23,7 @@
 - [x] 4.1 Update the Docker E2E fixture path to exercise AV1 CPU without a GPU and verify the resulting MKV and completion event.
 - [x] 4.2 Exercise the worker container's AV1 NVENC path on the RTX 5080, including GPU access and output probing; verify the exact profile works inside the image.
 - [x] 4.3 Run relevant Go tests, race tests, build, `openspec validate --all --strict`, and a changed-file credential scan; record concrete results and address failures.
-- [ ] 4.4 Open a PR against `codex/av1-benchmark-lab` with the implementation, specification, migration guidance, and verified test results; attach the PR to this task.
+- [x] 4.4 Open a PR against `codex/av1-benchmark-lab` with the implementation, specification, migration guidance, and verified test results; attach the PR to this task.
 
 ## Workflow follow-up
 

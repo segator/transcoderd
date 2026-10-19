@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -129,9 +128,6 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 		SetStdoutFunc(stdoutFFMPEG).
 		SetStderrFunc(checkPercentageFFMPEG)
 
-	if runtime.GOOS == "linux" {
-		ffmpegCommand.AddEnv(fmt.Sprintf("LD_LIBRARY_PATH=%s", filepath.Dir(helper.GetFFmpegPath())))
-	}
 	exitCode, err := ffmpegCommand.RunWithContext(ctx)
 	if err != nil {
 		return fmt.Errorf("%w: stder:%s", err, ffmpegErrLog)

@@ -41,7 +41,7 @@ func TestGeneratedAV1CommandsEncodeAndDecode(t *testing.T) {
 		codec string
 		crf   int
 	}{
-		{"CPU", config.AV1SVT, 35},
+		{"CPU", config.AV1SVT, 0},
 	}
 	if os.Getenv("AV1_TEST_GPU") == "1" {
 		tests = append(tests, struct {

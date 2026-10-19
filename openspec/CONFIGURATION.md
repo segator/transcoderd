@@ -143,6 +143,56 @@ worker:
 
 For a CPU worker set `videoCodec: libsvtav1`, `videoPreset: "3"`, and `videoCRF: 23`; set `parallelJobs: 1` if a single SVT encode should have the CPU to itself. For x265 rollback set `videoCodec: libx265`, `videoPreset: medium`, `videoProfile: main10`, and `videoCRF: 21`. Remove NVENC-only `videoCQ` and `videoQMax` from either alternative profile. The separate `worker.threads` flag does not drive FFmpeg. The worker image supplies FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract assets.
 
+### Separate CPU and GPU workers
+
+Run two worker instances with distinct names and configuration files to use
+both encoders against one server. Each instance has its own limits:
+
+```yaml
+# gpu-worker.yml
+web:
+  domain: http://transcoderd-server:8080
+  token: replace-this-token
+worker:
+  name: gpu-5080
+  maxActiveJobs: 4
+  ffmpegConfig:
+    videoCodec: av1_nvenc
+    parallelJobs: 4
+    threads: 0
+```
+
+```yaml
+# cpu-worker.yml
+web:
+  domain: http://transcoderd-server:8080
+  token: replace-this-token
+worker:
+  name: cpu-9900x3d
+  maxActiveJobs: 2
+  ffmpegConfig:
+    videoCodec: libsvtav1
+    videoPreset: "3"
+    videoCRF: 23
+    parallelJobs: 2
+    threads: 0
+```
+
+Both workers request jobs from the same server. Job assignment is based on
+availability, so this does not route a particular movie or source codec to a
+particular encoder. The limits apply per worker instance; four GPU and two CPU
+slots permit up to six active jobs total. On the RTX 5080 and Ryzen 9900X3D,
+a repeated 120-second 1080p clip measured aggregate p7/UHQ GPU throughput of
+5.74 source seconds per wall second with one job and 10.61 with four. SVT
+preset 3 rose from 1.88 to 2.20 with two jobs. Thus four GPU jobs nearly
+doubled total throughput in that trial, while two CPU jobs added about 17%; no
+single job became faster. Tune these values against real titles, available
+memory, OCR, transfer traffic, and power. On WSL2, preserve the NVIDIA driver
+library path in the GPU container; the worker passes its environment to FFmpeg.
+
+The previous HEVC command and defaults remain in the
+[legacy reference](../docs/legacy-hevc-encoding.md).
+
 ## PGS OCR settings
 
 | Key | Registered default | Effect |

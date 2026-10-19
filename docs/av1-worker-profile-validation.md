@@ -17,6 +17,7 @@ quality and size decision for the default GPU profile comes from the
 | Worker Docker image build | Passed with the existing versioned FFmpeg builder image |
 | RTX 5080 encode inside worker image | Approved p7/UHQ/CQ34/middle-4/fullres/QP0..100 profile encoded; 10-bit AV1 output probed and fully decoded |
 | Docker end-to-end test, SVT-AV1 preset 3 / CRF35 | Completed download, PGS OCR, AV1 encode, size/duration verification, upload, and final event |
+| Docker end-to-end test, AV1 NVENC p7 / CQ34 on RTX 5080 | Completed the same pipeline with 10-bit AV1 and all seven video/audio/subtitle streams |
 | Changed-file credential scan | No secrets found; two matches were the E2E test's `%s` YAML placeholders |
 
 The generated-command tests used the committed 10.12-second, 320×240 H.264 MKV
@@ -37,6 +38,14 @@ film library. CRF35 is an explicit test override, while the worker's default
 CPU fallback is CRF23. GPU library quality remains content dependent; the
 fixed profile does not promise p5 VMAF 91–92 on every scene.
 
+An opt-in E2E run with `E2E_GPU=1` used the RTX 5080 inside the actual worker
+container. The 518,240-byte fixture became a 147,616-byte AV1 MKV and passed
+the same server, stream, full-decode, size, and event checks. This also checks
+that the worker preserves the container's NVIDIA driver library path when it
+starts FFmpeg. The former worker code appended `LD_LIBRARY_PATH=.` and hid the
+WSL2 driver path from the child process; the AV1 worker now inherits the
+container environment.
+
 To repeat the command-level tests with a suitable local FFmpeg build:
 
 ```bash
@@ -48,3 +57,24 @@ AV1_TEST_FFMPEG=/path/to/project/ffmpeg AV1_TEST_GPU=1 \
 Omit `AV1_TEST_GPU=1` on a CPU-only host. The standard Docker E2E test is
 `make test-e2e` after building both application images. The worker image's
 GPU access instructions are in [the RTX 5080 validation](av1-nvenc-validation.md).
+
+The same E2E test can use WSL2 GPU access and, optionally, a complete local
+film without copying its large source. `E2E_MOVIE_PATH` points to the input;
+`E2E_WORK_DIR` must be on the same filesystem so the test can hard-link it
+into a disposable server media directory. The input itself is not modified.
+`E2E_KEEP_OUTPUT` copies the final MKV to a chosen path before cleanup.
+
+```bash
+E2E_GPU=1 E2E_WORK_DIR=/path/to/large/local/workdir \
+  E2E_MOVIE_PATH=/path/to/input.mkv \
+  E2E_KEEP_OUTPUT=/path/to/review-output.mkv \
+  E2E_SERVER_IMAGE=ghcr.io/segator/transcoderd:server-test \
+  E2E_WORKER_IMAGE=ghcr.io/segator/transcoderd:worker-test \
+  go test -count=1 -tags=integration -v -timeout 120m \
+    -run TestDockerE2E ./integration
+```
+
+For the short GPU fixture test, set only `E2E_GPU=1` and the image variables.
+This WSL2 mode mounts `/dev/dxg` and `/usr/lib/wsl/{lib,drivers}` into the
+worker. On ordinary Linux, use the NVIDIA Container Toolkit when deploying
+the worker; the opt-in WSL2 test helper is not a portable GPU runtime setup.

@@ -28,3 +28,10 @@
 ## Workflow follow-up
 
 - Archive the OpenSpec change once the implementation is reviewed and merged so the main specs describe shipped behavior.
+
+## 5. Full-pipeline deployment validation
+
+- [x] 5.1 Preserve the container's NVIDIA library search path in the FFmpeg child process and verify a GPU job through the Docker E2E server and worker.
+- [x] 5.2 Document separate GPU and CPU worker limits and retain the previous x265 command as a legacy benchmark reference.
+- [ ] 5.3 Run a complete local movie through the server and GPU worker, then verify its output, size, streams, duration, and event history.
+- [ ] 5.4 Rerun Go tests, lint, OpenSpec validation, and changed-file credential scan; update PR #126 with results.

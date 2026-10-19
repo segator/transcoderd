@@ -9,6 +9,10 @@ The worker SHALL map the selected source video stream and select an encoder-spec
 - **WHEN** no video encoder overrides are supplied
 - **THEN** the worker requests the AV1 NVENC profile with the stated defaults
 
+#### Scenario: GPU libraries exposed to the worker
+- **WHEN** a compatible NVIDIA GPU and its driver libraries are exposed to the worker container
+- **THEN** the default AV1 NVENC job can load the driver and complete encoding
+
 #### Scenario: CPU AV1 selected
 - **WHEN** `worker.ffmpegConfig.videoCodec` is `libsvtav1`
 - **THEN** the worker requests SVT-AV1 preset `3` and CRF `23`, without NVENC-only options

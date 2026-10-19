@@ -4,14 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"gopkg.in/ini.v1"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
+
 	"transcoder/helper"
 	"transcoder/helper/command"
 	"transcoder/model"
@@ -19,6 +20,8 @@ import (
 	"transcoder/worker/console"
 	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
+
+	"gopkg.in/ini.v1"
 )
 
 type FFMPEGStepExecutor struct {
@@ -45,7 +48,7 @@ func (f *FFMPEGStepExecutor) actions(jobContext *job.Context) []Action {
 }
 
 func (f *FFMPEGStepExecutor) encode(ctx context.Context, stepTracker Tracker, jobContext *job.Context) error {
-	FFMPEGProgressChan := make(chan int64)
+	FFMPEGProgressChan := make(chan int64, 1)
 	go f.ffmpegProgressRoutine(ctx, jobContext, stepTracker, FFMPEGProgressChan)
 	err := f.ffmpeg(ctx, stepTracker.Logger(), jobContext, FFMPEGProgressChan)
 	if err != nil {
@@ -71,9 +74,12 @@ func (f *FFMPEGStepExecutor) ffmpegProgressRoutine(ctx context.Context, job *job
 }
 
 func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledLogger, jobContext *job.Context, ffmpegProgressChan chan<- int64) error {
+	defer close(ffmpegProgressChan)
 	ffmpegGenerator := &FFMPEGGenerator{Config: f.ffmpegConfig}
 	ffmpegGenerator.setInputFilters(jobContext)
-	ffmpegGenerator.setVideoFilters(jobContext.Source.FFProbeData)
+	if err := ffmpegGenerator.setVideoFilters(jobContext.Source.FFProbeData); err != nil {
+		return err
+	}
 	ffmpegGenerator.setAudioFilters(jobContext.Source.FFProbeData)
 	ffmpegGenerator.setSubtFilters(jobContext.Source.FFProbeData)
 	ffmpegErrLog := ""
@@ -104,11 +110,11 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 				progressValue = frame
 			}
 
-			ffmpegProgressChan <- progressValue
+			select {
+			case ffmpegProgressChan <- progressValue:
+			default:
+			}
 
-		}
-		if exit {
-			close(ffmpegProgressChan)
 		}
 	}
 	sourceFileName := filepath.Base(jobContext.Source.FilePath)
@@ -116,8 +122,9 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 	targetPath := filepath.Join(jobContext.WorkingDir, encodedFilePath)
 
 	ffmpegArguments := ffmpegGenerator.buildArguments(uint8(f.ffmpegConfig.Threads), f.ffmpegConfig.ExtraArgs, targetPath)
-	logger.Cmdf("FFMPEG Command:%s %s", helper.GetFFmpegPath(), ffmpegArguments)
-	ffmpegCommand := command.NewCommandByString(helper.GetFFmpegPath(), ffmpegArguments).
+	ffmpegCommand := command.NewCommand(helper.GetFFmpegPath(), ffmpegArguments...)
+	logger.Cmdf("FFMPEG Command: %s", ffmpegCommand.GetFullCommand())
+	ffmpegCommand = ffmpegCommand.
 		SetWorkDir(jobContext.WorkingDir).
 		SetStdoutFunc(stdoutFFMPEG).
 		SetStderrFunc(checkPercentageFFMPEG)
@@ -150,11 +157,16 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 	if err != nil {
 		return err
 	}
+	targetInfo, err := os.Stat(targetPath)
+	if err != nil {
+		return fmt.Errorf("stat encoded file: %w", err)
+	}
 
 	jobContext.Target = &job.VideoData{
 		FilePath:    targetPath,
 		Checksum:    sha256str,
 		FFProbeData: normalizedFFProbeData,
+		Size:        targetInfo.Size(),
 	}
 	return nil
 }
@@ -162,29 +174,48 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 type FFMPEGGenerator struct {
 	Config         *config.FFMPEGConfig
 	inputPaths     []string
-	VideoFilter    string
-	AudioFilter    []string
-	SubtitleFilter []string
-	Metadata       string
+	VideoFilter    []string
+	AudioFilter    [][]string
+	SubtitleFilter [][]string
 }
 
 func (f *FFMPEGGenerator) setAudioFilters(container *ffmpeg.NormalizedFFProbe) {
-
 	for index, audioStream := range container.Audios {
-		// TODO que pasa quan el channelLayout esta empty??
 		title := fmt.Sprintf("%s (%s)", audioStream.Language, audioStream.ChannelLayour)
-		metadata := fmt.Sprintf(" -metadata:s:a:%d \"title=%s\"", index, title)
-		codecQuality := fmt.Sprintf("-c:a:%d %s -vbr %d", index, f.Config.AudioCodec, f.Config.AudioVBR)
-		f.AudioFilter = append(f.AudioFilter, fmt.Sprintf(" -map 0:%d %s %s", audioStream.Id, metadata, codecQuality))
+		f.AudioFilter = append(f.AudioFilter, []string{
+			"-map", fmt.Sprintf("0:%d", audioStream.Id),
+			fmt.Sprintf("-metadata:s:a:%d", index), "title=" + title,
+			fmt.Sprintf("-c:a:%d", index), f.Config.AudioCodec,
+			"-vbr", strconv.Itoa(f.Config.AudioVBR),
+		})
 	}
 }
-func (f *FFMPEGGenerator) setVideoFilters(container *ffmpeg.NormalizedFFProbe) {
-	videoFilterParameters := "\"scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease\""
-	videoEncoderQuality := fmt.Sprintf("-pix_fmt yuv420p10le -c:v %s -crf %d -profile:v %s -preset %s", f.Config.VideoCodec, f.Config.VideoCRF, f.Config.VideoProfile, f.Config.VideoPreset)
-	// TODO HDR??
-	videoHDR := ""
-	f.VideoFilter = fmt.Sprintf("-map 0:%d -avoid_negative_ts make_zero -copyts -map_chapters -1 -flags +global_header -filter:v %s %s %s", container.Video.Id, videoFilterParameters, videoHDR, videoEncoderQuality)
-
+func (f *FFMPEGGenerator) setVideoFilters(container *ffmpeg.NormalizedFFProbe) error {
+	settings, err := f.Config.ResolveVideoSettings()
+	if err != nil {
+		return err
+	}
+	f.VideoFilter = []string{
+		"-map", fmt.Sprintf("0:%d", container.Video.Id),
+		"-avoid_negative_ts", "make_zero", "-copyts", "-map_chapters", "-1",
+		"-flags", "+global_header",
+		"-filter:v", "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease",
+		"-pix_fmt", settings.PixelFormat, "-c:v", settings.Codec,
+	}
+	switch settings.Codec {
+	case config.AV1NVENC:
+		f.VideoFilter = append(f.VideoFilter,
+			"-preset", settings.Preset, "-tune", "uhq", "-rc", "vbr",
+			"-cq", strconv.Itoa(settings.CQ), "-b:v", "0", "-multipass", "fullres",
+			"-bf", "4", "-b_ref_mode", "middle", "-split_encode_mode", "disabled",
+			"-qmin", "0", "-qmax", strconv.Itoa(settings.QMax))
+	case config.AV1SVT:
+		f.VideoFilter = append(f.VideoFilter, "-preset", settings.Preset, "-crf", strconv.Itoa(settings.CRF))
+	case config.HEVCX265:
+		f.VideoFilter = append(f.VideoFilter, "-crf", strconv.Itoa(settings.CRF),
+			"-profile:v", settings.Profile, "-preset", settings.Preset)
+	}
+	return nil
 }
 func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 	subtInputIndex := 1
@@ -193,11 +224,11 @@ func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 		if subtitle.IsImageTypeSubtitle() || subtitle.NeedsMKVExtraction() {
 			// Both PGS (OCR'd to SRT) and extracted unsupported codecs (converted to SRT)
 			// are fed as separate input files. Map from the corresponding input index.
-			subtitleMap := fmt.Sprintf("-map %d -c:s:%d srt", subtInputIndex, outputIndex)
+			subtitleArgs := []string{"-map", fmt.Sprintf("%d:0", subtInputIndex),
+				fmt.Sprintf("-c:s:%d", outputIndex), "srt"}
 
 			// Build disposition flags: combine into a single -disposition flag
 			// to avoid FFmpeg overwriting earlier values and to use correct stream specifier (s:N not s:s:N)
-			subtitleDisposition := ""
 			var dispositions []string
 			if subtitle.Forced {
 				dispositions = append(dispositions, "forced", "default")
@@ -206,7 +237,7 @@ func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 				dispositions = append(dispositions, "comment")
 			}
 			if len(dispositions) > 0 {
-				subtitleDisposition = fmt.Sprintf(" -disposition:s:%d %s", outputIndex, strings.Join(dispositions, "+"))
+				subtitleArgs = append(subtitleArgs, fmt.Sprintf("-disposition:s:%d", outputIndex), strings.Join(dispositions, "+"))
 			}
 
 			// Clean subtitle title to avoid PGS in title
@@ -214,33 +245,41 @@ func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 			subtitleTitle := re.ReplaceAllString(subtitle.Title, "")
 			subtitleTitle = strings.TrimSpace(strings.ReplaceAll(subtitleTitle, "  ", " "))
 
-			f.SubtitleFilter = append(f.SubtitleFilter, fmt.Sprintf("%s %s -metadata:s:s:%d language=%s -metadata:s:s:%d \"title=%s\" -max_interleave_delta 0", subtitleMap, subtitleDisposition, outputIndex, subtitle.Language, outputIndex, subtitleTitle))
+			subtitleArgs = append(subtitleArgs,
+				fmt.Sprintf("-metadata:s:s:%d", outputIndex), "language="+subtitle.Language,
+				fmt.Sprintf("-metadata:s:s:%d", outputIndex), "title="+subtitleTitle,
+				"-max_interleave_delta", "0")
+			f.SubtitleFilter = append(f.SubtitleFilter, subtitleArgs)
 			subtInputIndex++
 			outputIndex++
 		} else {
-			f.SubtitleFilter = append(f.SubtitleFilter, fmt.Sprintf("-map 0:%d -c:s:%d copy", subtitle.Id, outputIndex))
+			f.SubtitleFilter = append(f.SubtitleFilter, []string{"-map", fmt.Sprintf("0:%d", subtitle.Id),
+				fmt.Sprintf("-c:s:%d", outputIndex), "copy"})
 			outputIndex++
 		}
 	}
 }
 
-func (f *FFMPEGGenerator) buildArguments(threads uint8, extraArgs string, outputFilePath string) string {
-	coreParameters := fmt.Sprintf("-fflags +genpts -nostats %s -progress pipe:1  -hide_banner  -threads %d -analyzeduration 2147483647 -probesize 2147483647", extraArgs, threads)
-	inputsParameters := ""
+func (f *FFMPEGGenerator) buildArguments(threads uint8, extraArgs string, outputFilePath string) []string {
+	args := []string{"-fflags", "+genpts", "-nostats"}
+	if extraArgs != "" {
+		args = append(args, command.StringToSlice(extraArgs)...)
+	}
+	args = append(args, "-progress", "pipe:1", "-hide_banner", "-nostdin",
+		"-threads", strconv.Itoa(int(threads)), "-analyzeduration", "2147483647",
+		"-probesize", "2147483647")
 	for _, input := range f.inputPaths {
-		inputsParameters = fmt.Sprintf("%s -i \"%s\"", inputsParameters, input)
+		args = append(args, "-i", input)
 	}
-	//-ss 900 -t 10
-	audioParameters := ""
+	args = append(args, "-max_muxing_queue_size", "9999")
+	args = append(args, f.VideoFilter...)
 	for _, audio := range f.AudioFilter {
-		audioParameters = fmt.Sprintf("%s %s", audioParameters, audio)
+		args = append(args, audio...)
 	}
-	subtParameters := ""
-	for _, subt := range f.SubtitleFilter {
-		subtParameters = fmt.Sprintf("%s %s", subtParameters, subt)
+	for _, subtitle := range f.SubtitleFilter {
+		args = append(args, subtitle...)
 	}
-
-	return fmt.Sprintf("%s %s -max_muxing_queue_size 9999 %s %s %s %s %s -y", coreParameters, inputsParameters, f.VideoFilter, audioParameters, subtParameters, f.Metadata, outputFilePath)
+	return append(args, "-y", outputFilePath)
 }
 
 func (f *FFMPEGGenerator) setInputFilters(jobContext *job.Context) {

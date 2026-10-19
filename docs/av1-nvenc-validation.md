@@ -5,8 +5,10 @@ GeForce RTX 5080, driver 616.92, WSL2, and FFmpeg 9.0.2. The image includes
 `av1_nvenc`, `libsvtav1`, `libaom-av1`, and `libvmaf`. FFmpeg inside the worker
 container produced decodable 10-bit AV1 with `av1_nvenc`. It also completed a
 separate H.264 GPU decode, `scale_cuda`, and AV1 NVENC encode test. These tests
-exercise the bundled FFmpeg; TranscoderD's job pipeline still defaults to HEVC
-and does not yet have validated AV1/NVENC job settings.
+exercise the bundled FFmpeg. The subsequent
+[`av1-worker-profiles`](../openspec/changes/av1-worker-profiles/) change adds
+the NVENC job profile and uses it by default; its exact video options are
+recorded in [the full-film pilot](av1-gpu-full-film-command.md).
 
 ## Container GPU access
 

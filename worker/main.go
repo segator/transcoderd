@@ -2,20 +2,22 @@ package main
 
 import (
 	"context"
-	log "github.com/sirupsen/logrus"
-	pflag "github.com/spf13/pflag"
 	"math"
 	"os"
 	"os/signal"
 	"runtime"
 	"sync"
 	"syscall"
+
 	"transcoder/cmd"
 	"transcoder/update"
 	"transcoder/version"
 	"transcoder/worker/console"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/worker"
+
+	log "github.com/sirupsen/logrus"
+	pflag "github.com/spf13/pflag"
 )
 
 var (
@@ -38,6 +40,7 @@ func init() {
 		defaultThreads = 16
 	}
 	pflag.Int("worker.threads", defaultThreads, "Worker Threads")
+	pflag.Int("worker.maxActiveJobs", 2, "Maximum accepted jobs on this worker")
 	pflag.Int("worker.pgsConfig.parallelJobs", int(math.Ceil(float64(runtime.NumCPU())/4)), "Worker PGS Jobs in parallel")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
 	pflag.String("worker.pgsConfig.DLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")
@@ -48,12 +51,16 @@ func init() {
 
 	pflag.String("worker.ffmpegConfig.audioCodec", "libfdk_aac", "FFMPEG Audio Codec")
 	pflag.Int("worker.ffmpegConfig.audioVBR", 5, "FFMPEG Audio VBR")
-	pflag.String("worker.ffmpegConfig.videoCodec", "libx265", "FFMPEG Video Codec")
-	pflag.String("worker.ffmpegConfig.videoPreset", "medium", "FFMPEG Video Preset")
-	pflag.String("worker.ffmpegConfig.videoProfile", "main10", "FFMPEG Video Profile")
+	pflag.String("worker.ffmpegConfig.videoCodec", "av1_nvenc", "Video encoder: av1_nvenc, libsvtav1, or libx265")
+	pflag.String("worker.ffmpegConfig.videoPreset", "", "Video preset; defaults to p7, 3, or medium by encoder")
+	pflag.String("worker.ffmpegConfig.videoProfile", "", "x265 profile; defaults to main10")
+	pflag.Int("worker.ffmpegConfig.videoCQ", 0, "AV1 NVENC CQ; defaults to 34")
+	pflag.Int("worker.ffmpegConfig.videoQMax", 0, "AV1 NVENC maximum QP; defaults to 100")
+	pflag.Int("worker.ffmpegConfig.parallelJobs", 2, "Maximum simultaneous FFmpeg encode jobs")
+	pflag.Int("worker.ffmpegConfig.threads", 0, "FFmpeg thread count (0 lets FFmpeg decide)")
 	pflag.String("worker.ffmpegConfig.extraArgs", "", "FFMPEG Extra Args")
 	pflag.Int("worker.verifyDeltaTime", 60, "FFMPEG Verify Delta Time in seconds, is the max range of time that the video can be different from the original, if is superior then the video is marked as invalid")
-	pflag.Int("worker.ffmpegConfig.videoCRF", 21, "FFMPEG Video CRF")
+	pflag.Int("worker.ffmpegConfig.videoCRF", 0, "SVT-AV1 or x265 CRF; defaults to 23 or 21")
 	pflag.Duration("worker.startAfter", 0, "Accept jobs only After HH:mm")
 	pflag.Duration("worker.stopAfter", 0, "Stop Accepting new Jobs after HH:mm")
 
@@ -97,6 +104,9 @@ func main() {
 }
 
 func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) error {
+	if err := opts.Worker.Validate(); err != nil {
+		return err
+	}
 	renderService := console.NewRenderService()
 	renderService.Run(wg, ctx)
 

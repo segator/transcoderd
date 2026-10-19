@@ -63,11 +63,15 @@ server:
 | `worker.name` | Hostname | Worker identity used in events and assignment. |
 | `worker.temporalPath` | OS temporary directory | Parent of `worker-<name>` workspaces. |
 | `worker.threads` | Number of CPUs, capped at 16 | Registered flag; the current encoder does not read this field. See `BASELINE.md`. |
-| `worker.ffmpegConfig.threads` | `0` when omitted | Value passed to FFmpeg's `-threads` option. This nested field has no registered CLI flag, but is mapped from YAML. |
-| `worker.ffmpegConfig.videoCodec` | `libx265` | Video encoder passed as `-c:v`. |
-| `worker.ffmpegConfig.videoCRF` | `21` | Video quality passed as `-crf`. |
-| `worker.ffmpegConfig.videoProfile` | `main10` | Video profile passed as `-profile:v`. |
-| `worker.ffmpegConfig.videoPreset` | `medium` | Encoder preset passed as `-preset`. |
+| `worker.maxActiveJobs` | `2` | Maximum accepted jobs, including jobs before and after encoding. |
+| `worker.ffmpegConfig.parallelJobs` | `2` | Maximum simultaneous FFmpeg encode jobs on this worker. |
+| `worker.ffmpegConfig.threads` | `0` | Value passed to FFmpeg's `-threads` option; zero lets FFmpeg decide. |
+| `worker.ffmpegConfig.videoCodec` | `av1_nvenc` | Selects the AV1 GPU profile, `libsvtav1` CPU profile, or explicit `libx265` rollback. |
+| `worker.ffmpegConfig.videoPreset` | Empty | Profile default: NVENC `p7`, SVT `3`, x265 `medium`. A supplied value must be valid for the selected encoder. |
+| `worker.ffmpegConfig.videoCQ` | `0` (profile default) | NVENC CQ; zero selects `34`. Invalid with CPU or x265. |
+| `worker.ffmpegConfig.videoQMax` | `0` (profile default) | NVENC maximum QP; zero selects `100`. Paired with `-qmin 0`. Invalid with CPU or x265. |
+| `worker.ffmpegConfig.videoCRF` | `0` (profile default) | SVT CRF `23` or x265 CRF `21` when omitted. Invalid with NVENC. |
+| `worker.ffmpegConfig.videoProfile` | Empty | x265 `main10` when omitted. Invalid with AV1. |
 | `worker.ffmpegConfig.audioCodec` | `libfdk_aac` | Audio encoder passed per selected stream as `-c:a:N`. |
 | `worker.ffmpegConfig.audioVBR` | `5` | Audio quality passed per selected stream as `-vbr`. |
 | `worker.ffmpegConfig.extraArgs` | Empty string | Inserted into the FFmpeg invocation before input files. |
@@ -76,32 +80,42 @@ server:
 | `worker.stopAfter` | `0s` | Optional local time elapsed since midnight after which work is not accepted. |
 | `worker.paused` | `false` when omitted | Disables requests for new jobs; no CLI flag is registered. |
 
-`worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered in `worker/main.go` but not copied to the latter. With no nested `threads` value, the current command asks FFmpeg for `-threads 0`. This is an observed wiring gap, not a deliberate policy that agents should preserve.
+`worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered but does not control FFmpeg. With no nested `threads` value, the command asks FFmpeg for `-threads 0`. SVT-AV1 also manages its own internal parallelism. `worker.maxActiveJobs` and `worker.ffmpegConfig.parallelJobs` are different limits: the first bounds entire in-flight jobs; the second bounds simultaneous encodes. Set both to `1` for serial operation. The default permits two GPU encode jobs once two accepted jobs reach that phase. This is a concurrency limit, not a promise of twice the throughput.
 
-The worker image bundles FFmpeg 9.0.2 with `libsvtav1`, `libaom-av1`, and `av1_nvenc` available for future AV1 experiments. The job pipeline still uses HEVC-oriented defaults (`libx265`, CRF `21`, profile `main10`, preset `medium`, and `yuv420p10le`). Setting `videoCodec` alone does not establish a validated AV1 mode; encoder-specific profiles, presets, quality settings, and GPU access need separate work.
+The worker image bundles FFmpeg 9.0.2 with `libsvtav1`, `libaom-av1`, and `av1_nvenc`. The default now requires an NVIDIA GPU available to the worker container. On Linux, configure the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) and pass `--gpus all`; WSL2 may require the validated `/dev/dxg` driver mounts described in [the RTX 5080 validation](../docs/av1-nvenc-validation.md). For CPU-only workers select `libsvtav1` explicitly. Invalid combinations fail at worker startup, before accepting jobs. The exact approved full-film argument vector is in [the pilot record](../docs/av1-gpu-full-film-command.md).
 
-The FFmpeg command maps the first video stream, uses `yuv420p10le`, scales width to `min(1920, input width)` while preserving aspect ratio, and writes an `-encoded.mkv` file. It maps one selected audio stream per language, choosing channel count first and bit rate second. It disables chapter copying. `extraArgs` is included before input arguments, so the meaning of an option depends on FFmpeg's option-placement rules.
+The FFmpeg command maps the first video stream, scales width to `min(1920, input width)` while preserving aspect ratio, and writes an `-encoded.mkv` file. It maps one selected audio stream per language, choosing channel count first and bit rate second. It disables chapter copying. `extraArgs` is included before input arguments, so the meaning of an option depends on FFmpeg's option-placement rules.
 
 ### Current FFmpeg invocation
 
 The command below is a schematic transcription of `worker/step/ffmpegStep.go`, with paths and stream indices left as placeholders. It is an implementation reference; the requirements in `specs/media-encoding/` describe the behavior that must remain stable.
 
 ```text
-ffmpeg -fflags +genpts -nostats <extraArgs> -progress pipe:1 -hide_banner \
+ffmpeg -fflags +genpts -nostats <extraArgs> -progress pipe:1 -hide_banner -nostdin \
   -threads <ffmpegConfig.threads> -analyzeduration 2147483647 -probesize 2147483647 \
   -i <downloaded-source> [-i <converted-subtitle.srt> ...] \
   -max_muxing_queue_size 9999 \
   -map 0:<video-stream> -avoid_negative_ts make_zero -copyts -map_chapters -1 \
   -flags +global_header \
   -filter:v "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease" \
-  -pix_fmt yuv420p10le -c:v <videoCodec> -crf <videoCRF> \
-  -profile:v <videoProfile> -preset <videoPreset> \
+  <selected video profile below> \
   [-map 0:<audio-stream> -metadata:s:a:<index> "title=<language> (<layout>)" \
     -c:a:<index> <audioCodec> -vbr <audioVBR> ...] \
-  [subtitle mappings and dispositions] <workspace>/<source-stem>-encoded.mkv -y
+  [subtitle mappings and dispositions] -y <workspace>/<source-stem>-encoded.mkv
 ```
 
-The output is probed again and hashed with SHA-256. Duration verification uses `worker.verifyDeltaTime` before upload. The code also attempts an output-size check, but currently does not populate the target size; see `BASELINE.md`.
+The video portion is one of:
+
+```text
+AV1 GPU: -pix_fmt p010le -c:v av1_nvenc -preset p7 -tune uhq -rc vbr
+         -cq 34 -b:v 0 -multipass fullres -bf 4 -b_ref_mode middle
+         -split_encode_mode disabled -qmin 0 -qmax 100
+AV1 CPU: -pix_fmt yuv420p10le -c:v libsvtav1 -preset 3 -crf 23
+HEVC:    -pix_fmt yuv420p10le -c:v libx265 -crf 21
+         -profile:v main10 -preset medium
+```
+
+The output is probed, hashed with SHA-256, and measured in bytes. Duration verification uses `worker.verifyDeltaTime`; an encoded MKV larger than its source is rejected before upload. No VMAF prepass or automatic retry is required. The fixed GPU CQ34 profile produced good visual quality on one complete high-bitrate H.264 film, but it is not a guaranteed p5 VMAF target for every title. SVT preset 3 was tested with several CRFs; the default CRF23 is conservative and configurable.
 
 ### Example worker YAML
 
@@ -112,13 +126,14 @@ web:
 worker:
   name: encode-node-1
   temporalPath: /tmp
+  maxActiveJobs: 2
   verifyDeltaTime: 60
   ffmpegConfig:
-    threads: 4
-    videoCodec: libx265
-    videoCRF: 21
-    videoProfile: main10
-    videoPreset: medium
+    threads: 0
+    videoCodec: av1_nvenc
+    parallelJobs: 2
+    videoCQ: 34
+    videoQMax: 100
     audioCodec: libfdk_aac
     audioVBR: 5
     extraArgs: ""
@@ -126,7 +141,7 @@ worker:
     parallelJobs: 2
 ```
 
-The example explicitly sets `worker.ffmpegConfig.threads` because the separate `worker.threads` flag does not currently drive FFmpeg. A worker also needs the FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract assets used by the selected media; the worker image supplies them.
+For a CPU worker set `videoCodec: libsvtav1`, `videoPreset: "3"`, and `videoCRF: 23`; set `parallelJobs: 1` if a single SVT encode should have the CPU to itself. For x265 rollback set `videoCodec: libx265`, `videoPreset: medium`, `videoProfile: main10`, and `videoCRF: 21`. Remove NVENC-only `videoCQ` and `videoQMax` from either alternative profile. The separate `worker.threads` flag does not drive FFmpeg. The worker image supplies FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract assets.
 
 ## PGS OCR settings
 

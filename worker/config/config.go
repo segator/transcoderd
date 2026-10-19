@@ -21,6 +21,9 @@ type FFMPEGConfig struct {
 	VideoPreset  string `mapstructure:"videoPreset" envconfig:"WORKER_FFMPEG_VIDEOPRESET"`
 	VideoProfile string `mapstructure:"videoProfile" envconfig:"WORKER_FFMPEG_VIDEOPROFILE"`
 	VideoCRF     int    `mapstructure:"videoCRF" envconfig:"WORKER_FFMPEG_VIDEOCRF"`
+	VideoCQ      int    `mapstructure:"videoCQ" envconfig:"WORKER_FFMPEG_VIDEOCQ"`
+	VideoQMax    int    `mapstructure:"videoQMax" envconfig:"WORKER_FFMPEG_VIDEOQMAX"`
+	ParallelJobs int    `mapstructure:"parallelJobs" envconfig:"WORKER_FFMPEG_PARALLELJOBS"`
 	Threads      int    `mapstructure:"threads" envconfig:"WORKER_FFMPEG_THREADS"`
 	ExtraArgs    string `mapstructure:"extraArgs" envconfig:"WORKER_FFMPEG_EXTRA_ARGS"`
 }
@@ -31,11 +34,12 @@ type Config struct {
 	StartAfter      *time.Duration `mapstructure:"startAfter" envconfig:"WORKER_START_AFTER"`
 	StopAfter       *time.Duration `mapstructure:"stopAfter" envconfig:"WORKER_STOP_AFTER"`
 	Paused          bool
+	MaxActiveJobs   int           `mapstructure:"maxActiveJobs" envconfig:"WORKER_MAX_ACTIVE_JOBS"`
 	PGSConfig       *PGSConfig    `mapstructure:"pgsConfig"`
 	EncodeConfig    *FFMPEGConfig `mapstructure:"ffmpegConfig"`
 	VerifyDeltaTime float64       `mapstructure:"verifyDeltaTime" envconfig:"WORKER_VERIFY_DELTA_TIME"`
 }
 
 func (c Config) HaveSettedPeriodTime() bool {
-	return *c.StartAfter != 0 || *c.StopAfter != 0
+	return c.StartAfter != nil && c.StopAfter != nil && (*c.StartAfter != 0 || *c.StopAfter != 0)
 }

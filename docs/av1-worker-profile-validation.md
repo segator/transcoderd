@@ -123,3 +123,38 @@ This validates one complete SDR 1080p job, including audio and subtitles.
 It does not measure a complete CPU film, mixed CPU/GPU load, power use,
 HDR preservation, or whole-film VMAF. The watched pilot's quality evidence
 remains its visual review and six scored sample windows.
+
+## Weekly admission follow-up
+
+The worker now supports optional weekly request windows and an explicit IANA
+timezone. Local checks on 2026-10-20 covered inclusive starts, exclusive ends,
+multiple weekday windows, all-day weekends, overnight windows and weekday
+rollover, UTC-to-local conversion, spring and autumn DST transitions, invalid
+configuration rejection before server contact, and CLI-over-YAML precedence
+(including clearing windows). Admission continues to respect pause and the
+configured active-job limit. The coordinator rechecks admission after its update
+check in case that check crosses a cutoff.
+
+The rebuilt worker Docker image was started twice against a local recording
+HTTP endpoint, using YAML `Europe/Madrid` windows. During a closed interval it
+sent its startup presence and a periodic heartbeat but **zero job requests**.
+During an open interval it sent both presence events and **one job request**,
+which received HTTP 204. Both processes shut down normally. This confirms the
+real binary/container uses the configuration and leaves presence reporting
+active outside request windows. It is a control-flow check; it does not require
+a GPU or score video quality. Deterministic boundary/DST tests use explicit
+clock values rather than waiting for the wall clock to change.
+
+Accepted and recovered jobs remain governed by the existing pipeline and keep
+running after admission closes. The schedule does not suspend jobs, predict
+completion times, classify public holidays, or retrieve electricity prices.
+See [the scheduling reference](worker-scheduling.md) for examples and limits.
+
+The follow-up also passed `go test ./...`, `go test -race ./cmd ./worker/...`,
+`golangci-lint run` (zero issues), worker binary/image builds, and strict
+OpenSpec validation (12 items). The rebuilt worker completed the CPU Docker
+E2E in 17.80 seconds, including subtitle OCR, FDK-AAC, AV1, all seven streams,
+full decode, upload, and completion events; the output remained 48,939 bytes.
+A scan of all 43 changed text files against the PR base found no private keys,
+service/GitHub tokens, or credential-bearing URLs. New scheduling files were
+also reviewed for embedded credentials; none were found.

@@ -196,6 +196,14 @@ has not been measured and can contend for CPU, memory, and I/O. For the
 balanced library migration, begin with the GPU worker and enable CPU capacity
 only when its extra storage saving or host utilization justifies it.
 
+## Restrict job acceptance to selected hours
+
+Both worker instances support `worker.schedule.timeZone` and
+`worker.schedule.windows`. Copy the same schedule into each YAML file to limit
+new requests to the same periods. See [weekly scheduling](worker-scheduling.md)
+for daily cutoff and weekday/weekend examples, CLI overrides, timezone behavior,
+and what happens to accepted jobs after the cutoff.
+
 ## What the build pipeline does
 
 `Dockerfile` compiles FFmpeg with a CUDA development image and pinned

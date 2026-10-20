@@ -82,6 +82,10 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 					q.logger.Logf("New version available %s,exiting ...", release.TagName)
 					os.Exit(update.ExitCode)
 				}
+				// The update check may have crossed an admission-window boundary.
+				if !q.worker.AcceptJobs() {
+					continue
+				}
 
 				requestJobResponse, err := q.serverClient.RequestJob()
 				if err != nil {

@@ -195,19 +195,17 @@ func (e *JobExecutor) resumeJobs() {
 }
 
 func (e *JobExecutor) AcceptJobs() bool {
+	return e.acceptJobsAt(time.Now())
+}
+
+func (e *JobExecutor) acceptJobsAt(now time.Time) bool {
 	if e.workerConfig.Paused {
 		return false
 	}
 	if e.ActiveJobs() >= uint32(e.workerConfig.MaxActiveJobs) {
 		return false
 	}
-	if e.workerConfig.HaveSettedPeriodTime() {
-		now := time.Now()
-		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		elapsedSinceMidnight := now.Sub(midnight)
-		return elapsedSinceMidnight >= *e.workerConfig.StartAfter && elapsedSinceMidnight <= *e.workerConfig.StopAfter
-	}
-	return true
+	return e.workerConfig.AdmissionAllowedAt(now)
 }
 func (e *JobExecutor) jobLogger(jobContext *job.Context) console.LeveledLogger {
 	return e.console.Logger(console.WithMessagePrefix(fmt.Sprintf("[%s]", jobContext.JobId.String())))

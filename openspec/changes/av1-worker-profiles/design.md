@@ -6,7 +6,7 @@ See proposal.md. The worker currently generates one HEVC-shaped FFmpeg command s
 
 ## Goals / Non-Goals
 
-**Goals:** Produce the approved NVENC AV1 video arguments exactly, offer a tested SVT-AV1 CPU option, preserve x265 rollback, safely bound simultaneous jobs, and verify output size before upload.
+**Goals:** Produce the approved NVENC AV1 video arguments exactly, offer a tested SVT-AV1 CPU option, preserve x265 rollback, safely bound simultaneous jobs, restrict new requests to configured weekly hours, and verify output size before upload.
 
 **Non-Goals:** Automatic per-title encoder/CQ selection, VMAF prepasses, CUDA decode or zero-copy conversion, split-frame encoding, multi-GPU scheduling, and automatic replacement of existing library files without the existing server workflow.
 
@@ -23,6 +23,12 @@ The FFmpeg generator will return a structured argument slice and call `command.N
 ### Concurrency
 
 Add `worker.maxActiveJobs` (default 2) and `worker.ffmpegConfig.parallelJobs` (default 2). Admission applies both the active-job limit and optional time window. Run the configured number of consumers for the FFmpeg step queue; retain per-job action concurrency for PGS OCR separately. Each accepted job keeps its existing isolated workspace and progress tracker. Validate limits as positive at startup. This supports multiple sessions but makes no throughput claim for arbitrary hardware; operators tune limits for their GPU, CPU, disk, and OCR workload.
+
+### Weekly admission windows
+
+Add `worker.schedule.timeZone` (default `Local`) and `worker.schedule.windows` (default empty), available as YAML and CLI settings. Each window is `Days@HH:MM-HH:MM`, where Days is `*`, a three-letter weekday, or an inclusive weekday range such as `Mon-Fri`. Multiple windows are combined with OR. `24:00` is allowed only as an end; equal endpoints are invalid. An overnight window belongs to the weekday on which it starts. Use local civil clock time in the selected IANA timezone, with inclusive starts and exclusive ends. Embed Go timezone data so runtime images need no host timezone mounts. Repeated civil hours during an autumn clock change have the same policy; nonexistent spring hours never occur.
+
+An empty window list adds no restriction. Preserve the existing legacy `startAfter`/`stopAfter` behavior when no weekly windows are supplied, but reject combining active legacy fields with weekly windows. Reject invalid zones and windows before contacting the server. The existing pause and active-job limit still apply. Evaluate admission before each periodic job request; a request already in flight at the cutoff can still receive its assignment. Accepted jobs, including restored and locally queued work, continue across closed windows; no encode cancellation, suspension, runtime VMAF pass, automatic electricity-price lookup, or public-holiday calendar is added. Configuration changes require restarting the worker. This is an admission schedule, not a hard electricity-consumption cutoff.
 
 ### Size and verification
 

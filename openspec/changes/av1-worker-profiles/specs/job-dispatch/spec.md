@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Local admission policy
-A paused worker SHALL not request jobs. A worker SHALL stop requesting jobs when its active-job count reaches `worker.maxActiveJobs`, whose registered default SHALL be `2`. If a time window is configured, the worker SHALL additionally request jobs only while local time elapsed since midnight lies between `startAfter` and `stopAfter`.
+A paused worker SHALL not request jobs. A worker SHALL stop requesting jobs when its active-job count reaches `worker.maxActiveJobs`, whose registered default SHALL be `2`. If a legacy time window is configured, the worker SHALL additionally request jobs only while local time elapsed since midnight lies between `startAfter` and `stopAfter`.
 
 #### Scenario: Worker paused
 - **WHEN** the worker is paused
@@ -37,3 +37,48 @@ The worker SHALL process up to `worker.ffmpegConfig.parallelJobs` encoding jobs 
 #### Scenario: Encode limit reached
 - **WHEN** the configured number of encoding jobs is already running
 - **THEN** additional encode jobs wait until a slot is available
+
+### Requirement: Weekly admission schedule
+The worker SHALL accept optional `worker.schedule.windows` with default empty and `worker.schedule.timeZone` with default `Local`. With windows configured, it SHALL initiate job requests only inside at least one window in the selected timezone, while also respecting pause and active-job limits.
+
+#### Scenario: Weekday cutoff
+- **WHEN** a Monday-to-Friday window ends at 10:00 in Europe/Madrid and the local clock reaches 10:00
+- **THEN** the worker initiates no further job requests until another configured window opens
+
+#### Scenario: Resume during another window
+- **WHEN** the next configured interval opens and capacity is available
+- **THEN** the next normal coordination poll can request another job
+
+#### Scenario: Weekend override
+- **WHEN** a Sat-Sun 00:00-24:00 interval is configured and the local day is Saturday
+- **THEN** the schedule permits new requests throughout that day
+
+#### Scenario: No weekly windows
+- **WHEN** the window list is empty
+- **THEN** the existing pause, limit, and optional legacy time window determine admission
+
+### Requirement: Weekly window clock semantics
+Window entries SHALL use `Days@HH:MM-HH:MM`, with `*`, a three-letter weekday, or an inclusive weekday range as Days. Starts SHALL be inclusive and ends exclusive. Overnight windows SHALL belong to their starting weekday; `24:00` SHALL be accepted only as an end. The worker SHALL evaluate civil clock time using timezone transitions.
+
+#### Scenario: Overnight interval
+- **WHEN** a Friday 22:00-08:00 interval is configured and local time is Saturday 07:59
+- **THEN** the interval permits a new request, but it stops permitting one at Saturday 08:00
+
+#### Scenario: Daylight saving transition
+- **WHEN** a timezone changes offset and a local civil time occurs in a configured interval
+- **THEN** admission follows that civil time rather than elapsed seconds since midnight
+
+### Requirement: Accepted work across closed windows
+Accepted jobs SHALL continue after a window closes, including work accepted before a restart. A request initiated before the boundary MAY complete afterward. The schedule SHALL NOT perform automatic electricity-tariff or public-holiday lookups.
+
+#### Scenario: Accepted jobs when admission closes
+- **WHEN** a window closes while accepted jobs are encoding or waiting in the local pipeline
+- **THEN** those jobs continue without schedule-driven suspension or cancellation
+
+#### Scenario: Restored work outside a window
+- **WHEN** the worker restores previously accepted jobs while admission is closed
+- **THEN** those jobs can continue, while new requests remain blocked
+
+#### Scenario: Request already in flight
+- **WHEN** a job request is initiated before the cutoff and its assignment arrives afterward
+- **THEN** the worker can process that assignment

@@ -61,8 +61,10 @@ func init() {
 	pflag.String("worker.ffmpegConfig.extraArgs", "", "FFMPEG Extra Args")
 	pflag.Int("worker.verifyDeltaTime", 60, "FFMPEG Verify Delta Time in seconds, is the max range of time that the video can be different from the original, if is superior then the video is marked as invalid")
 	pflag.Int("worker.ffmpegConfig.videoCRF", 0, "SVT-AV1 or x265 CRF; defaults to 23 or 21")
-	pflag.Duration("worker.startAfter", 0, "Accept jobs only After HH:mm")
-	pflag.Duration("worker.stopAfter", 0, "Stop Accepting new Jobs after HH:mm")
+	pflag.Duration("worker.startAfter", 0, "Legacy daily admission start as a duration since midnight, e.g. 8h")
+	pflag.Duration("worker.stopAfter", 0, "Legacy daily admission end as a duration since midnight, e.g. 22h")
+	pflag.String("worker.schedule.timeZone", "Local", "Admission timezone (IANA name, e.g. Europe/Madrid)")
+	pflag.StringSlice("worker.schedule.windows", nil, "Allowed job-request windows, e.g. Mon-Fri@00:00-10:00,Sat-Sun@00:00-24:00")
 
 	cmd.ViperConfig(&opts)
 }
@@ -106,6 +108,12 @@ func main() {
 func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) error {
 	if err := opts.Worker.Validate(); err != nil {
 		return err
+	}
+	if schedule := opts.Worker.Schedule; schedule != nil && len(schedule.Windows) > 0 {
+		log.WithFields(log.Fields{
+			"time_zone": schedule.TimeZone,
+			"windows":   schedule.Windows,
+		}).Info("Weekly job admission enabled; accepted jobs finish after windows close")
 	}
 	renderService := console.NewRenderService()
 	renderService.Run(wg, ctx)

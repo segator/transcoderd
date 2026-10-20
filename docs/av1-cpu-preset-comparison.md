@@ -60,6 +60,53 @@ All sizes below are decimal MB of video packet payloads in one minute.
 | Concert | SVT preset 5 | 27 | 127.962 | 92.221 | 20.44 |
 | Concert | SVT preset 6 | 28 | 137.951 | 92.150 | 16.55 |
 
+## Minutes and indicative sizes for a two-hour example
+
+**Only the GPU has a complete movie measurement:** the approved 89-minute
+Bruce Lee film encoded in **15 min 23 s**, and its complete worker job took
+**23 min 8 s** including transfer and subtitles. The original **21.022 GB**
+became **1.493 GB**, including two FDK-AAC tracks and a subtitle. We have not
+encoded that complete film with CPU presets 3–6, and have not scored whole-film
+VMAF. The 92.9% total-file saving includes audio conversion.
+
+For a readable CPU/GPU comparison, the table below scales the **same measured
+60-second Novecento scene** to 120 minutes. It answers: *if all two hours
+behaved like this one scene, what would encode time and video bytes be?*
+This is arithmetic extrapolation, not a measured movie or a library forecast.
+Times exclude download, subtitles, audio encoding, muxing, upload, and VMAF;
+sizes are **video only**, excluding audio and container overhead. Every row is
+one encode running alone. The p5 score belongs to the measured minute, not
+an imaginary full movie. The selected CRFs differ to compare similar quality;
+these are not measurements of the generic CPU CRF23 configuration.
+
+| Encoder | CQ / CRF tested | Approx. encode minutes for 2 h | Indicative video GB for 2 h | Measured scene p5 VMAF |
+| --- | ---: | ---: | ---: | ---: |
+| GPU NVENC p7/UHQ | 34 | 22 | 3.44 | 94.04 |
+| CPU SVT preset 3 | 25 | 63 | 3.53 | 94.10 |
+| CPU SVT preset 4 | 24 | 31 | 3.93 | 94.11 |
+| CPU SVT preset 5 | 24 | 28 | 3.99 | 94.08 |
+| CPU SVT preset 6 | 24 | 22 | 4.47 | 94.06 |
+
+Calculation: a two-hour film contains 120 one-minute intervals. The GPU's
+11.145 seconds for one interval becomes `11.145 × 120 / 60 = 22.29` encode
+minutes. Its 28.636 MB of video becomes `28.636 × 120 / 1000 = 3.44` GB.
+The same multiplication is applied to each CPU result; VMAF is not extrapolated.
+
+The three measured scenes give very different two-hour **time equivalents**:
+
+| Encoder | Range across the three scene extrapolations, minutes |
+| --- | ---: |
+| GPU NVENC p7/UHQ | 22–30 |
+| CPU SVT preset 3 | 48–103 |
+| CPU SVT preset 4 | 26–50 |
+| CPU SVT preset 5 | 23–41 |
+| CPU SVT preset 6 | 19–33 |
+
+These ranges show content sensitivity, not statistical confidence intervals.
+The complete GPU film result is a firmer fact than any one-scene projection.
+There is insufficient evidence for a universal CPU full-movie minute or GB
+estimate at CRF23, or for electricity cost: wall-plug power has not been measured.
+
 ## What to choose
 
 Preset 4 took **45–51% less time than preset 3**, with **0.3–11.3% more video

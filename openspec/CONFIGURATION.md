@@ -78,6 +78,8 @@ server:
 | `worker.verifyDeltaTime` | `60` | Maximum absolute source/output duration difference in seconds. |
 | `worker.startAfter` | `0s` | Optional local time elapsed since midnight before accepting work. |
 | `worker.stopAfter` | `0s` | Optional local time elapsed since midnight after which work is not accepted. |
+| `worker.schedule.timeZone` | `Local` | IANA timezone for weekly admission windows; use an explicit zone in containers. |
+| `worker.schedule.windows` | Empty list | OR of `Days@HH:MM-HH:MM` intervals for new requests; start inclusive, end exclusive. |
 | `worker.paused` | `false` when omitted | Disables requests for new jobs; no CLI flag is registered. |
 
 `worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered but does not control FFmpeg. With no nested `threads` value, the command asks FFmpeg for `-threads 0`. SVT-AV1 also manages its own internal parallelism. `worker.maxActiveJobs` and `worker.ffmpegConfig.parallelJobs` are different limits: the first bounds entire in-flight jobs; the second bounds simultaneous encodes. Set both to `1` for serial operation. The default permits two GPU encode jobs once two accepted jobs reach that phase. This is a concurrency limit, not a promise of twice the throughput.
@@ -85,6 +87,25 @@ server:
 The worker image bundles FFmpeg 9.0.2 with `libsvtav1`, `libaom-av1`, and `av1_nvenc`. The default now requires an NVIDIA GPU available to the worker container. On Linux, configure the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) and pass `--gpus all`; WSL2 may require the validated `/dev/dxg` driver mounts described in [the RTX 5080 validation](../docs/av1-nvenc-validation.md). For CPU-only workers select `libsvtav1` explicitly. Invalid combinations fail at worker startup, before accepting jobs. The exact approved full-film argument vector is in [the pilot record](../docs/av1-gpu-full-film-command.md).
 
 The FFmpeg command maps the first video stream, scales width to `min(1920, input width)` while preserving aspect ratio, and writes an `-encoded.mkv` file. It maps one selected audio stream per language, choosing channel count first and bit rate second. It disables chapter copying. `extraArgs` is included before input arguments, so the meaning of an option depends on FFmpeg's option-placement rules.
+
+### Weekly job admission
+
+Set `worker.schedule.timeZone: Europe/Madrid` and a `windows` list such as
+`["Mon-Fri@00:00-10:00", "Mon-Fri@14:00-18:00", "Mon-Fri@22:00-24:00", "Sat-Sun@00:00-24:00"]`
+to allow several periods per weekday and all-day weekends. Entries accept `*`,
+a three-letter weekday, or an inclusive weekday range. Overnight windows belong
+to their starting day, starts are inclusive, and ends exclusive. `24:00` is
+allowed only as an end. Civil clock time follows timezone/DST transitions;
+timezone data is bundled. Empty windows disable the weekly restriction.
+
+Both settings have CLI flags. `--worker.schedule.windows=` clears YAML windows.
+Invalid entries, invalid zones, or combining weekly windows with active legacy
+`startAfter`/`stopAfter` settings fail startup before server contact. Legacy
+fields keep their existing duration semantics. Closing admission leaves accepted,
+queued, and restored jobs running; requests initiated before the cutoff can
+complete afterward. There is no tariff-price lookup or public-holiday calendar.
+Configuration changes require restarting the worker. See the [complete scheduling
+reference](../docs/worker-scheduling.md) for examples and overrun implications.
 
 ### Current FFmpeg invocation
 

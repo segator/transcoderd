@@ -40,3 +40,10 @@
 
 - [x] 6.1 Document Linux, Unraid, and WSL NVIDIA worker prerequisites, separate CPU/GPU worker configuration, image build dependencies, and every production encoder option.
 - [x] 6.2 Compare SVT presets 3–6 with the production NVENC profile at similar scene quality; record measured time/size/quality and recommend selectable CPU options.
+
+## 7. Weekly job admission
+
+- [x] 7.1 Add CLI/YAML weekly windows and timezone settings with startup validation, retain legacy-window compatibility, and reject conflicting settings.
+- [x] 7.2 Apply weekly windows before new job requests without stopping accepted work; test exact boundaries, multiple windows, weekends, overnight windows, timezone offsets, DST, pause, and concurrency limits.
+- [x] 7.3 Document cutoff-only and weekday/weekend examples for both workers, explain job overruns and tariff/calendar limits, and express the measured CPU/GPU comparison in minutes with projection limits.
+- [x] 7.4 Run Go and race tests, lint, strict OpenSpec validation, review the diff for credentials, and update PR #126 with the results.

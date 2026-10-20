@@ -53,6 +53,29 @@ func TestEncodeConsumerLimit(t *testing.T) {
 	}
 }
 
+func TestAcceptJobsCombinesWeeklyScheduleWithPauseAndLimit(t *testing.T) {
+	e := &JobExecutor{workerConfig: &config.Config{
+		MaxActiveJobs: 4,
+		Schedule:      &config.ScheduleConfig{TimeZone: "Europe/Madrid", Windows: []string{"Mon-Fri@00:00-10:00"}},
+	}, activeJobs: 3}
+	before := time.Date(2026, 10, 19, 7, 59, 59, 0, time.UTC)
+	if !e.acceptJobsAt(before) || e.acceptJobsAt(before.Add(time.Second)) {
+		t.Error("acceptJobsAt() did not close admission at 10:00 local time")
+	}
+	if e.ActiveJobs() != 3 {
+		t.Error("closing admission changed accepted job count")
+	}
+	e.workerConfig.Paused = true
+	if e.acceptJobsAt(before) {
+		t.Error("acceptJobsAt() permitted a paused worker inside a weekly window")
+	}
+	e.workerConfig.Paused = false
+	atomic.StoreUint32(&e.activeJobs, 4)
+	if e.acceptJobsAt(before) {
+		t.Error("acceptJobsAt() bypassed the active-job limit inside a weekly window")
+	}
+}
+
 func TestParallelStepQueuesOverlapAndKeepJobState(t *testing.T) {
 	executor := step.NewStepExecutor(model.FFMPEGSNotification, nil)
 	ctx, cancel := context.WithCancel(context.Background())

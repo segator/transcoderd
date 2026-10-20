@@ -29,10 +29,11 @@ type FFMPEGConfig struct {
 }
 
 type Config struct {
-	TemporalPath    string         `mapstructure:"temporalPath" envconfig:"WORKER_TMP_PATH"`
-	Name            string         `mapstructure:"name" envconfig:"WORKER_NAME"`
-	StartAfter      *time.Duration `mapstructure:"startAfter" envconfig:"WORKER_START_AFTER"`
-	StopAfter       *time.Duration `mapstructure:"stopAfter" envconfig:"WORKER_STOP_AFTER"`
+	TemporalPath    string          `mapstructure:"temporalPath" envconfig:"WORKER_TMP_PATH"`
+	Name            string          `mapstructure:"name" envconfig:"WORKER_NAME"`
+	StartAfter      *time.Duration  `mapstructure:"startAfter" envconfig:"WORKER_START_AFTER"`
+	StopAfter       *time.Duration  `mapstructure:"stopAfter" envconfig:"WORKER_STOP_AFTER"`
+	Schedule        *ScheduleConfig `mapstructure:"schedule"`
 	Paused          bool
 	MaxActiveJobs   int           `mapstructure:"maxActiveJobs" envconfig:"WORKER_MAX_ACTIVE_JOBS"`
 	PGSConfig       *PGSConfig    `mapstructure:"pgsConfig"`

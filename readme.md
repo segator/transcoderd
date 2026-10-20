@@ -2,13 +2,15 @@
 
 ![GitHub Release](https://img.shields.io/github/v/release/segator/transcoderd) ![CI](https://github.com/segator/transcoderd/actions/workflows/main.yml/badge.svg)
 
-TranscoderD is a solution that helps to reduce of your video library by converting it to efficient video codec like h265.
+TranscoderD reduces video-library storage with distributed video encoding.
+The worker defaults to AV1 on NVIDIA NVENC and also supports CPU SVT-AV1 and
+the legacy software HEVC profile.
 
 TranscoderD have a server and a worker application. The server will manage and schedule the jobs, the worker will do the actual encoding.
 You can have as many workers you want, locally or remote in multiple machines.
 
 ## Features
-- Convert video files to h265
+- Encode AV1 with NVIDIA NVENC or CPU SVT-AV1; retain x265 HEVC as an explicit alternative
 - Convert audio to AAC for better compatibility.
 - Remove unwanted/duplicated audio tracks
 - PGS (image like subtitles) to SRT: Plex and emby likes to burn this subtitle format to video, meaning almost guaranteed you are going to transcode the video when playing, this is why we convert it to SRT
@@ -57,18 +59,31 @@ docker run -d \
 
 
 ## Worker Installation
+
+Follow the [worker deployment guide](docs/worker-deployment.md) for NVIDIA RTX
+50-series drivers, Linux/Unraid/WSL GPU access, CPU-only workers, and separate
+four-GPU/two-CPU job limits. The [encoding profile reference](docs/encoding-profiles.md)
+explains every video/audio parameter and the [local validation record](docs/av1-worker-profile-validation.md)
+contains the complete movie E2E result. The Docker image bundles FFmpeg and
+codec libraries; the NVIDIA host driver and container runtime still need setup.
+
 ### Run
+
+After preparing the configuration and scratch path from that guide, use a
+published or locally built worker image containing the AV1 change (replace
+`VERSION` with its tag). Older release images can have the legacy HEVC default.
+
 ```bash
-docker run -d \
-       --name transcoderd-worker \
-       --restart=always \
-       -v /tmp:/tmp \ # Ensure to have enough space (+50G, but depends on your biggest media size) on your temporal folder, as the worker will use it heavily for encoding
-       --hostname $(hostname) \ 
-       ghcr.io/segator/transcoderd:worker-v2.4.3 \ # x-release-please-version
-       --web.token my_secret_token \ # Replace it for the same value as in the server config
-        --web.domain http://192.168.1.55:8080 # Replace it for the server IP or public endpoint if you want remote access.
-        
+docker run -d --name transcoderd-worker --restart unless-stopped \
+  --network transcoderd --gpus all \
+  --mount type=bind,src=/srv/transcoderd/gpu.yml,dst=/etc/transcoderd/config.yml,readonly \
+  --mount type=bind,src=/srv/transcoderd/scratch,dst=/scratch \
+  ghcr.io/segator/transcoderd:worker-VERSION --noUpdates
 ```
+
+Use `videoCodec: libsvtav1` and omit the GPU device request for a CPU worker.
+The worker downloads media over the server API, so it needs a reachable server
+URL and matching token rather than a direct media-library mount.
 
 ## Development
 

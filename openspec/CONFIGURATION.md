@@ -172,11 +172,16 @@ worker:
   maxActiveJobs: 2
   ffmpegConfig:
     videoCodec: libsvtav1
-    videoPreset: "3"
+    videoPreset: "4"
     videoCRF: 23
     parallelJobs: 2
     threads: 0
 ```
+
+The CPU example selects preset 4 explicitly as a balanced alternative; omitted
+presets still resolve to the compression-oriented CPU default of 3. Presets
+5 and 6 are also selectable. See the [CPU comparison](../docs/av1-cpu-preset-comparison.md)
+before trading compression for speed. CRF23 is not a per-title quality guarantee.
 
 Both workers request jobs from the same server. Job assignment is based on
 availability, so this does not route a particular movie or source codec to a
@@ -192,6 +197,11 @@ library path in the GPU container; the worker passes its environment to FFmpeg.
 
 The previous HEVC command and defaults remain in the
 [legacy reference](../docs/legacy-hevc-encoding.md).
+
+The [worker deployment guide](../docs/worker-deployment.md) covers NVIDIA driver
+and container-runtime setup, Unraid/WSL differences, image builds, and complete
+GPU/CPU deployment examples. The [encoding profiles](../docs/encoding-profiles.md)
+explain each FFmpeg parameter, including audio and the CPU preset alternatives.
 
 ## PGS OCR settings
 

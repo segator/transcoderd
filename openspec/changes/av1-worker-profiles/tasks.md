@@ -33,5 +33,10 @@
 
 - [x] 5.1 Preserve the container's NVIDIA library search path in the FFmpeg child process and verify a GPU job through the Docker E2E server and worker.
 - [x] 5.2 Document separate GPU and CPU worker limits and retain the previous x265 command as a legacy benchmark reference.
-- [ ] 5.3 Run a complete local movie through the server and GPU worker, then verify its output, size, streams, duration, and event history.
-- [ ] 5.4 Rerun Go tests, lint, OpenSpec validation, and changed-file credential scan; update PR #126 with results.
+- [x] 5.3 Run a complete local movie through the server and GPU worker, then verify its output, size, streams, duration, and event history.
+- [x] 5.4 Rerun Go tests, lint, OpenSpec validation, and changed-file credential scan; update PR #126 with results.
+
+## 6. Deployment and CPU trade-offs
+
+- [x] 6.1 Document Linux, Unraid, and WSL NVIDIA worker prerequisites, separate CPU/GPU worker configuration, image build dependencies, and every production encoder option.
+- [x] 6.2 Compare SVT presets 3–6 with the production NVENC profile at similar scene quality; record measured time/size/quality and recommend selectable CPU options.

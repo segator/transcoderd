@@ -43,6 +43,9 @@ jobs:
       - name: Test
         run: devbox run -- make test
 
+      - name: Test AV1 benchmark lab
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+
       # A versioned FFmpeg builder avoids silently reusing an older binary.
       # A missing builder is built once, then reused by later CI runs.
       - name: Ensure builder images exist

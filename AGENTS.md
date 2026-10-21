@@ -2,18 +2,29 @@
 
 ## Project Overview
 
-TranscoderD is a distributed video transcoding system (server/worker architecture) written in **Go 1.24**.
+TranscoderD is a distributed video transcoding system (server/worker architecture) written in **Go 1.25**.
 Module name: `transcoder`. License: GPLv3.
+
+## OpenSpec
+
+- The current behavior contract lives in [`openspec/specs/`](openspec/specs/). Read the relevant capability before changing observable behavior. [`openspec/BASELINE.md`](openspec/BASELINE.md) maps capabilities to code and records known implementation gaps. [`openspec/CONFIGURATION.md`](openspec/CONFIGURATION.md) and [`openspec/PROTOCOL.md`](openspec/PROTOCOL.md) give the current settings and HTTP wire format.
+- Use the generated OpenSpec skills in `.agents/skills/` for changes: explore or propose, review the proposal and delta specs, apply, check the result against the specs, then archive. Keep active deltas in `openspec/changes/<change>/specs/`; archive completed changes so `openspec/specs/` reflects the shipped behavior.
+- Add or modify a requirement only for an observable contract change. Document configuration defaults and output effects in the relevant spec; keep exact command construction and internal control flow in design/tasks or reference docs. Preserve each capability's existing path. Write all OpenSpec artifacts in English, retaining the `SHALL`/`MUST` markers.
+- When implementation and a spec disagree, investigate the code and tests, record the discrepancy in `openspec/BASELINE.md`, and resolve it through a change. Do not silently rewrite a spec to hide a regression.
+- Validate spec changes with `openspec validate --all --strict` (or `npx -y @fission-ai/openspec@latest validate --all --strict` when the CLI is not installed). Run relevant Go tests as well.
 
 ## Build & Run Commands
 
 ```bash
-mage build:all          # Build both server + worker Go binaries → dist/
-mage build:server       # Build server binary only → dist/transcoderd-server
-mage build:worker       # Build worker binary only → dist/transcoderd-worker
-mage lint:fmt           # Run go fmt ./...
-mage lint:check         # Run golangci-lint (gocritic + gofmt)
-mage lint:fix           # Run golangci-lint --fix
+mage build:all          # Build server and worker binaries via Dagger
+mage build:server       # Build only the server binary
+mage build:worker       # Build only the worker binary
+mage docker:all         # Build server and worker images via Dagger
+mage docker:server      # Build only the server image
+mage docker:worker      # Build only the worker image
+mage lint:fmt           # Format Go source
+mage lint:check         # Run golangci-lint in Dagger
+mage lint:fix           # Apply golangci-lint fixes in Dagger
 ```
 
 ## Test Commands
@@ -22,9 +33,9 @@ mage lint:fix           # Run golangci-lint --fix
 mage test:unit          # Unit tests with coverage
 mage test:race          # Unit tests with race detector
 mage test:short         # Unit tests in short mode
-mage test:integration   # Integration tests (Dagger services)
+mage test:integration   # Integration tests via Dagger services
+mage test:e2e           # Docker end-to-end test via Dagger
 mage test:all           # Unit + integration tests
-mage test:e2e           # Full end-to-end test (Dagger services)
 
 # Run a single test by name
 go test -v -run TestFunctionName ./path/to/package/...
@@ -38,9 +49,10 @@ go test -tags=integration -v -timeout 5m ./integration/...
 
 ## CI Pipeline
 
-- **Lint**: `golangci-lint` via `.github/workflows/lint.yml` (Go 1.24)
-- **Build+Test**: `mage test && mage build` via `.github/workflows/main.yml`
+- **Lint**: `mage lint:check` via `.github/workflows/lint.yml` (Go 1.25)
+- **Build+Test+E2E**: Mage targets backed by Dagger via `.github/workflows/main.yml`
 - **Release**: Release Please (conventional commits) on push to `main`
+- Dev environment managed by **mise**: Go 1.25.0, Mage, and Dagger
 
 ## Code Style Guidelines
 
@@ -172,5 +184,6 @@ Binaries are built with ldflags injecting version info:
 
 ### Docker
 
-Multi-stage Dockerfile: `builder-ffmpeg` → `base` (debian) → `server` / `worker` targets.
+Multi-stage Dockerfile: `builder-ffmpeg` and `builder-pgs` provide binaries and OCR assets; `base` (Debian) feeds the `server` and `worker` targets.
+The FFmpeg builder uses a versioned GHCR tag selected by `FFMPEG_BUILDER_TAG` in the Makefile. Build it locally with `make build-builder-ffmpeg` and publish it with `make publish-builder-ffmpeg` after verification. The current builder compiles FFmpeg 9.0.2 with software AV1 and NVENC encoders, while the worker's default video settings still target HEVC. The worker image's RTX 5080 validation and provisional quality measurements are in `docs/av1-nvenc-validation.md`; they do not define AV1 job defaults. Keep `openspec/specs/distribution/` and the FFmpeg configuration reference in sync when changing this image.
 Images published to `ghcr.io/segator/transcoderd:{server,worker}-{version}`.

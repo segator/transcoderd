@@ -3,6 +3,10 @@
 assets_*
 statik/
 /build/
+/benchmark-input/*
+!/benchmark-input/.gitkeep
+__pycache__/
+*.pyc
 /dist/
 /gui/
 build/coverage.out
@@ -13,10 +17,10 @@ integration/testdata/*.mkv
 !integration/testdata/test_pgs_fixture.mkv
 !integration/testdata/e2e_fixture.mkv
 
-# mise
-.mise/
-
 # act (GitHub Actions local runner)
 .secrets
 .env.act
+
+# mise
+.mise/
 

@@ -689,31 +689,37 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 	}
 }
 
-// builderFfmpegImage replicates the Dockerfile builder-ffmpeg stage as a pure Dagger pipeline.
-// Base: ubuntu:noble-20251013 with FFmpeg compiled from source (~50min).
+// builderFfmpegImage builds the same FFmpeg toolchain as the published image.
+// Base: CUDA 13.3.1 on Ubuntu 24.04 with FFmpeg 9.0.2 (~50min).
 func builderFfmpegImage(client *dagger.Client) *dagger.Container {
 	return client.Container().
-		From("ubuntu:noble-20251013").
+		From("nvidia/cuda:13.3.1-devel-ubuntu24.04").
 		WithEnvVariable("DEBIAN_FRONTEND", "noninteractive").
 		WithExec([]string{
 			"bash", "-c",
 			"apt-get update && " +
 				"apt-get -y --no-install-recommends install git build-essential curl ca-certificates libva-dev " +
-				"python3 python-is-python3 ninja-build meson && " +
+				"python3 python-is-python3 ninja-build meson xz-utils file && " +
 				"apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* && " +
 				"update-ca-certificates",
 		}).
 		WithWorkdir("/app").
 		WithExec([]string{
-			"git", "clone", "--depth", "1", "--branch", "v1.59",
+			"git", "clone", "--depth", "1", "--branch", "v9.0.10",
 			"https://github.com/markus-perl/ffmpeg-build-script.git",
 		}).
 		WithWorkdir("/app/ffmpeg-build-script").
 		WithExec([]string{
 			"bash", "-c",
-			"SKIPINSTALL=yes ./build-ffmpeg --build --enable-gpl-and-non-free",
-		}).
-		WithExec([]string{"rm", "-rf", "packages"})
+			"NUMJOBS=4 CUDA_COMPUTE_CAPABILITY=75 SKIPINSTALL=yes ./build-ffmpeg --build --enable-gpl-and-non-free && " +
+				"workspace/bin/ffmpeg -hide_banner -version | head -n 1 | grep -Fq 'ffmpeg version 9.0.2' && " +
+				"workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' libsvtav1 ' && " +
+				"workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' libaom-av1 ' && " +
+				"workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' av1_nvenc ' && " +
+				"workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' libx265 ' && " +
+				"workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' libfdk_aac ' && " +
+				"rm -rf packages",
+		})
 }
 
 // builderPgsImage replicates the Dockerfile builder-pgs stage as a pure Dagger pipeline.

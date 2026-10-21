@@ -72,17 +72,23 @@ docker run -d \
 
 ## Development
 
-### Prerequisites
-- [mise](https://mise.jdx.dev/) + [direnv](https://direnv.net/) (auto-installs Go, Mage, Dagger on `cd`)
-- Docker
+The current behavior contracts are in [OpenSpec](./openspec/specs/). Start with the [baseline map and known gaps](./openspec/BASELINE.md), [configuration reference](./openspec/CONFIGURATION.md), and [HTTP protocol reference](./openspec/PROTOCOL.md) before changing a capability; contributor guidance is in [AGENTS.md](./AGENTS.md).
 
+### Prerequisites
+- [Go 1.25](https://go.dev/dl/)
+- [golangci-lint](https://golangci-lint.run/welcome/install/)
+- Docker with [buildx](https://docs.docker.com/build/install-buildx/) (for container builds)
+- PostgreSQL (for integration tests, provided via testcontainers)
+
+Install [mise](https://mise.jdx.dev/) for Go, Mage, and Dagger tooling. Dagger runs builds and tests in reproducible containers.
 
 ### Build
 
 ```bash
-mage build:all          # Build server + worker Go binaries -> dist/
-mage build:server       # Build server binary only
-mage build:worker       # Build worker binary only
+mage build:all          # Build server and worker binaries
+mage docker:all         # Build server and worker Docker images
+mage docker:server      # Build only the server image
+mage docker:worker      # Build only the worker image
 ```
 
 ### Test
@@ -91,9 +97,11 @@ mage build:worker       # Build worker binary only
 mage test:unit          # Unit tests with coverage
 mage test:race          # Unit tests with race detector
 mage test:short         # Unit tests in short mode
-mage test:integration   # Integration tests (via Dagger services)
+mage test:integration   # Integration tests via Dagger services
 mage test:all           # Unit + integration tests
-mage test:e2e           # Full end-to-end test (server + worker + postgres in Dagger)
+
+# Run a single test
+go test -v -run TestFunctionName ./path/to/package/...
 ```
 
 ### Lint
@@ -101,36 +109,29 @@ mage test:e2e           # Full end-to-end test (server + worker + postgres in Da
 ```bash
 mage lint:check         # Run golangci-lint
 mage lint:fix           # Run golangci-lint with auto-fix
-mage lint:fmt           # Run go fmt
 ```
 
-### Docker (via Dagger)
+### Docker
 
-Container images are built using [Dagger](https://dagger.io/) for content-addressed caching.
-
-```bash
-mage docker:all         # Build server + worker Docker images (loads locally)
-mage docker:server      # Build server Docker image only
-mage docker:worker      # Build worker Docker image only
-mage docker:ffmpeg      # Build FFmpeg builder image locally (~50min)
-mage docker:pgs         # Build PGS builder image locally (~5min)
-```
-
-### Publish
+The Dagger pipeline builds FFmpeg 9.0.2 with `libsvtav1`, `libaom-av1`, and
+`av1_nvenc`, and builds the PGS assets used by the worker. These builds run in
+containers and do not require a GPU on the build host. GPU encoding at runtime
+requires a compatible NVIDIA GPU and driver exposed to the worker container.
+On Linux, configure NVIDIA Container Toolkit and run with `--gpus all`. The
+worker image has also been tested on an RTX 5080 under WSL2 using direct device
+and driver mounts. See [AV1/NVENC validation](docs/av1-nvenc-validation.md).
 
 ```bash
-mage publish:app        # Push server + worker images to registry
-mage publish:ffmpeg     # Push FFmpeg builder image
-mage publish:pgs        # Push PGS builder image
-mage publish:all        # Push all images
+mage docker:ffmpeg      # Build FFmpeg builder image
+mage docker:pgs         # Build PGS asset image
+mage publish:app        # Push server and worker images
 ```
 
 ### CI Pipeline
 
 - **Lint**: runs `golangci-lint` on every push and PR
-- **Build + Test**: runs `mage test` and `mage build` on every push and PR
-- **Docker**: builds container images via Dagger on every push and PR
-- **Docker Publish**: pushes Docker images on pushes to `main` only (PRs skip publish)
+- **Build + Test + E2E**: runs Mage/Dagger tests, builds both Docker images, and runs Docker E2E on pushes and PRs
+- **Docker Publish**: pushes server and worker images on `main`
 - **Release**: managed by [Release Please](https://github.com/googleapis/release-please) on `main` using conventional commits
 
 ### Project Structure
@@ -139,7 +140,6 @@ mage publish:all        # Push all images
 cmd/            # Shared CLI config (pflag, viper, mapstructure)
 model/          # Domain types (Job, Event, Worker)
 helper/         # Utilities (command exec, concurrent collections, progress)
-magefiles/      # Mage build targets (Dagger-powered container builds)
 server/         # Server application
   config/       # Server config structs
   repository/   # PostgreSQL repository (interface + SQL impl)

@@ -43,20 +43,18 @@ jobs:
       - name: Test
         run: devbox run -- make test
 
-      # Ensure pre-built builder images exist in the registry. These are normally
-      # published via the "Publish builder images" workflow and only need rebuilding
-      # when FFmpeg/PGS dependencies change. This step is a safety net that builds
-      # and pushes them if they are missing (e.g. first run after setup).
+      # A versioned FFmpeg builder avoids silently reusing an older binary.
+      # A missing builder is built once, then reused by later CI runs.
       - name: Ensure builder images exist
         run: |
-          for target in builder-ffmpeg builder-pgs; do
-            if ! docker manifest inspect ghcr.io/segator/transcoderd:${target} > /dev/null 2>&1; then
-              echo "Image ${target} not found, building and pushing..."
-              make publish-${target}
-            else
-              echo "Image ${target} already exists, skipping."
-            fi
-          done
+          ffmpeg_image=$(make -s print-ffmpeg-builder-image)
+          if ! docker manifest inspect "$ffmpeg_image" > /dev/null 2>&1; then
+            echo "Image ${ffmpeg_image} not found, building and pushing..."
+            make publish-builder-ffmpeg
+          fi
+          if ! docker manifest inspect ghcr.io/segator/transcoderd:builder-pgs > /dev/null 2>&1; then
+            make publish-builder-pgs
+          fi
 
       - name: Build
         run: devbox run -- make build

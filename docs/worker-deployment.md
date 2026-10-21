@@ -66,7 +66,8 @@ Follow the plugin's reboot/runtime instructions for the installed Unraid
 version. The GPU must be available to the host driver rather than reserved
 exclusively for a VM.
 
-In the worker Docker template, mount the configuration and scratch directory,
+In the worker Docker template, mount the scratch directory and supply the CLI
+worker arguments shown below as the container command,
 select the NVIDIA runtime/GPU using the plugin's instructions, and expose
 `NVIDIA_VISIBLE_DEVICES` (the GPU UUID or `all`) and
 `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video`. Some installations use
@@ -89,120 +90,91 @@ Its working alternative exposes the WSL GPU interface and driver mounts:
 
 ```bash
 docker run --rm --name transcoderd-gpu --network transcoderd \
+  --env TZ=Europe/Madrid \
   --device /dev/dxg \
   --mount type=bind,src=/usr/lib/wsl/lib,dst=/usr/lib/wsl/lib,readonly \
   --mount type=bind,src=/usr/lib/wsl/drivers,dst=/usr/lib/wsl/drivers,readonly \
   --env LD_LIBRARY_PATH=/usr/lib/wsl/lib \
-  --mount type=bind,src=/srv/transcoderd/gpu.yml,dst=/etc/transcoderd/config.yml,readonly \
-  --mount type=bind,src=/srv/transcoderd/scratch,dst=/scratch \
-  ghcr.io/segator/transcoderd:worker-VERSION --noUpdates
+  --mount type=bind,src=/srv/transcoderd/scratch,dst=/tmp \
+  ghcr.io/segator/transcoderd:worker-VERSION --noUpdates \
+  --web.domain "${TRANSCODER_SERVER_URL:?Set the server URL}" \
+  --web.token "${TRANSCODER_TOKEN:?Set the server token}" \
+  --worker.name gpu-5080 --worker.maxActiveJobs 4 \
+  --worker.ffmpegConfig.videoCodec av1_nvenc \
+  --schedule=22:00-10:00
 ```
 
 These WSL paths are host-specific and are not a Linux/Unraid configuration.
 No privileged container was needed. The opt-in GPU E2E helper uses these same
 mounts. See [GPU validation](av1-nvenc-validation.md).
 
-## Four GPU jobs and two CPU jobs on one host
+## CLI-only CPU and GPU workers
 
-Run two instances with distinct worker names. Each instance selects one video
-encoder and has an independent job limit. Use the same server URL and token
-in both files, and ensure that the server is reachable on the Docker network.
-The token below is a placeholder to replace with your own server credential.
+Run one worker instance per encoder. The ordinary node-specific settings are
+its name, `maxActiveJobs`, and `videoCodec`. Encoder defaults supply preset,
+quality, pixel format, audio, and mux options. Omitted encode concurrency
+inherits `maxActiveJobs`; the advanced `ffmpegConfig.parallelJobs` override is
+optional. Shared connection and schedule arguments can be copied between nodes.
+No per-worker YAML file or configuration mount is required. Mount scratch at
+`/tmp` so the default worker workspace persists across container restarts.
 
-The examples use a user-defined network named `transcoderd`. Create it once
-and attach the existing server from the README with the DNS alias used below:
+Choose a built/published image containing this change. Set `TRANSCODER_IMAGE`
+to its `ghcr.io/segator/transcoderd:worker-VERSION` tag,
+`TRANSCODER_SERVER_URL` to the reachable server URL, and `TRANSCODER_TOKEN`
+to your server credential in your shell. Do not put a real token in a committed
+script. Create `/srv/transcoderd/scratch` on each node before starting.
 
-```bash
-docker network create transcoderd
-docker network connect --alias transcoderd-server transcoderd transcoder-daemon
-```
-
-For a server on another host, set `web.domain` to its reachable URL instead.
-An existing deployment can use its own network and server DNS name.
-
-```yaml
-# /srv/transcoderd/gpu.yml
-web:
-  domain: http://transcoderd-server:8080
-  token: replace-this-token
-worker:
-  name: gpu-5080
-  temporalPath: /scratch
-  maxActiveJobs: 4
-  ffmpegConfig:
-    videoCodec: av1_nvenc
-    videoPreset: p7
-    videoCQ: 34
-    videoQMax: 100
-    parallelJobs: 4
-    threads: 0
-    audioCodec: libfdk_aac
-    audioVBR: 5
-```
-
-```yaml
-# /srv/transcoderd/cpu.yml
-web:
-  domain: http://transcoderd-server:8080
-  token: replace-this-token
-worker:
-  name: cpu-9900x3d
-  temporalPath: /scratch
-  maxActiveJobs: 2
-  ffmpegConfig:
-    videoCodec: libsvtav1
-    videoPreset: "4"
-    videoCRF: 23
-    parallelJobs: 2
-    threads: 0
-    audioCodec: libfdk_aac
-    audioVBR: 5
-```
-
-Create `/srv/transcoderd/scratch` and the two configuration files first. On a
-normal Linux host with the NVIDIA Container Toolkit configured:
+GPU example on Linux with the NVIDIA Container Toolkit:
 
 ```bash
-docker run -d --name transcoderd-gpu --restart unless-stopped \
-  --network transcoderd --gpus all \
-  --mount type=bind,src=/srv/transcoderd/gpu.yml,dst=/etc/transcoderd/config.yml,readonly \
-  --mount type=bind,src=/srv/transcoderd/scratch,dst=/scratch \
-  ghcr.io/segator/transcoderd:worker-VERSION --noUpdates
+docker run -d --name transcoderd-gpu --restart unless-stopped --gpus all \
+  --env TZ=Europe/Madrid \
+  --mount type=bind,src=/srv/transcoderd/scratch,dst=/tmp \
+  "${TRANSCODER_IMAGE:?Set the worker image tag}" --noUpdates \
+  --web.domain "${TRANSCODER_SERVER_URL:?Set the server URL}" \
+  --web.token "${TRANSCODER_TOKEN:?Set the server token}" \
+  --worker.name gpu-5080 --worker.maxActiveJobs 4 \
+  --worker.ffmpegConfig.videoCodec av1_nvenc \
+  --schedule=22:00-10:00
+```
 
+CPU example:
+
+```bash
 docker run -d --name transcoderd-cpu --restart unless-stopped \
-  --network transcoderd \
-  --mount type=bind,src=/srv/transcoderd/cpu.yml,dst=/etc/transcoderd/config.yml,readonly \
-  --mount type=bind,src=/srv/transcoderd/scratch,dst=/scratch \
-  ghcr.io/segator/transcoderd:worker-VERSION --noUpdates
+  --env TZ=Europe/Madrid \
+  --mount type=bind,src=/srv/transcoderd/scratch,dst=/tmp \
+  "${TRANSCODER_IMAGE:?Set the worker image tag}" --noUpdates \
+  --web.domain "${TRANSCODER_SERVER_URL:?Set the server URL}" \
+  --web.token "${TRANSCODER_TOKEN:?Set the server token}" \
+  --worker.name cpu-9900x3d --worker.maxActiveJobs 2 \
+  --worker.ffmpegConfig.videoCodec libsvtav1 \
+  --schedule=22:00-10:00
 ```
 
-The CPU example explicitly selects the balanced preset-4 override. Omitting
-`videoPreset` still selects preset 3, the compression-oriented CPU default.
-CRF23 is a configurable starting value, not a guarantee of p5 VMAF on every
-title. See the [matched-quality CPU comparison](av1-cpu-preset-comparison.md).
+Both examples accept new jobs every day from 22:00 inclusive until 10:00
+exclusive in Europe/Madrid. This includes weekends. Accepted jobs finish after
+the cutoff. See [scheduling](worker-scheduling.md) for timezone and overrun rules.
 
-The different names produce different scratch subdirectories. Workers download
-sources from the server API; they do not need the library mounted directly.
-Provision scratch space for all accepted source copies and output files.
-`maxActiveJobs` includes download, subtitles, encode, verification, and upload;
-`parallelJobs` limits simultaneous FFmpeg encodes. With these values, at most
-four GPU and two CPU jobs can be active. The server assigns available jobs;
-it does not route particular source codecs or titles to CPU versus GPU.
+Use distinct names on a shared scratch directory. Workers download sources
+from the server API and need no direct library mount. Provision scratch for all
+accepted source copies and outputs. For a local Docker server, connect both
+containers to its user-defined network and use the server's DNS alias; a remote
+server needs a URL reachable from each container.
 
-Slot counts do not multiply speed linearly. A 120-second 1080p trial measured
-1.85× aggregate GPU throughput at four jobs versus one, and only 1.17× CPU
-throughput at two jobs versus one. The mixed four-GPU-plus-two-CPU workload
-has not been measured and can contend for CPU, memory, and I/O. For the
-balanced library migration, begin with the GPU worker and enable CPU capacity
-only when its extra storage saving or host utilization justifies it.
+The GPU profile is the approved p7/UHQ/CQ34 recipe; CPU selection resolves its
+software profile automatically. Advanced preset/CRF overrides remain available
+for experiments and rollback. The [encoder reference](encoding-profiles.md)
+describes the exact current defaults. Whole-film follow-up measurements will
+determine the recommended general CPU preset; the prior short-scene projections
+are not completed movie results.
 
-## Restrict job acceptance to selected hours
-
-Both worker instances support `worker.schedule.timeZone` and
-`worker.schedule.windows`. Copy the same schedule into each YAML file to limit
-new requests to the same periods. See [weekly scheduling](worker-scheduling.md)
-for daily cutoff and weekday/weekend examples, CLI overrides, timezone behavior,
-and what happens to accepted jobs after the cutoff.
+`maxActiveJobs` includes download, subtitles, encode, verification, and upload.
+With no encode override, four accepted GPU jobs can encode together and two
+accepted CPU jobs can encode together. The server assigns available jobs; it
+does not route particular titles or source codecs to CPU versus GPU. Increasing
+slots does not multiply throughput linearly. Mixed four-GPU-plus-two-CPU load
+and wall-plug energy have not been measured.
 
 ## What the build pipeline does
 

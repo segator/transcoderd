@@ -64,10 +64,10 @@ server:
 | `worker.temporalPath` | OS temporary directory | Parent of `worker-<name>` workspaces. |
 | `worker.threads` | Number of CPUs, capped at 16 | Registered flag; the current encoder does not read this field. See `BASELINE.md`. |
 | `worker.maxActiveJobs` | `2` | Maximum accepted jobs, including jobs before and after encoding. |
-| `worker.ffmpegConfig.parallelJobs` | `2` | Maximum simultaneous FFmpeg encode jobs on this worker. |
+| `worker.ffmpegConfig.parallelJobs` | `0` | Inherits `worker.maxActiveJobs`; a positive advanced override limits simultaneous encodes separately. |
 | `worker.ffmpegConfig.threads` | `0` | Value passed to FFmpeg's `-threads` option; zero lets FFmpeg decide. |
 | `worker.ffmpegConfig.videoCodec` | `av1_nvenc` | Selects the AV1 GPU profile, `libsvtav1` CPU profile, or explicit `libx265` rollback. |
-| `worker.ffmpegConfig.videoPreset` | Empty | Profile default: NVENC `p7`, SVT `3`, x265 `medium`. A supplied value must be valid for the selected encoder. |
+| `worker.ffmpegConfig.videoPreset` | Empty | Profile default: NVENC `p7`, SVT `4`, x265 `medium`. A supplied value must be valid for the selected encoder. |
 | `worker.ffmpegConfig.videoCQ` | `0` (profile default) | NVENC CQ; zero selects `34`. Invalid with CPU or x265. |
 | `worker.ffmpegConfig.videoQMax` | `0` (profile default) | NVENC maximum QP; zero selects `100`. Paired with `-qmin 0`. Invalid with CPU or x265. |
 | `worker.ffmpegConfig.videoCRF` | `0` (profile default) | SVT CRF `23` or x265 CRF `21` when omitted. Invalid with NVENC. |
@@ -78,11 +78,12 @@ server:
 | `worker.verifyDeltaTime` | `60` | Maximum absolute source/output duration difference in seconds. |
 | `worker.startAfter` | `0s` | Optional local time elapsed since midnight before accepting work. |
 | `worker.stopAfter` | `0s` | Optional local time elapsed since midnight after which work is not accepted. |
-| `worker.schedule.timeZone` | `Local` | IANA timezone for weekly admission windows; use an explicit zone in containers. |
+| `worker.schedule.timeZone` | `Local` | IANA timezone for advanced weekly admission windows; defaults to the worker process timezone. |
 | `worker.schedule.windows` | Empty list | OR of `Days@HH:MM-HH:MM` intervals for new requests; start inclusive, end exclusive. |
+| `--schedule` | No windows | Repeatable daily `HH:MM-HH:MM` CLI shortcut using the process timezone; overrides YAML windows when supplied. |
 | `worker.paused` | `false` when omitted | Disables requests for new jobs; no CLI flag is registered. |
 
-`worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered but does not control FFmpeg. With no nested `threads` value, the command asks FFmpeg for `-threads 0`. SVT-AV1 also manages its own internal parallelism. `worker.maxActiveJobs` and `worker.ffmpegConfig.parallelJobs` are different limits: the first bounds entire in-flight jobs; the second bounds simultaneous encodes. Set both to `1` for serial operation. The default permits two GPU encode jobs once two accepted jobs reach that phase. This is a concurrency limit, not a promise of twice the throughput.
+`worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered but does not control FFmpeg. With no nested `threads` value, the command asks FFmpeg for `-threads 0`. SVT-AV1 also manages its own internal parallelism. `worker.maxActiveJobs` bounds entire in-flight jobs and, by default, simultaneous encodes. The optional `worker.ffmpegConfig.parallelJobs` override separates the encode limit; zero inherits the active-job limit. Set only `maxActiveJobs` to `1` for serial operation. The default permits two GPU encode jobs once two accepted jobs reach that phase. This is a concurrency limit, not a promise of twice the throughput.
 
 The worker image bundles FFmpeg 9.0.2 with `libsvtav1`, `libaom-av1`, and `av1_nvenc`. The default now requires an NVIDIA GPU available to the worker container. On Linux, configure the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) and pass `--gpus all`; WSL2 may require the validated `/dev/dxg` driver mounts described in [the RTX 5080 validation](../docs/av1-nvenc-validation.md). For CPU-only workers select `libsvtav1` explicitly. Invalid combinations fail at worker startup, before accepting jobs. The exact approved full-film argument vector is in [the pilot record](../docs/av1-gpu-full-film-command.md).
 
@@ -90,15 +91,19 @@ The FFmpeg command maps the first video stream, scales width to `min(1920, input
 
 ### Weekly job admission
 
-Set `worker.schedule.timeZone: Europe/Madrid` and a `windows` list such as
-`["Mon-Fri@00:00-10:00", "Mon-Fri@14:00-18:00", "Mon-Fri@22:00-24:00", "Sat-Sun@00:00-24:00"]`
-to allow several periods per weekday and all-day weekends. Entries accept `*`,
-a three-letter weekday, or an inclusive weekday range. Overnight windows belong
-to their starting day, starts are inclusive, and ends exclusive. `24:00` is
-allowed only as an end. Civil clock time follows timezone/DST transitions;
-timezone data is bundled. Empty windows disable the weekly restriction.
+Use `TZ=Europe/Madrid` and repeatable `--schedule=HH:MM-HH:MM` arguments for
+daily admission windows. For example, `--schedule=22:00-10:00` permits new
+requests every day from 22:00 until 10:00 in the process timezone. Repeated
+flags form an OR, so `--schedule=22:00-10:00 --schedule=14:00-16:00` permits
+both periods. This top-level shortcut replaces `worker.schedule.windows` from
+YAML when supplied. Advanced weekday windows can still use
+`worker.schedule.windows` or `--worker.schedule.windows`; selectors accept
+`*`, a three-letter weekday, or an inclusive weekday range. Overnight windows
+belong to their starting day, starts are inclusive, and ends exclusive.
+`24:00` is allowed only as an end. Civil clock time follows timezone/DST
+transitions; timezone data is bundled. Empty windows disable the restriction.
 
-Both settings have CLI flags. `--worker.schedule.windows=` clears YAML windows.
+The advanced settings have CLI flags; `--schedule=` clears configured windows.
 Invalid entries, invalid zones, or combining weekly windows with active legacy
 `startAfter`/`stopAfter` settings fail startup before server contact. Legacy
 fields keep their existing duration semantics. Closing admission leaves accepted,
@@ -131,12 +136,12 @@ The video portion is one of:
 AV1 GPU: -pix_fmt p010le -c:v av1_nvenc -preset p7 -tune uhq -rc vbr
          -cq 34 -b:v 0 -multipass fullres -bf 4 -b_ref_mode middle
          -split_encode_mode disabled -qmin 0 -qmax 100
-AV1 CPU: -pix_fmt yuv420p10le -c:v libsvtav1 -preset 3 -crf 23
+AV1 CPU: -pix_fmt yuv420p10le -c:v libsvtav1 -preset 4 -crf 23
 HEVC:    -pix_fmt yuv420p10le -c:v libx265 -crf 21
          -profile:v main10 -preset medium
 ```
 
-The output is probed, hashed with SHA-256, and measured in bytes. Duration verification uses `worker.verifyDeltaTime`; an encoded MKV larger than its source is rejected before upload. No VMAF prepass or automatic retry is required. The fixed GPU CQ34 profile produced good visual quality on one complete high-bitrate H.264 film, but it is not a guaranteed p5 VMAF target for every title. SVT preset 3 was tested with several CRFs; the default CRF23 is conservative and configurable.
+The output is probed, hashed with SHA-256, and measured in bytes. Duration verification uses `worker.verifyDeltaTime`; an encoded MKV larger than its source is rejected before upload. No VMAF prepass or automatic retry is required. The fixed GPU CQ34 profile produced good visual quality on one complete high-bitrate H.264 film, but it is not a guaranteed p5 VMAF target for every title. SVT preset 4 / CRF23 is the provisional CPU default: one full-film comparison found preset 3 took about twice as long for a 1.9% smaller output and a 0.36-point higher whole-film p5. Additional film types remain to be measured.
 
 ### Example worker YAML
 
@@ -162,47 +167,26 @@ worker:
     parallelJobs: 2
 ```
 
-For a CPU worker set `videoCodec: libsvtav1`, `videoPreset: "3"`, and `videoCRF: 23`; set `parallelJobs: 1` if a single SVT encode should have the CPU to itself. For x265 rollback set `videoCodec: libx265`, `videoPreset: medium`, `videoProfile: main10`, and `videoCRF: 21`. Remove NVENC-only `videoCQ` and `videoQMax` from either alternative profile. The separate `worker.threads` flag does not drive FFmpeg. The worker image supplies FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract assets.
+For a CPU worker set `videoCodec: libsvtav1`; the default is preset `4` / CRF `23`. Set `parallelJobs: 1` if a single SVT encode should have the CPU to itself. For x265 rollback set `videoCodec: libx265`, `videoPreset: medium`, `videoProfile: main10`, and `videoCRF: 21`. Remove NVENC-only `videoCQ` and `videoQMax` from either alternative profile. The separate `worker.threads` flag does not drive FFmpeg. The worker image supplies FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract assets.
 
 ### Separate CPU and GPU workers
 
-Run two worker instances with distinct names and configuration files to use
-both encoders against one server. Each instance has its own limits:
+Run two worker instances using the same server URL, credential, and schedule.
+Their node-specific encoder arguments are:
 
-```yaml
-# gpu-worker.yml
-web:
-  domain: http://transcoderd-server:8080
-  token: replace-this-token
-worker:
-  name: gpu-5080
-  maxActiveJobs: 4
-  ffmpegConfig:
-    videoCodec: av1_nvenc
-    parallelJobs: 4
-    threads: 0
+```text
+GPU: --worker.name gpu-5080 --worker.maxActiveJobs 4 --worker.ffmpegConfig.videoCodec av1_nvenc
+CPU: --worker.name cpu-9900x3d --worker.maxActiveJobs 2 --worker.ffmpegConfig.videoCodec libsvtav1
 ```
 
-```yaml
-# cpu-worker.yml
-web:
-  domain: http://transcoderd-server:8080
-  token: replace-this-token
-worker:
-  name: cpu-9900x3d
-  maxActiveJobs: 2
-  ffmpegConfig:
-    videoCodec: libsvtav1
-    videoPreset: "4"
-    videoCRF: 23
-    parallelJobs: 2
-    threads: 0
-```
-
-The CPU example selects preset 4 explicitly as a balanced alternative; omitted
-presets still resolve to the compression-oriented CPU default of 3. Presets
-5 and 6 are also selectable. See the [CPU comparison](../docs/av1-cpu-preset-comparison.md)
-before trading compression for speed. CRF23 is not a per-title quality guarantee.
+Omitted video settings resolve to the selected encoder's defaults. Omitted
+`parallelJobs` follows `maxActiveJobs`, so no second concurrency setting is
+needed. Preset/quality overrides remain available for benchmarks and advanced
+use. Shared `TZ=Europe/Madrid --schedule=22:00-10:00` arguments permit new
+requests nightly on every day, including weekends. See
+[the deployment guide](../docs/worker-deployment.md) for complete CLI-only Docker
+commands and scratch/GPU access. YAML examples above remain supported for
+existing installations; no YAML file is required.
 
 Both workers request jobs from the same server. Job assignment is based on
 availability, so this does not route a particular movie or source codec to a

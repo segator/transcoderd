@@ -26,7 +26,7 @@ func TestResolveVideoSettings(t *testing.T) {
 		{
 			name: "CPU default",
 			cfg:  FFMPEGConfig{VideoCodec: AV1SVT},
-			want: VideoSettings{Codec: AV1SVT, Preset: "3", PixelFormat: "yuv420p10le", CRF: 23},
+			want: VideoSettings{Codec: AV1SVT, Preset: "4", PixelFormat: "yuv420p10le", CRF: 23},
 		},
 		{
 			name: "CPU quality override",
@@ -86,7 +86,7 @@ func TestWorkerConfigValidation(t *testing.T) {
 		cfg  Config
 	}{
 		{"zero active jobs", Config{EncodeConfig: &FFMPEGConfig{ParallelJobs: 2}}},
-		{"zero parallel encodes", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{}}},
+		{"negative parallel encodes", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: -1}}},
 		{"unsupported codec", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2, VideoCodec: "unknown"}}},
 		{"excess threads", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2, Threads: 256}}},
 	}

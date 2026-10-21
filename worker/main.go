@@ -12,6 +12,7 @@ import (
 	"transcoder/cmd"
 	"transcoder/update"
 	"transcoder/version"
+	"transcoder/worker/config"
 	"transcoder/worker/console"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/worker"
@@ -52,11 +53,11 @@ func init() {
 	pflag.String("worker.ffmpegConfig.audioCodec", "libfdk_aac", "FFMPEG Audio Codec")
 	pflag.Int("worker.ffmpegConfig.audioVBR", 5, "FFMPEG Audio VBR")
 	pflag.String("worker.ffmpegConfig.videoCodec", "av1_nvenc", "Video encoder: av1_nvenc, libsvtav1, or libx265")
-	pflag.String("worker.ffmpegConfig.videoPreset", "", "Video preset; defaults to p7, 3, or medium by encoder")
+	pflag.String("worker.ffmpegConfig.videoPreset", "", "Video preset; defaults to p7, 4, or medium by encoder")
 	pflag.String("worker.ffmpegConfig.videoProfile", "", "x265 profile; defaults to main10")
 	pflag.Int("worker.ffmpegConfig.videoCQ", 0, "AV1 NVENC CQ; defaults to 34")
 	pflag.Int("worker.ffmpegConfig.videoQMax", 0, "AV1 NVENC maximum QP; defaults to 100")
-	pflag.Int("worker.ffmpegConfig.parallelJobs", 2, "Maximum simultaneous FFmpeg encode jobs")
+	pflag.Int("worker.ffmpegConfig.parallelJobs", 0, "Maximum simultaneous FFmpeg encode jobs (0 inherits worker.maxActiveJobs)")
 	pflag.Int("worker.ffmpegConfig.threads", 0, "FFmpeg thread count (0 lets FFmpeg decide)")
 	pflag.String("worker.ffmpegConfig.extraArgs", "", "FFMPEG Extra Args")
 	pflag.Int("worker.verifyDeltaTime", 60, "FFMPEG Verify Delta Time in seconds, is the max range of time that the video can be different from the original, if is superior then the video is marked as invalid")
@@ -64,9 +65,30 @@ func init() {
 	pflag.Duration("worker.startAfter", 0, "Legacy daily admission start as a duration since midnight, e.g. 8h")
 	pflag.Duration("worker.stopAfter", 0, "Legacy daily admission end as a duration since midnight, e.g. 22h")
 	pflag.String("worker.schedule.timeZone", "Local", "Admission timezone (IANA name, e.g. Europe/Madrid)")
-	pflag.StringSlice("worker.schedule.windows", nil, "Allowed job-request windows, e.g. Mon-Fri@00:00-10:00,Sat-Sun@00:00-24:00")
+	pflag.StringSlice("worker.schedule.windows", nil, "Allowed job-request windows, e.g. 22:00-10:00 or Mon-Fri@00:00-10:00")
+	pflag.StringArray("schedule", nil, "Daily job-request window HH:MM-HH:MM; repeat to add windows; follows the process timezone")
 
 	cmd.ViperConfig(&opts)
+	if pflag.Lookup("schedule").Changed {
+		schedules, err := pflag.CommandLine.GetStringArray("schedule")
+		if err != nil {
+			log.Panic(err)
+		}
+		applyScheduleFlag(opts.Worker, schedules)
+	}
+}
+
+func applyScheduleFlag(worker *config.Config, schedules []string) {
+	if worker == nil || schedules == nil {
+		return
+	}
+	if len(schedules) == 1 && schedules[0] == "" {
+		schedules = nil
+	}
+	if worker.Schedule == nil {
+		worker.Schedule = &config.ScheduleConfig{TimeZone: "Local"}
+	}
+	worker.Schedule.Windows = schedules
 }
 
 func main() {

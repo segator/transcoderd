@@ -8,7 +8,7 @@
 
 ## 2. FFmpeg profiles and output verification
 
-- [x] 2.1 Generate structured FFmpeg arguments for exact NVENC p7/UHQ/CQ34, SVT preset3/CRF23, and x265 rollback profiles while retaining stream mapping and scaling; verify table-driven command tests.
+- [x] 2.1 Generate structured FFmpeg arguments for exact NVENC p7/UHQ/CQ34, SVT preset4/CRF23, and x265 rollback profiles while retaining stream mapping and scaling; verify table-driven command tests.
 - [x] 2.2 Record actual encoded MKV bytes before verification and reject outputs larger than the source; verify size and duration checks with focused tests.
 - [x] 2.3 Run real local GPU and CPU AV1 encodes from a representative fixture with the generated arguments, then probe and decode both outputs; verify codecs, bit depth, audio, subtitle mapping, and duration.
 
@@ -47,3 +47,11 @@
 - [x] 7.2 Apply weekly windows before new job requests without stopping accepted work; test exact boundaries, multiple windows, weekends, overnight windows, timezone offsets, DST, pause, and concurrency limits.
 - [x] 7.3 Document cutoff-only and weekday/weekend examples for both workers, explain job overruns and tariff/calendar limits, and express the measured CPU/GPU comparison in minutes with projection limits.
 - [x] 7.4 Run Go and race tests, lint, strict OpenSpec validation, review the diff for credentials, and update PR #126 with the results.
+
+## 8. Whole-film benchmarks and simpler defaults
+
+- [x] 8.1 Extend full-film E2E controls/reporting and a resumable local runner to retain exact settings, phase timings, CPU/memory telemetry, and completed outputs safely.
+- [x] 8.2 Compare CPU presets 6, 4, and 3 against fixed GPU on complete 60-second source clips from H.264 film, HEVC concert, and difficult-scene material; score every clip frame and retain repeated isolated timings. Treat results as provisional rather than whole-film claims.
+- [x] 8.3 Make omitted encode concurrency inherit maxActiveJobs, select provisional CPU preset 4 from the completed short-scene evidence, and verify explicit overrides/default-only worker selection.
+- [x] 8.4 Support simple daily CLI schedule shorthand and document portable CLI-only Docker commands with the revised 22:00-10:00 Europe/Madrid schedule.
+- [x] 8.5 Publish completed measurements with clear quality/time/resource boundaries, run relevant tests/builds/spec validation and credential review, and update PR #126.

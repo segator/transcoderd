@@ -56,6 +56,10 @@ func TestWeeklyAdmissionOvernightAndDST(t *testing.T) {
 		{"range wraps", "Fri-Mon@12:00-14:00", "2026-10-25T12:00:00+01:00", true},
 		{"case insensitive", "mon@12:00-14:00", "2026-10-19T12:00:00+02:00", true},
 		{"all days", "*@12:00-14:00", "2026-10-21T12:00:00+02:00", true},
+		{"daily shorthand opens", "22:00-10:00", "2026-10-19T22:00:00+02:00", true},
+		{"daily shorthand overnight", "22:00-10:00", "2026-10-20T09:59:59+02:00", true},
+		{"daily shorthand closes", "22:00-10:00", "2026-10-20T10:00:00+02:00", false},
+		{"daily shorthand closed", "22:00-10:00", "2026-10-20T21:59:59+02:00", false},
 		{"spring uses civil clock", "Sun@03:00-04:00", "2026-03-29T01:30:00Z", true},
 		{"spring nonexistent hour skipped", "Sun@02:00-03:00", "2026-03-29T01:30:00Z", false},
 		{"autumn first repeated hour", "Sun@02:00-03:00", "2026-10-25T00:30:00Z", true},
@@ -85,7 +89,7 @@ func TestScheduleValidation(t *testing.T) {
 		cfg  ScheduleConfig
 	}{
 		{"invalid zone", ScheduleConfig{TimeZone: "Not/A_Zone"}},
-		{"missing separator", ScheduleConfig{Windows: []string{"00:00-10:00"}}},
+		{"missing hours", ScheduleConfig{Windows: []string{"Mon-Fri"}}},
 		{"unknown day", ScheduleConfig{Windows: []string{"Monday@00:00-10:00"}}},
 		{"invalid range", ScheduleConfig{Windows: []string{"Mon-Bad@00:00-10:00"}}},
 		{"missing end", ScheduleConfig{Windows: []string{"*@00:00"}}},

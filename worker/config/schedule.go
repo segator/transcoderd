@@ -88,7 +88,7 @@ func (s *ScheduleConfig) parse() (*time.Location, []admissionWindow, error) {
 func parseAdmissionWindow(entry string) (admissionWindow, error) {
 	days, hours, ok := strings.Cut(strings.TrimSpace(entry), "@")
 	if !ok {
-		return admissionWindow{}, fmt.Errorf("expected Days@HH:MM-HH:MM")
+		days, hours = "*", strings.TrimSpace(entry)
 	}
 	mask, err := parseAdmissionDays(days)
 	if err != nil {

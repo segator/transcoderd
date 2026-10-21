@@ -28,7 +28,7 @@ A paused worker SHALL not request jobs. A worker SHALL stop requesting jobs when
 ## ADDED Requirements
 
 ### Requirement: Bounded concurrent encoding
-The worker SHALL process up to `worker.ffmpegConfig.parallelJobs` encoding jobs simultaneously, with a registered default of `2`, while preserving a separate workspace, progress, and outcome for each job.
+The worker SHALL bound simultaneous encoding jobs by the resolved encode limit while preserving a separate workspace, progress, and outcome for each job. `worker.ffmpegConfig.parallelJobs` SHALL default to `0`, meaning inherit `worker.maxActiveJobs`; a positive explicit value SHALL override that encode limit.
 
 #### Scenario: Two encode jobs queued
 - **WHEN** two accepted jobs reach the encode phase and the limit is `2`
@@ -38,8 +38,22 @@ The worker SHALL process up to `worker.ffmpegConfig.parallelJobs` encoding jobs 
 - **WHEN** the configured number of encoding jobs is already running
 - **THEN** additional encode jobs wait until a slot is available
 
+#### Scenario: Default encode concurrency follows admission
+- **WHEN** `worker.maxActiveJobs` is `4` and the encode concurrency override is omitted
+- **THEN** up to four accepted jobs can encode simultaneously
+
 ### Requirement: Weekly admission schedule
-The worker SHALL accept optional `worker.schedule.windows` with default empty and `worker.schedule.timeZone` with default `Local`. With windows configured, it SHALL initiate job requests only inside at least one window in the selected timezone, while also respecting pause and active-job limits.
+The worker SHALL accept optional `worker.schedule.windows` with default empty and `worker.schedule.timeZone` with default `Local`.
+
+With weekly windows configured, the worker SHALL initiate job requests only inside at least one window in the selected timezone. It SHALL also respect pause and active-job limits.
+
+#### Scenario: Request during an open window
+- **WHEN** the worker is active, below its job limit, and inside a configured window
+- **THEN** it may initiate the next normal job request
+
+
+### Requirement: Daily CLI schedule shortcut
+The worker SHALL accept repeatable top-level `--schedule=HH:MM-HH:MM` daily windows. These windows SHALL use the worker process's local timezone and replace YAML schedule windows when supplied.
 
 #### Scenario: Weekday cutoff
 - **WHEN** a Monday-to-Friday window ends at 10:00 in Europe/Madrid and the local clock reaches 10:00
@@ -58,7 +72,7 @@ The worker SHALL accept optional `worker.schedule.windows` with default empty an
 - **THEN** the existing pause, limit, and optional legacy time window determine admission
 
 ### Requirement: Weekly window clock semantics
-Window entries SHALL use `Days@HH:MM-HH:MM`, with `*`, a three-letter weekday, or an inclusive weekday range as Days. Starts SHALL be inclusive and ends exclusive. Overnight windows SHALL belong to their starting weekday; `24:00` SHALL be accepted only as an end. The worker SHALL evaluate civil clock time using timezone transitions.
+Window entries SHALL accept daily `HH:MM-HH:MM` or `Days@HH:MM-HH:MM`, with `*`, a three-letter weekday, or an inclusive weekday range as Days. Starts SHALL be inclusive and ends exclusive. Overnight windows SHALL belong to their starting weekday; `24:00` SHALL be accepted only as an end. The worker SHALL evaluate civil clock time using timezone transitions.
 
 #### Scenario: Overnight interval
 - **WHEN** a Friday 22:00-08:00 interval is configured and local time is Saturday 07:59
@@ -67,6 +81,18 @@ Window entries SHALL use `Days@HH:MM-HH:MM`, with `*`, a three-letter weekday, o
 #### Scenario: Daylight saving transition
 - **WHEN** a timezone changes offset and a local civil time occurs in a configured interval
 - **THEN** admission follows that civil time rather than elapsed seconds since midnight
+
+#### Scenario: Daily command-line schedule
+- **WHEN** `TZ=Europe/Madrid` and `--schedule=22:00-10:00` are supplied
+- **THEN** the worker permits new requests daily from 22:00 inclusive until 10:00 exclusive in Europe/Madrid
+
+#### Scenario: Repeated command-line schedule
+- **WHEN** `--schedule=22:00-10:00 --schedule=14:00-16:00` are supplied
+- **THEN** the worker permits new requests inside either daily period in its local timezone
+
+#### Scenario: Command-line schedule overrides YAML
+- **WHEN** YAML windows are configured and one or more `--schedule` flags are supplied
+- **THEN** the worker uses the command-line windows instead of the YAML windows
 
 ### Requirement: Accepted work across closed windows
 Accepted jobs SHALL continue after a window closes, including work accepted before a restart. A request initiated before the boundary MAY complete afterward. The schedule SHALL NOT perform automatic electricity-tariff or public-holiday lookups.

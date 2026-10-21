@@ -69,19 +69,29 @@ codec libraries; the NVIDIA host driver and container runtime still need setup.
 
 ### Run
 
-After preparing the configuration and scratch path from that guide, use a
+After creating the scratch directory and setting the server URL/token shell
+variables from that guide, use a
 published or locally built worker image containing the AV1 change (replace
 `VERSION` with its tag). Older release images can have the legacy HEVC default.
 
 ```bash
 docker run -d --name transcoderd-worker --restart unless-stopped \
   --network transcoderd --gpus all \
-  --mount type=bind,src=/srv/transcoderd/gpu.yml,dst=/etc/transcoderd/config.yml,readonly \
-  --mount type=bind,src=/srv/transcoderd/scratch,dst=/scratch \
-  ghcr.io/segator/transcoderd:worker-VERSION --noUpdates
+  --env TZ=Europe/Madrid \
+  --mount type=bind,src=/srv/transcoderd/scratch,dst=/tmp \
+  ghcr.io/segator/transcoderd:worker-VERSION --noUpdates \
+  --web.domain "${TRANSCODER_SERVER_URL:?Set the server URL}" \
+  --web.token "${TRANSCODER_TOKEN:?Set the server token}" \
+  --worker.name gpu-5080 --worker.maxActiveJobs 4 \
+  --worker.ffmpegConfig.videoCodec av1_nvenc \
+  --schedule=22:00-10:00
 ```
 
-Use `videoCodec: libsvtav1` and omit the GPU device request for a CPU worker.
+For a CPU node, select `--worker.ffmpegConfig.videoCodec libsvtav1`, choose its
+name and `--worker.maxActiveJobs` count, and omit the GPU device request. Encoder
+settings use their codec defaults; encode concurrency inherits the active-job
+limit. No per-worker YAML file is required. The shared schedule permits requests
+daily from 22:00 until 10:00 in Europe/Madrid; accepted work finishes afterward.
 The worker downloads media over the server API, so it needs a reachable server
 URL and matching token rather than a direct media-library mount.
 
@@ -138,7 +148,9 @@ require a GPU. GPU encoding at runtime requires a compatible NVIDIA GPU and
 driver exposed to the worker container.
 On Linux, configure NVIDIA Container Toolkit and run with `--gpus all`. The
 worker image has also been tested on an RTX 5080 under WSL2 using direct device
-and driver mounts. See [AV1/NVENC validation](docs/av1-nvenc-validation.md).
+and driver mounts. The worker defaults to the approved AV1 NVENC profile;
+CPU SVT-AV1 and legacy x265 are explicit codec choices. See [AV1/NVENC
+validation](docs/av1-nvenc-validation.md) and the [profile reference](docs/encoding-profiles.md).
 
 ```bash
 mage docker:ffmpeg      # Build FFmpeg builder tarball locally

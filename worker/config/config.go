@@ -44,3 +44,10 @@ type Config struct {
 func (c Config) HaveSettedPeriodTime() bool {
 	return c.StartAfter != nil && c.StopAfter != nil && (*c.StartAfter != 0 || *c.StopAfter != 0)
 }
+
+func (c Config) EncodeParallelJobs() int {
+	if c.EncodeConfig != nil && c.EncodeConfig.ParallelJobs > 0 {
+		return c.EncodeConfig.ParallelJobs
+	}
+	return c.MaxActiveJobs
+}

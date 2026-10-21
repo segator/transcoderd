@@ -63,7 +63,7 @@ func (c *FFMPEGConfig) ResolveVideoSettings() (VideoSettings, error) {
 		}
 		preset := c.VideoPreset
 		if preset == "" {
-			preset = "3"
+			preset = "4"
 		}
 		presetNumber, err := strconv.Atoi(preset)
 		if err != nil || presetNumber < 0 || presetNumber > 13 {
@@ -120,8 +120,8 @@ func (c *Config) Validate() error {
 	if c.EncodeConfig == nil {
 		return fmt.Errorf("worker.ffmpegConfig is required")
 	}
-	if c.EncodeConfig.ParallelJobs < 1 {
-		return fmt.Errorf("worker.ffmpegConfig.parallelJobs must be positive, got %d", c.EncodeConfig.ParallelJobs)
+	if c.EncodeConfig.ParallelJobs < 0 {
+		return fmt.Errorf("worker.ffmpegConfig.parallelJobs must be nonnegative (0 inherits maxActiveJobs), got %d", c.EncodeConfig.ParallelJobs)
 	}
 	if c.EncodeConfig.Threads < 0 || c.EncodeConfig.Threads > 255 {
 		return fmt.Errorf("worker.ffmpegConfig.threads must be 0 through 255, got %d", c.EncodeConfig.Threads)

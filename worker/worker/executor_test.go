@@ -44,12 +44,25 @@ func TestAcceptJobsCombinesLimitAndWindow(t *testing.T) {
 }
 
 func TestEncodeConsumerLimit(t *testing.T) {
-	e := &JobExecutor{workerConfig: &config.Config{EncodeConfig: &config.FFMPEGConfig{ParallelJobs: 2}}}
-	if got := e.stepConsumers(model.FFMPEGSNotification); got != 2 {
-		t.Errorf("stepConsumers(FFMPEG) = %d, want 2", got)
+	tests := []struct {
+		name                   string
+		active, override, want int
+	}{
+		{"GPU defaults follow four active jobs", 4, 0, 4},
+		{"CPU defaults follow two active jobs", 2, 0, 2},
+		{"serial defaults", 1, 0, 1},
+		{"explicit lower limit", 4, 2, 2},
 	}
-	if got := e.stepConsumers(model.UploadNotification); got != 1 {
-		t.Errorf("stepConsumers(Upload) = %d, want 1", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := &JobExecutor{workerConfig: &config.Config{MaxActiveJobs: tt.active, EncodeConfig: &config.FFMPEGConfig{ParallelJobs: tt.override}}}
+			if got := e.stepConsumers(model.FFMPEGSNotification); got != tt.want {
+				t.Errorf("stepConsumers(FFMPEG) = %d, want %d", got, tt.want)
+			}
+			if got := e.stepConsumers(model.UploadNotification); got != 1 {
+				t.Errorf("stepConsumers(Upload) = %d, want 1", got)
+			}
+		})
 	}
 }
 

@@ -1,11 +1,11 @@
 # AV1 GPU full-film pilot command
 
-The exact FFmpeg argument vector used for the completed *La saga de Bruce Lee*
-pilot is saved in [`av1-gpu-full-film-command.json`](av1-gpu-full-film-command.json).
-It includes argument order, both input paths, stream maps, audio and subtitle
-settings, timestamp and mux settings, and the output path. The file is a record
-of the command that ran, not a TranscoderD configuration or a universal AV1
-default. It intentionally preserves machine-specific paths for auditability.
+The FFmpeg argument vector used for the completed feature-film pilot is saved
+in [`av1-gpu-full-film-command.json`](av1-gpu-full-film-command.json). It
+includes argument order, stream maps, audio and subtitle settings, timestamp
+and mux settings. Machine-specific paths are replaced with placeholders so the
+repository does not expose local media-library paths. The file records the
+command that ran, not a TranscoderD configuration or a universal AV1 default.
 
 The video configuration the user approved after watching the complete output
 was:
@@ -39,9 +39,9 @@ with open("docs/av1-gpu-full-film-command.json", encoding="utf-8") as f:
 subprocess.run(command, check=True)
 ```
 
-Update the machine-specific input, subtitle, and output paths before running
-it elsewhere. The tracked command has no `-y` flag; FFmpeg will ask before
-overwriting an existing output. The source and output are both MKV files.
+Replace the executable, input, subtitle, and output placeholders before
+running it. The command has no `-y` flag; FFmpeg will ask before overwriting an
+existing output. The source and output are both MKV files.
 
 ## Result and environment
 

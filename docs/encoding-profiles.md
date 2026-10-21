@@ -52,7 +52,7 @@ validation; the full-film pilot was SDR 1080p.
 ```text
 -threads 0
 -filter:v "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease"
--pix_fmt yuv420p10le -c:v libsvtav1 -preset 3 -crf 23
+-pix_fmt yuv420p10le -c:v libsvtav1 -preset 4 -crf 23
 ```
 
 `yuv420p10le` is planar 10-bit 4:2:0. `libsvtav1` performs AV1 encoding on CPU.
@@ -61,8 +61,8 @@ are faster. CRF controls quality/bit allocation separately, with lower values
 generally producing larger, higher-quality output. Changing the preset can
 change quality at the same CRF, so compare at similar measured quality.
 
-The conservative compression-oriented fallback remains preset **3 / CRF23**.
-Presets **4, 5, and 6 are already selectable** through `videoPreset` (quoted
+The provisional time/size balanced fallback is preset **4 / CRF23**.
+Presets **3, 5, and 6 are also selectable** through `videoPreset` (quoted
 as a YAML string), and `videoCRF` is independently configurable. SVT manages
 its own internal parallelism; automatic FFmpeg threading does not imply every
 logical CPU stays saturated. Two simultaneous CPU jobs may improve aggregate

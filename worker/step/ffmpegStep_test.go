@@ -24,7 +24,7 @@ func TestFFMPEGGeneratorVideoProfiles(t *testing.T) {
 		{
 			name: "SVT CPU",
 			cfg:  config.FFMPEGConfig{VideoCodec: config.AV1SVT},
-			want: []string{"-pix_fmt", "yuv420p10le", "-c:v", "libsvtav1", "-preset", "3", "-crf", "23"},
+			want: []string{"-pix_fmt", "yuv420p10le", "-c:v", "libsvtav1", "-preset", "4", "-crf", "23"},
 		},
 		{
 			name: "x265 rollback",

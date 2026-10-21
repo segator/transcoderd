@@ -159,7 +159,7 @@ func (e *JobExecutor) start(ctx context.Context) {
 
 func (e *JobExecutor) stepConsumers(notificationType model.NotificationType) int {
 	if notificationType == model.FFMPEGSNotification {
-		return e.workerConfig.EncodeConfig.ParallelJobs
+		return e.workerConfig.EncodeParallelJobs()
 	}
 	return 1
 }

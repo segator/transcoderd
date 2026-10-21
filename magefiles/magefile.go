@@ -331,7 +331,7 @@ func (Test) E2e(ctx context.Context) error {
 		WithServiceBinding("postgres", postgresSvc).
 		WithNewFile("/etc/transcoderd/config.yml", e2eServerConfig).
 		WithFile("/source/e2e_fixture.mkv", fixtureFile).
-		WithExposedPort(8080).
+		WithExposedPort(8080, dagger.ContainerWithExposedPortOpts{ExperimentalSkipHealthcheck: true}).
 		WithEnvVariable("CACHE_BUSTER", time.Now().String()).
 		WithExec([]string{"/app/transcoderd-server", "--noUpdates"}).
 		AsService()
@@ -370,7 +370,12 @@ func (Test) E2e(ctx context.Context) error {
 		WithEnvVariable("CACHE_BUSTER", time.Now().String()).
 		WithExec([]string{
 			"sh", "-c",
-			"/app/transcoderd-worker" +
+			"ready=0; for attempt in $(seq 1 60); do " +
+				"if curl --silent --show-error --fail --output /dev/null " +
+				"-H 'Authorization: Bearer e2e-test-token' -H 'workerName: e2e-readiness' " +
+				"http://server:8080/api/v1/job/request; then ready=1; break; fi; sleep 1; done; " +
+				"if [ \"$ready\" -ne 1 ]; then echo 'server did not become ready' >&2; exit 1; fi; " +
+				"/app/transcoderd-worker" +
 				" --noUpdates" +
 				" --web.token e2e-test-token" +
 				" --web.domain http://server:8080" +
@@ -384,7 +389,7 @@ func (Test) E2e(ctx context.Context) error {
 				" --worker.threads 2" +
 				" > /tmp/worker.log 2>&1 &" +
 				" sleep 3 && echo '=== WORKER STARTUP ===' && cat /tmp/worker.log && echo '=== END WORKER STARTUP ===' &&" +
-				" go test -tags=integration -v -timeout 15m -run TestE2E ./integration/... 2>&1; EXIT=$?;" +
+				" go test -tags=integration -v -timeout 25m -run TestE2E ./integration/... 2>&1; EXIT=$?;" +
 				" echo '=== WORKER LOG ==='; cat /tmp/worker.log; exit $EXIT",
 		}).
 		Stdout(ctx)

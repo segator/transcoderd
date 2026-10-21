@@ -113,17 +113,23 @@ mage lint:fix           # Run golangci-lint with auto-fix
 
 ### Docker
 
-The Dagger pipeline builds FFmpeg 9.0.2 with `libsvtav1`, `libaom-av1`, and
-`av1_nvenc`, and builds the PGS assets used by the worker. These builds run in
-containers and do not require a GPU on the build host. GPU encoding at runtime
-requires a compatible NVIDIA GPU and driver exposed to the worker container.
+The versioned FFmpeg builder contains FFmpeg 9.0.2 with `libsvtav1`,
+`libaom-av1`, and `av1_nvenc`; the PGS builder contains the OCR assets used by
+the worker. App image builds reuse these validated builders. CI checks their
+registry tags and builds/publishes any missing builder through Dagger. Rebuilding
+the FFmpeg builder from source takes about 50 minutes; it is a separate target,
+so ordinary app builds do not repeat that work. Builder compilation does not
+require a GPU. GPU encoding at runtime requires a compatible NVIDIA GPU and
+driver exposed to the worker container.
 On Linux, configure NVIDIA Container Toolkit and run with `--gpus all`. The
 worker image has also been tested on an RTX 5080 under WSL2 using direct device
 and driver mounts. See [AV1/NVENC validation](docs/av1-nvenc-validation.md).
 
 ```bash
-mage docker:ffmpeg      # Build FFmpeg builder image
-mage docker:pgs         # Build PGS asset image
+mage docker:ffmpeg      # Build FFmpeg builder tarball locally
+mage docker:pgs         # Build PGS builder tarball locally
+mage publish:ffmpeg     # Build and push the FFmpeg builder
+mage publish:pgs        # Build and push the PGS builder
 mage publish:app        # Push server and worker images
 ```
 

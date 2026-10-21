@@ -32,11 +32,13 @@ import (
 // ---------------------------------------------------------------------------
 
 var (
-	imageName      = envOrDefault("IMAGE_NAME", "ghcr.io/segator/transcoderd")
-	projectVersion = ""
-	gitCommitSHA   = ""
-	gitBranchName  = ""
-	buildDate      = ""
+	imageName        = envOrDefault("IMAGE_NAME", "ghcr.io/segator/transcoderd")
+	ffmpegBuilderTag = envOrDefault("FFMPEG_BUILDER_TAG", "builder-ffmpeg-9.0.2-av1")
+	pgsBuilderTag    = envOrDefault("PGS_BUILDER_TAG", "builder-pgs")
+	projectVersion   = ""
+	gitCommitSHA     = ""
+	gitBranchName    = ""
+	buildDate        = ""
 )
 
 const e2eServerConfig = `server:
@@ -347,8 +349,8 @@ func (Test) E2e(ctx context.Context) error {
 		}).
 		File("/output/transcoderd-worker")
 
-	ffmpegBins := builderFfmpegImage(client)
-	pgsBins := builderPgsImage(client)
+	ffmpegBins := ffmpegBuilderImage(client)
+	pgsBins := pgsBuilderImage(client)
 
 	// 4. Test runner
 	out, err := goContainer(client, src).
@@ -485,7 +487,7 @@ func (Docker) Ffmpeg(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(tarPath), 0o755); err != nil {
 		return err
 	}
-	_, err = builderFfmpegImage(client).
+	_, err = buildFFmpegBuilderImage(client).
 		AsTarball(dagger.ContainerAsTarballOpts{
 			ForcedCompression: dagger.ImageLayerCompressionGzip,
 		}).
@@ -509,7 +511,7 @@ func (Docker) Pgs(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(tarPath), 0o755); err != nil {
 		return err
 	}
-	_, err = builderPgsImage(client).
+	_, err = buildPgsBuilderImage(client).
 		AsTarball(dagger.ContainerAsTarballOpts{
 			ForcedCompression: dagger.ImageLayerCompressionGzip,
 		}).
@@ -531,13 +533,13 @@ type Publish mg.Namespace
 // All pushes all images (server, worker, ffmpeg builder, pgs builder).
 func (Publish) All(ctx context.Context) error {
 	p := Publish{}
-	if err := p.App(ctx); err != nil {
-		return err
-	}
 	if err := p.Ffmpeg(ctx); err != nil {
 		return err
 	}
-	return p.Pgs(ctx)
+	if err := p.Pgs(ctx); err != nil {
+		return err
+	}
+	return p.App(ctx)
 }
 
 // App pushes both server and worker images via Dagger.
@@ -573,7 +575,7 @@ func (Publish) Ffmpeg(ctx context.Context) error {
 	}
 	defer client.Close()
 
-	addr, err := builderFfmpegImage(client).Publish(ctx, imageName+":builder-ffmpeg")
+	addr, err := buildFFmpegBuilderImage(client).Publish(ctx, imageName+":"+ffmpegBuilderTag)
 	if err != nil {
 		return fmt.Errorf("publish builder-ffmpeg: %w", err)
 	}
@@ -589,7 +591,7 @@ func (Publish) Pgs(ctx context.Context) error {
 	}
 	defer client.Close()
 
-	addr, err := builderPgsImage(client).Publish(ctx, imageName+":builder-pgs")
+	addr, err := buildPgsBuilderImage(client).Publish(ctx, imageName+":"+pgsBuilderTag)
 	if err != nil {
 		return fmt.Errorf("publish builder-pgs: %w", err)
 	}
@@ -641,7 +643,7 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 		}).
 		File("/output/transcoderd-" + component)
 
-	ffmpegBins := builderFfmpegImage(client)
+	ffmpegBins := ffmpegBuilderImage(client)
 
 	base := client.Container().
 		From("debian:trixie-20241223-slim").
@@ -662,7 +664,7 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 			WithEntrypoint([]string{"/app/transcoderd-server"}), nil
 
 	case "worker":
-		pgsBins := builderPgsImage(client)
+		pgsBins := pgsBuilderImage(client)
 
 		return base.
 			WithDirectory("/app/tessdata", pgsBins.Directory("/src/tessdata")).
@@ -689,9 +691,14 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 	}
 }
 
-// builderFfmpegImage builds the same FFmpeg toolchain as the published image.
+// ffmpegBuilderImage imports the versioned, validated FFmpeg build from GHCR.
+func ffmpegBuilderImage(client *dagger.Client) *dagger.Container {
+	return client.Container().From(imageName + ":" + ffmpegBuilderTag)
+}
+
+// buildFFmpegBuilderImage builds the same FFmpeg toolchain as the published image.
 // Base: CUDA 13.3.1 on Ubuntu 24.04 with FFmpeg 9.0.2 (~50min).
-func builderFfmpegImage(client *dagger.Client) *dagger.Container {
+func buildFFmpegBuilderImage(client *dagger.Client) *dagger.Container {
 	return client.Container().
 		From("nvidia/cuda:13.3.1-devel-ubuntu24.04").
 		WithEnvVariable("DEBIAN_FRONTEND", "noninteractive").
@@ -722,9 +729,14 @@ func builderFfmpegImage(client *dagger.Client) *dagger.Container {
 		})
 }
 
-// builderPgsImage replicates the Dockerfile builder-pgs stage as a pure Dagger pipeline.
+// pgsBuilderImage imports the PGS tools and OCR data from GHCR.
+func pgsBuilderImage(client *dagger.Client) *dagger.Container {
+	return client.Container().From(imageName + ":" + pgsBuilderTag)
+}
+
+// buildPgsBuilderImage builds the PGS tools and OCR data as a pure Dagger pipeline.
 // Base: dotnet/sdk:8.0.419 with PgsToSrt + tessdata (~5min).
-func builderPgsImage(client *dagger.Client) *dagger.Container {
+func buildPgsBuilderImage(client *dagger.Client) *dagger.Container {
 	const (
 		tessdataVersion = "ced78752cc61322fb554c280d13360b35b8684e4"
 		pgstosrtVersion = "ef11919491b5c98f9dcdaf13d721596e60efb7ed"

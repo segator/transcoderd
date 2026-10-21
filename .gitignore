@@ -3,6 +3,10 @@
 assets_*
 statik/
 /build/
+/benchmark-input/*
+!/benchmark-input/.gitkeep
+__pycache__/
+*.pyc
 /dist/
 /gui/
 build/coverage.out

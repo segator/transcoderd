@@ -137,7 +137,7 @@ func projectSource(client *dagger.Client) *dagger.Directory {
 
 func goContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container {
 	return client.Container().
-		From("golang:1.25-bookworm").
+		From("golang:1.26-bookworm").
 		WithMountedCache("/root/.cache/go-build", client.CacheVolume("go-build"), dagger.ContainerWithMountedCacheOpts{Sharing: dagger.CacheSharingModeShared}).
 		WithMountedCache("/go/pkg/mod", client.CacheVolume("go-mod"), dagger.ContainerWithMountedCacheOpts{Sharing: dagger.CacheSharingModeShared}).
 		WithEnvVariable("CGO_ENABLED", "0").
@@ -147,7 +147,7 @@ func goContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container
 
 func lintContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container {
 	return client.Container().
-		From("golang:1.25-bookworm").
+		From("golang:1.26-bookworm").
 		WithMountedCache("/root/.cache/go-build", client.CacheVolume("go-build")).
 		WithMountedCache("/go/pkg/mod", client.CacheVolume("go-mod")).
 		WithMountedCache("/root/.cache/golangci-lint", client.CacheVolume("golangci-lint")).

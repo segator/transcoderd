@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-TranscoderD is a distributed video transcoding system (server/worker architecture) written in **Go 1.25**.
+TranscoderD is a distributed video transcoding system (server/worker architecture) written in **Go 1.26**.
 Module name: `transcoder`. License: GPLv3.
 
 ## OpenSpec
@@ -49,10 +49,10 @@ go test -tags=integration -v -timeout 5m ./integration/...
 
 ## CI Pipeline
 
-- **Lint**: `mage lint:check` via `.github/workflows/lint.yml` (Go 1.25)
+- **Lint**: `mage lint:check` via `.github/workflows/lint.yml` (Go 1.26)
 - **Build+Test+E2E**: Mage targets backed by Dagger via `.github/workflows/main.yml`
 - **Release**: Release Please (conventional commits) on push to `main`
-- Dev environment managed by **mise**: Go 1.25.0, Mage, and Dagger
+- Dev environment managed by **mise**: Go 1.26.0, Mage, and Dagger
 
 ## Code Style Guidelines
 

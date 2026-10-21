@@ -2,7 +2,7 @@ schema: spec-driven
 
 context: |
   TranscoderD is a distributed video transcoding system with server, workers, and PostgreSQL.
-  Its Go module is transcoder and it requires Go 1.25.
+  Its Go module is transcoder and it requires Go 1.26.
   openspec/specs/ describes current behavior; openspec/BASELINE.md records scope and known gaps.
   openspec/CONFIGURATION.md and openspec/PROTOCOL.md provide the current settings and HTTP reference.
   Write all OpenSpec artifacts in English and retain the structural headings and SHALL/MUST terminology.

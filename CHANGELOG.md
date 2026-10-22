@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.5.0](https://github.com/segator/transcoderd/compare/v2.4.3...v2.5.0) (2026-10-22)
+
+
+### 🎉 Features
+
+* migrate build system from Makefile to Mage + Dagger ([#112](https://github.com/segator/transcoderd/issues/112)) ([404974e](https://github.com/segator/transcoderd/commit/404974e49316ef67bf5ebe08980fe74fee5a73b7))
+* **worker:** use approved AV1 profiles with bounded encode jobs ([#126](https://github.com/segator/transcoderd/issues/126)) ([c1e1a5d](https://github.com/segator/transcoderd/commit/c1e1a5ddbb91254c413ecf3e1ada22952ac83356))
+
+
+### 🐛 Bug Fixes
+
+* restore subtitle metadata stream specifiers to preserve multi-language audio ([#111](https://github.com/segator/transcoderd/issues/111)) ([ffaa7cb](https://github.com/segator/transcoderd/commit/ffaa7cbe46eb2f9291f97513afe051f548720a92))
+
+
+### 📝 Documentation
+
+* add OpenSpec baseline and align agent guidance ([#122](https://github.com/segator/transcoderd/issues/122)) ([bc884c5](https://github.com/segator/transcoderd/commit/bc884c5b8dc0625d569c5e8d12ca139314669d50))
+
+
+### 🏗️ Build System
+
+* package FFmpeg 9.0.2 with AV1 encoders ([#123](https://github.com/segator/transcoderd/issues/123)) ([6615ab3](https://github.com/segator/transcoderd/commit/6615ab3993d7eeea709fbcf45ddfc0e519a9080d))
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/asticode/go-astisub from 0.39.0 to 0.40.0 ([#110](https://github.com/segator/transcoderd/issues/110)) ([16e38fe](https://github.com/segator/transcoderd/commit/16e38fec25b928fe8f1bec27f25e1c2707561c76))
+* **deps:** bump github.com/asticode/go-astisub from 0.40.0 to 0.41.0 ([#119](https://github.com/segator/transcoderd/issues/119)) ([e0ee8d3](https://github.com/segator/transcoderd/commit/e0ee8d3745e14e5e795e3d64899da4729698aa56))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.7.10 to 6.8.1 ([#116](https://github.com/segator/transcoderd/issues/116)) ([9b6184f](https://github.com/segator/transcoderd/commit/9b6184fb44b5b54875a292f1049b1bea2705f60a))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.7.9 to 6.7.10 ([#108](https://github.com/segator/transcoderd/issues/108)) ([9383c6f](https://github.com/segator/transcoderd/commit/9383c6fb9d3bd74b804bd63884fdc0ba9672cba2))
+* **deps:** bump github.com/testcontainers/testcontainers-go from 0.42.0 to 0.43.0 ([#117](https://github.com/segator/transcoderd/issues/117)) ([601e77c](https://github.com/segator/transcoderd/commit/601e77c051ada644ce5391a1f5286ccbd87f350f))
+* **deps:** bump github.com/testcontainers/testcontainers-go/modules/postgres from 0.42.0 to 0.43.0 ([#118](https://github.com/segator/transcoderd/issues/118)) ([97e7956](https://github.com/segator/transcoderd/commit/97e79562b6bc1d99b78837a32451f0d93ddb0f62))
+* **deps:** bump gopkg.in/ini.v1 from 1.67.1 to 1.67.2 ([#113](https://github.com/segator/transcoderd/issues/113)) ([681ca91](https://github.com/segator/transcoderd/commit/681ca91bd20423b7d7c8d25c9f8c68f94921d221))
+* **deps:** bump gopkg.in/ini.v1 from 1.67.2 to 1.67.3 ([#115](https://github.com/segator/transcoderd/issues/115)) ([cd6ddfc](https://github.com/segator/transcoderd/commit/cd6ddfcde92327154989de5ce8bbe74a0f4c7baf))
+* **deps:** bump the go_modules group across 1 directory with 2 updates ([#121](https://github.com/segator/transcoderd/issues/121)) ([70f5bab](https://github.com/segator/transcoderd/commit/70f5bab322b5b68909e8a3f99ee7ccf167817d6c))
+* **deps:** bump the go_modules group across 1 directory with 4 updates ([#127](https://github.com/segator/transcoderd/issues/127)) ([dda1e62](https://github.com/segator/transcoderd/commit/dda1e62ec462f25987f681e240d593705c6e48e5))
+
+
+### ✅ Tests
+
+* add AV1 library benchmark lab ([#124](https://github.com/segator/transcoderd/issues/124)) ([7ef1680](https://github.com/segator/transcoderd/commit/7ef1680747b6dfd8cb8686f04713a63e849fd1fe))
+
 ## [2.4.3](https://github.com/segator/transcoderd/compare/v2.4.2...v2.4.3) (2026-04-19)
 
 

@@ -178,19 +178,20 @@ and wall-plug energy have not been measured.
 
 ## What the build pipeline does
 
-`Dockerfile` compiles FFmpeg with a CUDA development image and pinned
-`ffmpeg-build-script` tag, validates the required encoders, and exports the
-binaries as `builder-ffmpeg-9.0.2-av1`. It separately builds the PGS/.NET/OCR
-assets. Runtime worker images copy these assets and the compiled Go worker.
-An NVIDIA GPU is not needed to compile these images.
+Mage and Dagger build the application images from a Debian runtime and two
+versioned builder images. `builder-ffmpeg-9.0.2-av1` contains FFmpeg 9.0.2 with
+`libsvtav1`, `libaom-av1`, `av1_nvenc`, x265, and `libfdk_aac`. The separate PGS
+builder supplies .NET/OCR binaries and language data. The server and worker
+images copy the needed files from those builders. An NVIDIA GPU is not needed
+to compile these images.
 
-`.github/workflows/main.yml` runs on pushes and PRs to `main`, plus manual
-dispatch. It logs into GHCR, runs Go tests, checks the versioned FFmpeg and PGS
-builder manifests, builds/publishes a missing builder, builds server/worker
-images, and runs the Docker E2E test. Publishing application/release images
-is restricted to non-PR runs. The builder step requires package push access
-when a builder is absent; fork runs without that access need an available
-published builder or a maintainer build.
+`.github/workflows/main.yml` runs on pushes and pull requests targeting `main`,
+plus manual dispatch. It logs into GHCR, runs Go tests and the AV1 benchmark
+lab, checks the versioned FFmpeg and PGS builder manifests, builds and publishes
+a missing builder when needed, builds server/worker images, and runs the Docker
+E2E test. Publishing application/release images is restricted to non-PR runs.
+The builder step needs package push access when a builder is absent; fork runs
+without that access need an available published builder or a maintainer build.
 
 The ordinary CI E2E run selects **SVT-AV1 CPU**, so a hosted runner needs no
 GPU. CI validates compilation and the CPU pipeline; it cannot validate NVENC
@@ -201,19 +202,21 @@ main-only build workflow; the local results are recorded separately.
 Local build commands are:
 
 ```bash
-make build-builder-ffmpeg       # Expensive; needed when the builder changes
-devbox run -- make build        # Go binaries and server/worker images
-devbox run -- make test-e2e     # CPU Docker pipeline check
+mise install                    # Go, Mage, and Dagger from .mise.toml
+mise exec -- mage build:all     # Go server and worker binaries
+mise exec -- mage docker:all    # Server and worker images via Dagger
+mise exec -- mage test:e2e      # Short CPU AV1 server/worker pipeline check
 ```
 
-`make publish-builder-ffmpeg` builds and pushes the versioned builder after
-verification. Changing FFmpeg or codec dependencies requires a new builder
-tag in both the Dockerfile and Makefile, then validation and publishing of
-that tag. CI reuses an existing tag; it does not rebuild it merely because
-the Dockerfile source changed. The current code remains usable with the
-documented [legacy HEVC profile](legacy-hevc-encoding.md).
+`mage docker:ffmpeg` and `mage docker:pgs` build local builder tarballs;
+`mage publish:ffmpeg` and `mage publish:pgs` build and push versioned builders
+after verification. Changing FFmpeg or codec dependencies requires a new
+builder tag in `magefiles/magefile.go`, then validation and publishing of that
+tag. CI reuses existing builder tags and builds missing ones; it does not
+rebuild a present tag just because source changed. See the documented
+[legacy HEVC profile](legacy-hevc-encoding.md) for rollback and benchmark
+reference.
 
 If overriding `PROJECT_VERSION` for a local build, use a semantic version such
 as `0.0.0-av1-test`; the updater parses the version even with `--noUpdates`.
-Arbitrary image/branch labels are not valid application version metadata. The
-Makefile also creates a separate branch-named image tag automatically.
+Arbitrary image/branch labels are not valid application version metadata.

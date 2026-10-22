@@ -17,8 +17,9 @@ On a Linux Docker host, configure the
 and pass `--gpus all` to the worker container. The local WSL2 Docker daemon
 rejected `--gpus all` because it had no NVIDIA runtime configured. For this
 test, passing `/dev/dxg` and the WSL driver files directly worked without a
-privileged container. This WSL2 command reproduces the synthetic 10-bit encode
-after `make buildcontainer-worker` on the current branch:
+privileged container. Build the local worker image with
+`mise exec -- mage docker:worker`; this target loads local image tags when
+Docker is available. The command below reproduces the synthetic 10-bit encode:
 
 ```bash
 WORKER_IMAGE="ghcr.io/segator/transcoderd:worker-$(git branch --show-current | sed 's/[^a-zA-Z0-9._-]/-/g')"

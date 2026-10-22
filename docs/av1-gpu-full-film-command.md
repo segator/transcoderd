@@ -62,8 +62,10 @@ workspace. The original is left intact.
 
 ## NVIDIA Video Codec SDK 13.1 review
 
-The project Dockerfile compiles [FFmpeg 9.0.2](https://ffmpeg.org/download.html)
-on a CUDA 13.3.1 development image using `ffmpeg-build-script` tag `v9.0.10`.
+The current Mage/Dagger FFmpeg builder compiles
+[FFmpeg 9.0.2](https://ffmpeg.org/download.html) on a CUDA 13.3.1 development
+image using `ffmpeg-build-script` tag `v9.0.10` (see
+`magefiles/magefile.go`).
 That script [pins `nv-codec-headers` 13.1.15.0](https://github.com/markus-perl/ffmpeg-build-script/blob/v9.0.10/src/10-versions.sh),
 corresponding to the latest released Video Codec SDK 13.1
 [headers](https://github.com/FFmpeg/nv-codec-headers/releases). The worker

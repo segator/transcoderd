@@ -351,7 +351,7 @@ func (Test) E2e(ctx context.Context) error {
 	// background processes so readiness is checked with a real HTTP request.
 	out, err := goContainer(client, src).
 		WithExec([]string{"apt-get", "update"}).
-		WithExec([]string{"apt-get", "install", "-y", "ca-certificates", "mkvtoolnix", "libtesseract-dev", "wget", "curl"}).
+		WithExec([]string{"apt-get", "install", "-y", "ca-certificates", "mkvtoolnix", "libva-drm2", "libtesseract-dev", "wget", "curl"}).
 		WithExec([]string{"update-ca-certificates"}).
 		WithExec([]string{"sh", "-c", "curl -ksSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && chmod +x /tmp/dotnet-install.sh && /tmp/dotnet-install.sh --channel 8.0 --runtime dotnet --install-dir /usr/share/dotnet && ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet && rm /tmp/dotnet-install.sh"}).
 		WithFile("/usr/bin/ffmpeg", ffmpegBins.File("/app/ffmpeg-build-script/workspace/bin/ffmpeg")).

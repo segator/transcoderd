@@ -725,7 +725,7 @@ func buildFFmpegBuilderImage(client *dagger.Client) *dagger.Container {
 		WithWorkdir("/app/ffmpeg-build-script").
 		WithExec([]string{
 			"bash", "-c",
-			"NUMJOBS=4 CUDA_COMPUTE_CAPABILITY=75 SKIPINSTALL=yes ./build-ffmpeg --build --enable-gpl-and-non-free && " +
+			"NUMJOBS=$(nproc); echo \"FFmpeg build parallel jobs: $NUMJOBS\"; export NUMJOBS; export CUDA_COMPUTE_CAPABILITY=75; export SKIPINSTALL=yes; ./build-ffmpeg --build --enable-gpl-and-non-free && " +
 				"workspace/bin/ffmpeg -hide_banner -version | head -n 1 | grep -Fq 'ffmpeg version 9.0.2' && " +
 				"workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' libsvtav1 ' && " +
 				"workspace/bin/ffmpeg -hide_banner -encoders | grep -Eq ' libaom-av1 ' && " +

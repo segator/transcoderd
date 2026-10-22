@@ -139,7 +139,7 @@ func projectSource(client *dagger.Client) *dagger.Directory {
 
 func goContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container {
 	return client.Container().
-		From("golang:1.26-trixie").
+		From("golang:1.26.10-trixie").
 		WithMountedCache("/root/.cache/go-build", client.CacheVolume("go-build"), dagger.ContainerWithMountedCacheOpts{Sharing: dagger.CacheSharingModeShared}).
 		WithMountedCache("/go/pkg/mod", client.CacheVolume("go-mod"), dagger.ContainerWithMountedCacheOpts{Sharing: dagger.CacheSharingModeShared}).
 		WithEnvVariable("CGO_ENABLED", "0").
@@ -351,7 +351,7 @@ func (Test) E2e(ctx context.Context) error {
 	// background processes so readiness is checked with a real HTTP request.
 	out, err := goContainer(client, src).
 		WithExec([]string{"apt-get", "update"}).
-		WithExec([]string{"apt-get", "install", "-y", "ca-certificates", "mkvtoolnix", "libva-drm2", "libtesseract-dev", "wget", "curl"}).
+		WithExec([]string{"apt-get", "install", "-y", "--no-install-recommends", "ca-certificates", "mkvtoolnix", "libva-drm2", "libtesseract-dev", "wget", "curl"}).
 		WithExec([]string{"update-ca-certificates"}).
 		WithExec([]string{"sh", "-c", "curl -ksSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && chmod +x /tmp/dotnet-install.sh && /tmp/dotnet-install.sh --channel 8.0 --runtime dotnet --install-dir /usr/share/dotnet && ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet && rm /tmp/dotnet-install.sh"}).
 		WithFile("/usr/bin/ffmpeg", ffmpegBins.File("/app/ffmpeg-build-script/workspace/bin/ffmpeg")).
@@ -655,7 +655,7 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 		From("debian:trixie-20241223-slim").
 		WithExec([]string{"apt-get", "update"}).
 		WithExec([]string{
-			"apt-get", "install", "-y",
+			"apt-get", "install", "-y", "--no-install-recommends",
 			"ca-certificates", "mkvtoolnix", "libva-drm2", "wget",
 		}).
 		WithExec([]string{"rm", "-rf", "/var/lib/apt/lists/*"}).

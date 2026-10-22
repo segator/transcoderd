@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.5.1](https://github.com/segator/transcoderd/compare/v2.5.0...v2.5.1) (2026-10-22)
+
+
+### 🐛 Bug Fixes
+
+* **ci:** use workflow token for Dependabot merges ([#134](https://github.com/segator/transcoderd/issues/134)) ([f774e99](https://github.com/segator/transcoderd/commit/f774e990e63a0db0143b6e86e98b3e5983d95749))
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/asticode/go-astisub from 0.41.0 to 0.45.0 ([#129](https://github.com/segator/transcoderd/issues/129)) ([5e04dc2](https://github.com/segator/transcoderd/commit/5e04dc21813ab2adb30cbfb0806adde6daeafdb4))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.8.1 to 6.8.3 ([#132](https://github.com/segator/transcoderd/issues/132)) ([00967e7](https://github.com/segator/transcoderd/commit/00967e7080c43d9475663242e1e24097a2c0738c))
+* **deps:** bump gopkg.in/vansante/go-ffprobe.v2 from 2.3.0 to 2.3.1 ([#131](https://github.com/segator/transcoderd/issues/131)) ([538b60b](https://github.com/segator/transcoderd/commit/538b60b6606d533fbe74618a955d521f8b432978))
+
 ## [2.5.0](https://github.com/segator/transcoderd/compare/v2.4.3...v2.5.0) (2026-10-22)
 
 

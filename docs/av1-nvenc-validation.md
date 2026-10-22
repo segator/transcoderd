@@ -5,8 +5,10 @@ GeForce RTX 5080, driver 616.92, WSL2, and FFmpeg 9.0.2. The image includes
 `av1_nvenc`, `libsvtav1`, `libaom-av1`, and `libvmaf`. FFmpeg inside the worker
 container produced decodable 10-bit AV1 with `av1_nvenc`. It also completed a
 separate H.264 GPU decode, `scale_cuda`, and AV1 NVENC encode test. These tests
-exercise the bundled FFmpeg; TranscoderD's job pipeline still defaults to HEVC
-and does not yet have validated AV1/NVENC job settings.
+exercise the bundled FFmpeg. The subsequent
+[`av1-worker-profiles`](../openspec/changes/av1-worker-profiles/) change adds
+the NVENC job profile and uses it by default; its exact video options are
+recorded in [the full-film pilot](av1-gpu-full-film-command.md).
 
 ## Container GPU access
 
@@ -15,8 +17,9 @@ On a Linux Docker host, configure the
 and pass `--gpus all` to the worker container. The local WSL2 Docker daemon
 rejected `--gpus all` because it had no NVIDIA runtime configured. For this
 test, passing `/dev/dxg` and the WSL driver files directly worked without a
-privileged container. This WSL2 command reproduces the synthetic 10-bit encode
-after `make buildcontainer-worker` on the current branch:
+privileged container. Build the local worker image with
+`mise exec -- mage docker:worker`; this target loads local image tags when
+Docker is available. The command below reproduces the synthetic 10-bit encode:
 
 ```bash
 WORKER_IMAGE="ghcr.io/segator/transcoderd:worker-$(git branch --show-current | sed 's/[^a-zA-Z0-9._-]/-/g')"

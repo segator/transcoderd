@@ -2,20 +2,23 @@ package main
 
 import (
 	"context"
-	log "github.com/sirupsen/logrus"
-	pflag "github.com/spf13/pflag"
 	"math"
 	"os"
 	"os/signal"
 	"runtime"
 	"sync"
 	"syscall"
+
 	"transcoder/cmd"
 	"transcoder/update"
 	"transcoder/version"
+	"transcoder/worker/config"
 	"transcoder/worker/console"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/worker"
+
+	log "github.com/sirupsen/logrus"
+	pflag "github.com/spf13/pflag"
 )
 
 var (
@@ -38,6 +41,7 @@ func init() {
 		defaultThreads = 16
 	}
 	pflag.Int("worker.threads", defaultThreads, "Worker Threads")
+	pflag.Int("worker.maxActiveJobs", 2, "Maximum accepted jobs on this worker")
 	pflag.Int("worker.pgsConfig.parallelJobs", int(math.Ceil(float64(runtime.NumCPU())/4)), "Worker PGS Jobs in parallel")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
 	pflag.String("worker.pgsConfig.DLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")
@@ -48,16 +52,43 @@ func init() {
 
 	pflag.String("worker.ffmpegConfig.audioCodec", "libfdk_aac", "FFMPEG Audio Codec")
 	pflag.Int("worker.ffmpegConfig.audioVBR", 5, "FFMPEG Audio VBR")
-	pflag.String("worker.ffmpegConfig.videoCodec", "libx265", "FFMPEG Video Codec")
-	pflag.String("worker.ffmpegConfig.videoPreset", "medium", "FFMPEG Video Preset")
-	pflag.String("worker.ffmpegConfig.videoProfile", "main10", "FFMPEG Video Profile")
+	pflag.String("worker.ffmpegConfig.videoCodec", "av1_nvenc", "Video encoder: av1_nvenc, libsvtav1, or libx265")
+	pflag.String("worker.ffmpegConfig.videoPreset", "", "Video preset; defaults to p7, 4, or medium by encoder")
+	pflag.String("worker.ffmpegConfig.videoProfile", "", "x265 profile; defaults to main10")
+	pflag.Int("worker.ffmpegConfig.videoCQ", 0, "AV1 NVENC CQ; defaults to 34")
+	pflag.Int("worker.ffmpegConfig.videoQMax", 0, "AV1 NVENC maximum QP; defaults to 100")
+	pflag.Int("worker.ffmpegConfig.parallelJobs", 0, "Maximum simultaneous FFmpeg encode jobs (0 inherits worker.maxActiveJobs)")
+	pflag.Int("worker.ffmpegConfig.threads", 0, "FFmpeg thread count (0 lets FFmpeg decide)")
 	pflag.String("worker.ffmpegConfig.extraArgs", "", "FFMPEG Extra Args")
 	pflag.Int("worker.verifyDeltaTime", 60, "FFMPEG Verify Delta Time in seconds, is the max range of time that the video can be different from the original, if is superior then the video is marked as invalid")
-	pflag.Int("worker.ffmpegConfig.videoCRF", 21, "FFMPEG Video CRF")
-	pflag.Duration("worker.startAfter", 0, "Accept jobs only After HH:mm")
-	pflag.Duration("worker.stopAfter", 0, "Stop Accepting new Jobs after HH:mm")
+	pflag.Int("worker.ffmpegConfig.videoCRF", 0, "SVT-AV1 or x265 CRF; defaults to 23 or 21")
+	pflag.Duration("worker.startAfter", 0, "Legacy daily admission start as a duration since midnight, e.g. 8h")
+	pflag.Duration("worker.stopAfter", 0, "Legacy daily admission end as a duration since midnight, e.g. 22h")
+	pflag.String("worker.schedule.timeZone", "Local", "Admission timezone (IANA name, e.g. Europe/Madrid)")
+	pflag.StringSlice("worker.schedule.windows", nil, "Allowed job-request windows, e.g. 22:00-10:00 or Mon-Fri@00:00-10:00")
+	pflag.StringArray("schedule", nil, "Daily job-request window HH:MM-HH:MM; repeat to add windows; follows the process timezone")
 
 	cmd.ViperConfig(&opts)
+	if pflag.Lookup("schedule").Changed {
+		schedules, err := pflag.CommandLine.GetStringArray("schedule")
+		if err != nil {
+			log.Panic(err)
+		}
+		applyScheduleFlag(opts.Worker, schedules)
+	}
+}
+
+func applyScheduleFlag(worker *config.Config, schedules []string) {
+	if worker == nil || schedules == nil {
+		return
+	}
+	if len(schedules) == 1 && schedules[0] == "" {
+		schedules = nil
+	}
+	if worker.Schedule == nil {
+		worker.Schedule = &config.ScheduleConfig{TimeZone: "Local"}
+	}
+	worker.Schedule.Windows = schedules
 }
 
 func main() {
@@ -97,6 +128,15 @@ func main() {
 }
 
 func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) error {
+	if err := opts.Worker.Validate(); err != nil {
+		return err
+	}
+	if schedule := opts.Worker.Schedule; schedule != nil && len(schedule.Windows) > 0 {
+		log.WithFields(log.Fields{
+			"time_zone": schedule.TimeZone,
+			"windows":   schedule.Windows,
+		}).Info("Weekly job admission enabled; accepted jobs finish after windows close")
+	}
 	renderService := console.NewRenderService()
 	renderService.Run(wg, ctx)
 

@@ -1,0 +1,53 @@
+# Design
+
+## Context
+
+See proposal.md. The worker currently generates one HEVC-shaped FFmpeg command string regardless of `videoCodec`; `command.NewCommandByString` reparses that string. Its encode queue has one consumer, and `maxActiveJobs` is a fixed value of two. The existing `parallelRunners` setting controls actions **within one job**, not simultaneous jobs. Download records source bytes, but FFmpeg does not populate target bytes before the size check. The upstream FFmpeg builder in PR #123 contains both NVENC and SVT-AV1.
+
+## Goals / Non-Goals
+
+**Goals:** Produce the approved NVENC AV1 video arguments exactly, offer a tested SVT-AV1 CPU option, preserve x265 rollback, safely bound simultaneous jobs, restrict new requests to configured weekly hours, and verify output size before upload.
+
+**Non-Goals:** Automatic per-title encoder/CQ selection, VMAF prepasses, CUDA decode or zero-copy conversion, split-frame encoding, multi-GPU scheduling, and automatic replacement of existing library files without the existing server workflow.
+
+## Decisions
+
+### Encoder selection and compatibility
+
+Retain `worker.ffmpegConfig.videoCodec` as the selection key with supported values `av1_nvenc`, `libsvtav1`, and `libx265`. Set its registered default to `av1_nvenc`. Resolve omitted preset, CRF/CQ, and profile values per codec; reject incompatible explicit settings at worker startup. Keep `videoCRF`, `videoPreset`, and `videoProfile` for existing x265 configurations. Add `videoCQ` and `videoQMax` for NVENC. An omitted numeric override is represented by zero, since neither the chosen AV1 nor x265 profiles uses zero as a default quality target. Reject unsupported modes instead of emitting an invalid mixed command.
+
+The NVENC profile is fixed to P010, p7, UHQ, VBR CQ34, zero target bitrate, full-resolution multipass, four middle-reference B-frames, disabled split encoding, and qmin0/qmax100. CQ, QP ceiling, and preset can be explicitly tuned. The SVT profile is 10-bit `yuv420p10le`, preset 4 and CRF23 by default, with preset and CRF overrides. Preset 4 is a provisional time/size balance: on the completed Bruce Lee film it encoded in half the time of preset 3, with a 1.9% larger output and 0.36 lower whole-film p5. More film types will be measured before treating this as a final library-wide optimum. The explicit x265 profile retains `yuv420p10le`, medium, CRF21, and main10 defaults.
+
+The FFmpeg generator will return a structured argument slice and call `command.NewCommand`. This avoids ambiguous reparsing of paths and titles and makes exact argument tests possible. Existing `extraArgs` remain before input arguments, parsed with the project's current splitter; malformed or codec-specific overrides via `extraArgs` are outside the named profile contract and documented as advanced use.
+
+### Concurrency
+
+Add `worker.maxActiveJobs` (default 2) and `worker.ffmpegConfig.parallelJobs` (default 0, meaning inherit maxActiveJobs). Admission applies both the active-job limit and optional time window. Run the configured number of consumers for the FFmpeg step queue; retain per-job action concurrency for PGS OCR separately. Each accepted job keeps its existing isolated workspace and progress tracker. Validate the active-job limit as positive and the encode override as nonnegative; resolve zero to the active-job limit. This supports multiple sessions but makes no throughput claim for arbitrary hardware; operators tune limits for their GPU, CPU, disk, and OCR workload.
+
+### Weekly admission windows
+
+Add `worker.schedule.timeZone` (default `Local`) and `worker.schedule.windows` (default empty), available as YAML and advanced CLI settings. Add a repeatable top-level `--schedule=HH:MM-HH:MM` daily shortcut that uses the process timezone and replaces YAML windows when supplied. Each advanced window is `Days@HH:MM-HH:MM`, or daily `HH:MM-HH:MM` with implicit `*`, where Days is `*`, a three-letter weekday, or an inclusive weekday range such as `Mon-Fri`. Multiple windows are combined with OR. `24:00` is allowed only as an end; equal endpoints are invalid. An overnight window belongs to the weekday on which it starts. Use local civil clock time in the selected IANA timezone, with inclusive starts and exclusive ends. Embed Go timezone data so runtime images need no host timezone mounts. Repeated civil hours during an autumn clock change have the same policy; nonexistent spring hours never occur.
+
+An empty window list adds no restriction. Preserve the existing legacy `startAfter`/`stopAfter` behavior when no weekly windows are supplied, but reject combining active legacy fields with weekly windows. Reject invalid zones and windows before contacting the server. The existing pause and active-job limit still apply. Evaluate admission before each periodic job request; a request already in flight at the cutoff can still receive its assignment. Accepted jobs, including restored and locally queued work, continue across closed windows; no encode cancellation, suspension, runtime VMAF pass, automatic electricity-price lookup, or public-holiday calendar is added. Configuration changes require restarting the worker. This is an admission schedule, not a hard electricity-consumption cutoff.
+
+### Size and verification
+
+Stat the complete MKV after FFmpeg exits, record the byte count in `jobContext.Target.Size`, and retain the existing verification rule that rejects outputs larger than sources. This prevents silent growth during the library migration. Preserve the original until the existing server completion policy runs; no source is deleted by the encoder itself.
+
+## Risks / Trade-offs
+
+- [Default NVENC requires a usable NVIDIA runtime] → Document GPU access and provide an explicit CPU profile; fail clearly when NVENC initialization fails.
+- [A fixed CQ cannot guarantee p5 VMAF on all films] → Keep quality configurable and avoid claiming an automatic quality guarantee; use the existing manual pilot and visual review process.
+- [CPU CRF23 may waste bytes on easy titles] → Make CRF configurable. Presets 3, 4, and 6 were measured on one complete film; further film types and per-title tuning remain operator-driven.
+- [Two simultaneous GPU encodes can contend for memory or I/O] → Bound both accepted jobs and encode consumers and expose both limits.
+- [A larger output may now fail where the old zero target-size bug let it pass] → Report the measured sizes in the error; keep the original file available for retry or different settings.
+
+## Migration Plan
+
+Deploy PR #123's FFmpeg builder and PR #124's benchmark base first. GPU workers can use the new default once NVIDIA runtime access is configured. Set `worker.ffmpegConfig.videoCodec: libsvtav1` for CPU-only workers, or `libx265` to roll back. Existing x265 installations that explicitly set codec, preset, CRF, and profile retain that behavior. Configure `worker.maxActiveJobs` and `worker.ffmpegConfig.parallelJobs` to match each host's resources; set both to `1` to force serial processing.
+
+## Short-scene CPU evidence and simple deployment follow-up
+
+Use complete source frames from representative 60-second clips for the CPU preset matrix so each test finishes quickly. Compare SVT presets 6, 4, and 3 with the fixed production GPU CQ34 profile on the selected H.264 film, HEVC concert, and difficult-scene sources. Preserve exact commands, every-frame VMAF, byte counts, and three isolated timing runs. Validate source/output/scored frame counts. These short scenes support a provisional default only; they do not establish whole-film quality, energy use, or a library-wide winner. The approved complete GPU film remains the end-to-end production reference. Keep originals untouched and resumable per-run records. Do not add automatic per-title production tuning.
+
+Document CLI-only Docker deployment with encoder defaults, worker name, active-job count, and selected codec. Use the user's revised daily Europe/Madrid 22:00-10:00 window every day, replacing the previous example weekday/weekend preference. Preserve advanced overrides and existing YAML compatibility.

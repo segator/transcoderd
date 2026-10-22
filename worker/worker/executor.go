@@ -4,22 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
+
 	"transcoder/model"
 	"transcoder/worker/config"
 	"transcoder/worker/console"
 	"transcoder/worker/job"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/step"
-)
 
-const maxActiveJobs = 2
+	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
+)
 
 type JobExecutor struct {
 	activeJobs uint32
@@ -149,9 +149,19 @@ func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) {
 
 func (e *JobExecutor) start(ctx context.Context) {
 	e.resumeJobs()
-	for _, stepExecutor := range e.stepExecutors {
-		go e.stepQueueRoutine(ctx, stepExecutor)
+	for notificationType, stepExecutor := range e.stepExecutors {
+		consumers := e.stepConsumers(notificationType)
+		for i := 0; i < consumers; i++ {
+			go e.stepQueueRoutine(ctx, stepExecutor)
+		}
 	}
+}
+
+func (e *JobExecutor) stepConsumers(notificationType model.NotificationType) int {
+	if notificationType == model.FFMPEGSNotification {
+		return e.workerConfig.EncodeParallelJobs()
+	}
+	return 1
 }
 
 func (e *JobExecutor) stop() {
@@ -185,16 +195,17 @@ func (e *JobExecutor) resumeJobs() {
 }
 
 func (e *JobExecutor) AcceptJobs() bool {
+	return e.acceptJobsAt(time.Now())
+}
+
+func (e *JobExecutor) acceptJobsAt(now time.Time) bool {
 	if e.workerConfig.Paused {
 		return false
 	}
-	if e.workerConfig.HaveSettedPeriodTime() {
-		now := time.Now()
-		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		elapsedSinceMidnight := now.Sub(midnight)
-		return elapsedSinceMidnight >= *e.workerConfig.StartAfter && elapsedSinceMidnight <= *e.workerConfig.StopAfter
+	if e.ActiveJobs() >= uint32(e.workerConfig.MaxActiveJobs) {
+		return false
 	}
-	return e.ActiveJobs() < maxActiveJobs
+	return e.workerConfig.AdmissionAllowedAt(now)
 }
 func (e *JobExecutor) jobLogger(jobContext *job.Context) console.LeveledLogger {
 	return e.console.Logger(console.WithMessagePrefix(fmt.Sprintf("[%s]", jobContext.JobId.String())))
@@ -247,6 +258,18 @@ func (e *JobExecutor) ActiveJobs() uint32 {
 }
 
 func (e *JobExecutor) stepQueueRoutine(ctx context.Context, stepExecutor *step.Executor) {
+	runStepQueue(ctx, stepExecutor, func(jobCtx *job.Context) {
+		stepExecutor.OnJob(jobCtx)
+		err := e.executeStepActions(ctx, stepExecutor, jobCtx)
+		if err != nil {
+			stepExecutor.OnError(jobCtx, stepExecutor.NotificationType(), err)
+			return
+		}
+		stepExecutor.OnComplete(jobCtx)
+	})
+}
+
+func runStepQueue(ctx context.Context, stepExecutor *step.Executor, process func(*job.Context)) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -255,13 +278,7 @@ func (e *JobExecutor) stepQueueRoutine(ctx context.Context, stepExecutor *step.E
 			if !ok {
 				return
 			}
-			stepExecutor.OnJob(jobCtx)
-			err := e.executeStepActions(ctx, stepExecutor, jobCtx)
-			if err != nil {
-				stepExecutor.OnError(jobCtx, stepExecutor.NotificationType(), err)
-				continue
-			}
-			stepExecutor.OnComplete(jobCtx)
+			process(jobCtx)
 		}
 	}
 }

@@ -25,9 +25,7 @@ These observations are not normative requirements. They need separate fixes or e
 - `CancelJob` appends `Job/canceled` for assigned or started jobs, then returns an unknown-state error. The API can answer HTTP 500 despite recording cancellation. Queued jobs are not canceled through that route.
 - Download, checksum, and upload routes do not use the bearer middleware used by the four control routes. Download and upload check `workerName` against the assignment; checksum only looks up the UUID and a published checksum.
 - An invalid upload returns HTTP 400, but deferred stream close still renames the `.upload` file to the destination. Cleanup can remove the previous destination. The old file is not guaranteed to be preserved.
-- The encoding phase does not set `Target.Size` in the job context. The output-size comparison in `ffmpegVerifyStep.go` therefore does not effectively reject a larger output.
 - The registered `worker.threads` flag is never wired to `worker.ffmpegConfig.threads`, which supplies FFmpeg's `-threads` option. Without the nested setting, the current invocation uses `-threads 0`.
-- When `startAfter` or `stopAfter` defines a time window, `AcceptJobs` decides by the window and no longer applies the ordinary two-active-job limit.
 - The intake response includes `skipped`, but the current scheduler classifies ineligible files under `failed`; this path does not produce `ErrorFileSkipped`.
 - Several entries in the accepted-extension list include trailing spaces, so ordinary `.mov`, `.ogx`, `.asf`, and `.vob` files fail the extension check; matching is also case-sensitive.
 - Job intake joins the submitted `sourcePath` with the media root but does not reject traversal segments or verify that the resolved path remains inside the root.

@@ -125,7 +125,7 @@ func TestE2E(t *testing.T) {
 		sourceProbe := completedJob.SourceProbe
 		targetProbe := completedJob.TargetProbe
 
-		var hasHEVC, hasAAC, hasSRT bool
+		var hasAV1, hasAAC, hasSRT bool
 		audioLangs := make(map[string]int)
 		subtitleLangs := make(map[string]int)
 		var outputVideoWidth, outputVideoHeight int
@@ -134,8 +134,8 @@ func TestE2E(t *testing.T) {
 		for i, s := range targetProbe.Streams {
 			t.Logf("  %d. %s: %s (lang=%s title=%q)", i, s.CodecType, s.CodecName, s.Language, s.Title)
 			switch {
-			case s.CodecType == "video" && s.CodecName == "hevc":
-				hasHEVC = true
+			case s.CodecType == "video" && s.CodecName == "av1":
+				hasAV1 = true
 				outputVideoWidth = s.Width
 				outputVideoHeight = s.Height
 			case s.CodecType == "audio" && s.CodecName == "aac":
@@ -157,8 +157,8 @@ func TestE2E(t *testing.T) {
 			}
 		}
 
-		if !hasHEVC {
-			t.Errorf("Output missing HEVC video stream")
+		if !hasAV1 {
+			t.Errorf("Output missing AV1 video stream")
 		}
 		if !hasAAC {
 			t.Errorf("Output missing AAC audio stream")

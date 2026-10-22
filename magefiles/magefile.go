@@ -380,11 +380,10 @@ func (Test) E2e(ctx context.Context) error {
 				" --web.token e2e-test-token" +
 				" --web.domain http://127.0.0.1:8080" +
 				" --worker.name e2e-worker" +
-				" --worker.ffmpegConfig.videoPreset ultrafast" +
+				" --worker.ffmpegConfig.videoPreset 4" +
 				" --worker.ffmpegConfig.videoCRF 35" +
-				" --worker.ffmpegConfig.videoCodec libx265" +
-				" --worker.ffmpegConfig.audioCodec aac" +
-				" --worker.ffmpegConfig.videoProfile main10" +
+				" --worker.ffmpegConfig.videoCodec libsvtav1" +
+				" --worker.ffmpegConfig.audioCodec libfdk_aac" +
 				" --worker.verifyDeltaTime 5" +
 				" --worker.threads 2" +
 				" > /tmp/worker.log 2>&1) &" +

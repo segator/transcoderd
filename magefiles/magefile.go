@@ -139,7 +139,7 @@ func projectSource(client *dagger.Client) *dagger.Directory {
 
 func goContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container {
 	return client.Container().
-		From("golang:1.26-bookworm").
+		From("golang:1.26-trixie").
 		WithMountedCache("/root/.cache/go-build", client.CacheVolume("go-build"), dagger.ContainerWithMountedCacheOpts{Sharing: dagger.CacheSharingModeShared}).
 		WithMountedCache("/go/pkg/mod", client.CacheVolume("go-mod"), dagger.ContainerWithMountedCacheOpts{Sharing: dagger.CacheSharingModeShared}).
 		WithEnvVariable("CGO_ENABLED", "0").
@@ -375,7 +375,7 @@ func (Test) E2e(ctx context.Context) error {
 				"-H 'Authorization: Bearer e2e-test-token' -H 'workerName: e2e-readiness' " +
 				"http://127.0.0.1:8080/api/v1/job/request; then ready=1; break; fi; sleep 1; done; " +
 				"if [ \"$ready\" -ne 1 ]; then echo 'server did not become ready' >&2; cat /tmp/server.log; kill \"$server_pid\" 2>/dev/null || true; exit 1; fi; " +
-				"/app/transcoderd-worker" +
+				"(cd /app && /app/transcoderd-worker" +
 				" --noUpdates" +
 				" --web.token e2e-test-token" +
 				" --web.domain http://127.0.0.1:8080" +
@@ -387,7 +387,7 @@ func (Test) E2e(ctx context.Context) error {
 				" --worker.ffmpegConfig.videoProfile main10" +
 				" --worker.verifyDeltaTime 5" +
 				" --worker.threads 2" +
-				" > /tmp/worker.log 2>&1 &" +
+				" > /tmp/worker.log 2>&1) &" +
 				" sleep 3 && echo '=== WORKER STARTUP ===' && cat /tmp/worker.log && echo '=== END WORKER STARTUP ===' &&" +
 				" go test -tags=integration -v -timeout 7m -run TestE2E ./integration/... 2>&1; EXIT=$?;" +
 				" echo '=== SERVER LOG ==='; cat /tmp/server.log;" +
@@ -676,6 +676,7 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 		return base.
 			WithDirectory("/app/tessdata", pgsBins.Directory("/src/tessdata")).
 			WithDirectory("/app", pgsBins.Directory("/src/PgsToSrt/out")).
+			WithWorkdir("/app").
 			WithExec([]string{"apt-get", "update"}).
 			WithExec([]string{
 				"apt-get", "install", "-y", "libtesseract-dev",

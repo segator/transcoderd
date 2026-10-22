@@ -22,15 +22,15 @@ jobs:
 
       - name: Install crane
         run: |
-          go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/bin"
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
 
       - name: Authenticate to GHCR
         env:
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '%s' "$GHCR_TOKEN" | crane auth login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+          printf '%s' "$GHCR_TOKEN" | "$RUNNER_TEMP/bin/crane" auth login ghcr.io --username "$GHCR_USERNAME" --password-stdin
 
       - name: Release please
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -59,10 +59,10 @@ jobs:
       - name: Ensure builder images exist
         run: |
           ffmpeg_image="ghcr.io/segator/transcoderd:builder-ffmpeg-9.0.2-av1"
-          if ! crane manifest "$ffmpeg_image" > /dev/null 2>&1; then
+          if ! "$RUNNER_TEMP/bin/crane" manifest "$ffmpeg_image" > /dev/null 2>&1; then
             mage publish:ffmpeg
           fi
-          if ! crane manifest ghcr.io/segator/transcoderd:builder-pgs > /dev/null 2>&1; then
+          if ! "$RUNNER_TEMP/bin/crane" manifest ghcr.io/segator/transcoderd:builder-pgs > /dev/null 2>&1; then
             mage publish:pgs
           fi
 

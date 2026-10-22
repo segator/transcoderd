@@ -299,8 +299,9 @@ func (Test) Integration(ctx context.Context) error {
 }
 
 // E2e runs the full end-to-end test using Dagger Services.
-// Postgres, server, and worker run as Dagger services; the test binary
-// communicates with the server over HTTP only.
+// PostgreSQL runs as a Dagger service; the test runner starts the server and
+// worker together so the HTTP flow is covered without a service readiness
+// probe between the server and worker containers.
 func (Test) E2e(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
@@ -322,37 +323,32 @@ func (Test) E2e(ctx context.Context) error {
 		WithExposedPort(5432).
 		AsService()
 
-	// 2. Server service
-	serverCtr, err := containerImage(ctx, client, src, "server")
-	if err != nil {
-		return fmt.Errorf("build server image: %w", err)
-	}
-	serverSvc := serverCtr.
-		WithServiceBinding("postgres", postgresSvc).
-		WithNewFile("/etc/transcoderd/config.yml", e2eServerConfig).
-		WithFile("/source/e2e_fixture.mkv", fixtureFile).
-		WithExposedPort(8080, dagger.ContainerWithExposedPortOpts{ExperimentalSkipHealthcheck: true}).
-		WithEnvVariable("CACHE_BUSTER", time.Now().String()).
-		WithExec([]string{"/app/transcoderd-server", "--noUpdates"}).
-		AsService()
-
-	// 3. Worker binary (background process in test runner)
-	goBinary := goContainer(client, src).
+	// Build both binaries in one Go container. The E2E runner starts them in
+	// the same container and talks to the server over localhost.
+	goBinaries := goContainer(client, src).
 		WithEnvVariable("GOOS", "linux").
 		WithEnvVariable("GOARCH", "amd64").
 		WithEnvVariable("CACHE_BUSTER", buildDate).
 		WithExec([]string{
 			"go", "build",
+			"-ldflags", ldflags("transcoderd-server"),
+			"-o", "/output/transcoderd-server",
+			"./server/main.go",
+		}).
+		WithExec([]string{
+			"go", "build",
 			"-ldflags", ldflags("transcoderd-worker"),
 			"-o", "/output/transcoderd-worker",
 			"./worker/main.go",
-		}).
-		File("/output/transcoderd-worker")
+		})
+	serverBinary := goBinaries.File("/output/transcoderd-server")
+	workerBinary := goBinaries.File("/output/transcoderd-worker")
 
 	ffmpegBins := ffmpegBuilderImage(client)
 	pgsBins := pgsBuilderImage(client)
 
-	// 4. Test runner
+	// Test runner. PostgreSQL is a service binding; server and worker are local
+	// background processes so readiness is checked with a real HTTP request.
 	out, err := goContainer(client, src).
 		WithExec([]string{"apt-get", "update"}).
 		WithExec([]string{"apt-get", "install", "-y", "ca-certificates", "mkvtoolnix", "libtesseract-dev", "wget", "curl"}).
@@ -362,23 +358,27 @@ func (Test) E2e(ctx context.Context) error {
 		WithFile("/usr/bin/ffprobe", ffmpegBins.File("/app/ffmpeg-build-script/workspace/bin/ffprobe")).
 		WithDirectory("/app/tessdata", pgsBins.Directory("/src/tessdata")).
 		WithDirectory("/app", pgsBins.Directory("/src/PgsToSrt/out")).
-		WithFile("/app/transcoderd-worker", goBinary).
-		WithServiceBinding("server", serverSvc).
-		WithEnvVariable("E2E_SERVER_URL", "http://server:8080").
+		WithFile("/app/transcoderd-server", serverBinary).
+		WithFile("/app/transcoderd-worker", workerBinary).
+		WithServiceBinding("postgres", postgresSvc).
+		WithNewFile("/etc/transcoderd/config.yml", e2eServerConfig).
+		WithFile("/source/e2e_fixture.mkv", fixtureFile).
+		WithEnvVariable("E2E_SERVER_URL", "http://127.0.0.1:8080").
 		WithEnvVariable("E2E_TOKEN", "e2e-test-token").
 		WithEnvVariable("E2E_SOURCE_PATH", "e2e_fixture.mkv").
 		WithEnvVariable("CACHE_BUSTER", time.Now().String()).
 		WithExec([]string{
 			"sh", "-c",
-			"ready=0; for attempt in $(seq 1 60); do " +
+			"/app/transcoderd-server --noUpdates > /tmp/server.log 2>&1 & " +
+				"server_pid=$!; ready=0; for attempt in $(seq 1 60); do " +
 				"if curl --silent --show-error --fail --output /dev/null " +
 				"-H 'Authorization: Bearer e2e-test-token' -H 'workerName: e2e-readiness' " +
-				"http://server:8080/api/v1/job/request; then ready=1; break; fi; sleep 1; done; " +
-				"if [ \"$ready\" -ne 1 ]; then echo 'server did not become ready' >&2; exit 1; fi; " +
+				"http://127.0.0.1:8080/api/v1/job/request; then ready=1; break; fi; sleep 1; done; " +
+				"if [ \"$ready\" -ne 1 ]; then echo 'server did not become ready' >&2; cat /tmp/server.log; kill \"$server_pid\" 2>/dev/null || true; exit 1; fi; " +
 				"/app/transcoderd-worker" +
 				" --noUpdates" +
 				" --web.token e2e-test-token" +
-				" --web.domain http://server:8080" +
+				" --web.domain http://127.0.0.1:8080" +
 				" --worker.name e2e-worker" +
 				" --worker.ffmpegConfig.videoPreset ultrafast" +
 				" --worker.ffmpegConfig.videoCRF 35" +
@@ -389,8 +389,10 @@ func (Test) E2e(ctx context.Context) error {
 				" --worker.threads 2" +
 				" > /tmp/worker.log 2>&1 &" +
 				" sleep 3 && echo '=== WORKER STARTUP ===' && cat /tmp/worker.log && echo '=== END WORKER STARTUP ===' &&" +
-				" go test -tags=integration -v -timeout 25m -run TestE2E ./integration/... 2>&1; EXIT=$?;" +
-				" echo '=== WORKER LOG ==='; cat /tmp/worker.log; exit $EXIT",
+				" go test -tags=integration -v -timeout 7m -run TestE2E ./integration/... 2>&1; EXIT=$?;" +
+				" echo '=== SERVER LOG ==='; cat /tmp/server.log;" +
+				" echo '=== WORKER LOG ==='; cat /tmp/worker.log;" +
+				" kill \"$server_pid\" 2>/dev/null || true; exit $EXIT",
 		}).
 		Stdout(ctx)
 	fmt.Println(out)

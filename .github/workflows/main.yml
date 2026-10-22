@@ -69,7 +69,7 @@ jobs:
         run: mage docker:all
 
       - name: E2E Test
-        timeout-minutes: 30
+        timeout-minutes: 15
         run: mage test:e2e
 
       - name: Publish

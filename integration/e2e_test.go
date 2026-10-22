@@ -20,7 +20,7 @@ import (
 
 const (
 	e2ePollInterval = 5 * time.Second
-	e2eTimeout      = 20 * time.Minute
+	e2eTimeout      = 5 * time.Minute
 )
 
 // TestE2E runs a full end-to-end verification against an already-running

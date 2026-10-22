@@ -34,6 +34,21 @@ const (
 	FailedNotificationStatus    NotificationStatus = "failed"
 )
 
+type MediaStream struct {
+	Index     int    `json:"index"`
+	CodecType string `json:"codec_type"`
+	CodecName string `json:"codec_name"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	Language  string `json:"language,omitempty"`
+	Title     string `json:"title,omitempty"`
+}
+
+type MediaProbe struct {
+	DurationSeconds float64       `json:"duration_seconds"`
+	Streams         []MediaStream `json:"streams"`
+}
+
 type Identity interface {
 	getUUID() uuid.UUID
 }
@@ -48,6 +63,8 @@ type Job struct {
 	LastUpdate    *time.Time       `json:"last_update,omitempty"`
 	SourceSize    int64            `json:"source_size,omitempty"`
 	TargetSize    int64            `json:"target_size,omitempty"`
+	SourceProbe   *MediaProbe      `json:"source_probe,omitempty"`
+	TargetProbe   *MediaProbe      `json:"target_probe,omitempty"`
 }
 
 type JobEventQueue struct {
@@ -97,6 +114,7 @@ type TaskEventType struct {
 	NotificationType NotificationType   `json:"notificationType"`
 	Status           NotificationStatus `json:"status"`
 	Message          string             `json:"message"`
+	TargetProbe      *MediaProbe        `json:"target_probe,omitempty"`
 }
 
 type PingEventType struct {

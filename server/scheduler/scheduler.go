@@ -14,6 +14,7 @@ import (
 	"transcoder/helper"
 	"transcoder/model"
 	"transcoder/server/repository"
+	"transcoder/worker/ffmpeg"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -33,6 +34,7 @@ type Scheduler interface {
 	RequestJob(ctx context.Context, workerName string) (*model.RequestJobResponse, error)
 	HandleWorkerEvent(ctx context.Context, taskEvent *model.EnvelopEvent) error
 	CancelJob(ctx context.Context, id string) error
+	GetJob(ctx context.Context, id string) (*model.Job, error)
 }
 
 type Config struct {
@@ -116,6 +118,10 @@ func (r *RuntimeScheduler) CancelJob(ctx context.Context, id string) error {
 	return fmt.Errorf("job %s is in unknown state", id)
 }
 
+func (r *RuntimeScheduler) GetJob(ctx context.Context, id string) (*model.Job, error) {
+	return r.repo.GetJob(ctx, id)
+}
+
 func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.EnvelopEvent) error {
 	var err error
 	switch event.EventType {
@@ -178,6 +184,10 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 		return err
 	}
 	video.TargetSize = targetStat.Size()
+
+	if jobEvent.TargetProbe != nil {
+		video.TargetProbe = jobEvent.TargetProbe
+	}
 
 	err = r.repo.UpdateJob(ctx, video)
 	if err != nil {
@@ -361,8 +371,17 @@ func (r *RuntimeScheduler) newJob(ctx context.Context, tx repository.Repository,
 		TargetPath: jobRequest.TargetPath,
 		Id:         newUUID,
 	}
+
+	sourcePath := filepath.Join(r.config.SourcePath, jobRequest.SourcePath)
+	probeData, err := ffmpeg.ExtractFFProbeData(ctx, sourcePath)
+	if err != nil {
+		l.Warnf("failed to ffprobe source file: %v", err)
+	} else {
+		job.SourceProbe = ffmpeg.ProbeDataToMediaProbe(probeData)
+	}
+
 	l.WithField("job_id", job.Id.String()).Info("Creating new job")
-	err := tx.AddJob(ctx, job)
+	err = tx.AddJob(ctx, job)
 	if err != nil {
 		return nil, err
 	}

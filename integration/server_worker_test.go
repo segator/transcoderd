@@ -13,74 +13,38 @@ import (
 	"testing"
 	"time"
 
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
-
 	"transcoder/model"
 	"transcoder/server/repository"
 	"transcoder/server/scheduler"
 )
 
-// TestServerWorkerIntegration es un test de integración que:
-// 1. Levanta un PostgreSQL real con testcontainers
-// 2. Levanta un servidor con un scheduler
-// 3. Simula un worker que pide un job
-// 4. El worker "encodea" el archivo (simulado)
-// 5. Verifica que el servidor registre el job como completado
 func TestServerWorkerIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
 
+	pgHost := os.Getenv("INTEGRATION_PG_HOST")
+	pgPortStr := os.Getenv("INTEGRATION_PG_PORT")
+	pgUser := os.Getenv("INTEGRATION_PG_USER")
+	pgPass := os.Getenv("INTEGRATION_PG_PASSWORD")
+	pgDB := os.Getenv("INTEGRATION_PG_DATABASE")
+	if pgHost == "" || pgPortStr == "" || pgUser == "" || pgPass == "" || pgDB == "" {
+		t.Skip("Integration env vars not set (INTEGRATION_PG_HOST, INTEGRATION_PG_PORT, INTEGRATION_PG_USER, INTEGRATION_PG_PASSWORD, INTEGRATION_PG_DATABASE)")
+	}
+
+	pgPort, err := strconv.Atoi(pgPortStr)
+	if err != nil {
+		t.Fatalf("Invalid INTEGRATION_PG_PORT: %v", err)
+	}
+
 	ctx := context.Background()
 
-	// 1. Levantar PostgreSQL con testcontainers
-	t.Log("🐳 Starting PostgreSQL container...")
-	pgContainer, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("transcoderd_test"),
-		postgres.WithUsername("test"),
-		postgres.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(60*time.Second),
-		),
-	)
-	if err != nil {
-		t.Fatalf("Failed to start postgres container: %v", err)
-	}
-	defer func() {
-		if err := pgContainer.Terminate(ctx); err != nil {
-			t.Logf("Failed to terminate postgres container: %v", err)
-		}
-	}()
-
-	// Obtener connection string
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatalf("Failed to get connection string: %v", err)
-	}
-
-	// Obtener el puerto mapeado
-	mappedPort, err := pgContainer.MappedPort(ctx, "5432")
-	if err != nil {
-		t.Fatalf("Failed to get mapped port: %v", err)
-	}
-
-	pgPort, err := strconv.Atoi(mappedPort.Port())
-	if err != nil {
-		t.Fatalf("Failed to parse PG port: %v", err)
-	}
-	t.Logf("PostgreSQL started: %s (port: %d)", connStr, pgPort)
-
 	dbConfig := &repository.SQLServerConfig{
-		Host:     "localhost",
+		Host:     pgHost,
 		Port:     pgPort,
-		User:     "test",
-		Password: "test",
-		Scheme:   "transcoderd_test",
+		User:     pgUser,
+		Password: pgPass,
+		Scheme:   pgDB,
 		Driver:   "postgres",
 	}
 
@@ -89,32 +53,17 @@ func TestServerWorkerIntegration(t *testing.T) {
 		t.Fatalf("Failed to create repository: %v", err)
 	}
 
-	// Inicializar el schema de la base de datos
 	if err := repo.Initialize(ctx); err != nil {
 		t.Fatalf("Failed to initialize repository: %v", err)
 	}
-	t.Log("✅ Repository initialized")
 
-	// 3. Setup: Crear directorios temporales
 	tmpDir := t.TempDir()
-	sourceDir := filepath.Join(tmpDir, "source")
-	targetDir := filepath.Join(tmpDir, "target")
 
-	if err := os.MkdirAll(sourceDir, 0755); err != nil {
-		t.Fatalf("Failed to create source dir: %v", err)
-	}
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		t.Fatalf("Failed to create target dir: %v", err)
-	}
-
-	// Crear un archivo de video de prueba
-	testVideoPath := filepath.Join(sourceDir, "test-video.mkv")
+	testVideoPath := filepath.Join(tmpDir, "test-video.mkv")
 	if err := createTestVideoFile(testVideoPath, 1024*1024); err != nil {
 		t.Fatalf("Failed to create test video: %v", err)
 	}
-	t.Log("✅ Test files created")
 
-	// 4. Configurar el scheduler
 	schedulerConfig := &scheduler.Config{
 		ScheduleTime:           time.Second * 5,
 		JobTimeout:             time.Minute * 5,
@@ -127,12 +76,13 @@ func TestServerWorkerIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create scheduler: %v", err)
 	}
-	t.Log("✅ Scheduler created")
 
 	testCtx, cancel := context.WithTimeout(ctx, time.Minute*2)
 	defer cancel()
 
-	// Test 1: Programar un job
+	var jobID string
+	workerName := "test-worker-1"
+
 	t.Run("Schedule Job", func(t *testing.T) {
 		jobRequest := &model.JobRequest{
 			SourcePath: "test-video.mkv",
@@ -153,13 +103,11 @@ func TestServerWorkerIntegration(t *testing.T) {
 			t.Errorf("Unexpected failed requests: %v", result.FailedJobRequest)
 		}
 
-		t.Logf("✅ Job scheduled: %s", result.ScheduledJobs[0].Id)
+		jobID = result.ScheduledJobs[0].Id.String()
+		t.Logf("Job scheduled: %s", jobID)
 	})
 
-	// Test 2: Worker solicita un job
 	t.Run("Request Job", func(t *testing.T) {
-		workerName := "test-worker-1"
-
 		jobResponse, err := sched.RequestJob(testCtx, workerName)
 		if err != nil {
 			t.Fatalf("Failed to request job: %v", err)
@@ -169,9 +117,8 @@ func TestServerWorkerIntegration(t *testing.T) {
 			t.Fatal("No job was assigned")
 		}
 
-		t.Logf("✅ Job assigned to worker: %s (EventID: %d)", jobResponse.Id, jobResponse.EventID)
+		t.Logf("Job assigned to worker: %s (EventID: %d)", jobResponse.Id, jobResponse.EventID)
 
-		// Verificar que el job está en estado Assigned
 		job, err := repo.GetJob(testCtx, jobResponse.Id.String())
 		if err != nil {
 			t.Fatalf("Failed to get job: %v", err)
@@ -183,17 +130,12 @@ func TestServerWorkerIntegration(t *testing.T) {
 		}
 	})
 
-	// Test 3: Worker reporta inicio del job
 	t.Run("Worker Starts Job", func(t *testing.T) {
-		jobs, _ := repo.GetJobsByStatus(testCtx, model.JobNotification, model.AssignedNotificationStatus)
-		if len(jobs) == 0 {
-			t.Fatal("No assigned jobs found")
+		job, err := repo.GetJob(testCtx, jobID)
+		if err != nil {
+			t.Fatalf("Failed to get job: %v", err)
 		}
 
-		job := jobs[0]
-		workerName := "test-worker-1"
-
-		// Simular evento de inicio
 		startEvent := &model.TaskEventType{
 			Event: model.Event{
 				EventTime:  time.Now(),
@@ -212,32 +154,23 @@ func TestServerWorkerIntegration(t *testing.T) {
 			RemoteAddr: "127.0.0.1:12345",
 		}
 
-		err := sched.HandleWorkerEvent(testCtx, envelope)
-		if err != nil {
+		if err := sched.HandleWorkerEvent(testCtx, envelope); err != nil {
 			t.Fatalf("Failed to handle start event: %v", err)
 		}
 
-		// Verificar estado
-		job, _ = repo.GetJob(testCtx, job.Id.String())
+		job, _ = repo.GetJob(testCtx, jobID)
 		status := job.Events.GetStatus()
 		if status != model.StartedNotificationStatus {
 			t.Errorf("Expected status %s, got %s", model.StartedNotificationStatus, status)
 		}
-
-		t.Logf("✅ Job started by worker")
 	})
 
-	// Test 4: Simular encoding (download, encode, upload)
 	t.Run("Simulate Encoding Process", func(t *testing.T) {
-		jobs, _ := repo.GetJobsByStatus(testCtx, model.JobNotification, model.StartedNotificationStatus)
-		if len(jobs) == 0 {
-			t.Fatal("No started jobs found")
+		job, err := repo.GetJob(testCtx, jobID)
+		if err != nil {
+			t.Fatalf("Failed to get job: %v", err)
 		}
 
-		job := jobs[0]
-		workerName := "test-worker-1"
-
-		// Simular progreso de download
 		t.Run("Download Progress", func(t *testing.T) {
 			for i := 0; i <= 100; i += 25 {
 				progressEvent := &model.TaskProgressType{
@@ -258,15 +191,12 @@ func TestServerWorkerIntegration(t *testing.T) {
 					RemoteAddr: "127.0.0.1:12345",
 				}
 
-				err := sched.HandleWorkerEvent(testCtx, envelope)
-				if err != nil {
+				if err := sched.HandleWorkerEvent(testCtx, envelope); err != nil {
 					t.Fatalf("Failed to handle progress event: %v", err)
 				}
 			}
-			t.Logf("✅ Download progress simulated")
 		})
 
-		// Crear archivo de salida simulado
 		targetPath := filepath.Join(tmpDir, job.TargetPath)
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 			t.Fatalf("Failed to create target dir: %v", err)
@@ -275,96 +205,48 @@ func TestServerWorkerIntegration(t *testing.T) {
 			t.Fatalf("Failed to create encoded file: %v", err)
 		}
 
-		// Reportar completado de download
-		downloadCompleteEvent := &model.TaskEventType{
-			Event: model.Event{
-				EventTime:  time.Now(),
-				WorkerName: workerName,
-			},
-			JobId:            job.Id,
-			EventID:          job.Events.GetLatest().EventID + 1,
-			NotificationType: model.DownloadNotification,
-			Status:           model.CompletedNotificationStatus,
-			Message:          "Download completed",
+		steps := []struct {
+			notifType model.NotificationType
+			message   string
+		}{
+			{model.DownloadNotification, "Download completed"},
+			{model.FFMPEGSNotification, "Encoding completed"},
+			{model.UploadNotification, "Upload completed"},
 		}
 
-		envelope := &model.EnvelopEvent{
-			EventType:  model.NotificationEvent,
-			EventData:  mustMarshal(downloadCompleteEvent),
-			RemoteAddr: "127.0.0.1:12345",
+		for _, step := range steps {
+			event := &model.TaskEventType{
+				Event: model.Event{
+					EventTime:  time.Now(),
+					WorkerName: workerName,
+				},
+				JobId:            job.Id,
+				EventID:          job.Events.GetLatest().EventID + 1,
+				NotificationType: step.notifType,
+				Status:           model.CompletedNotificationStatus,
+				Message:          step.message,
+			}
+
+			envelope := &model.EnvelopEvent{
+				EventType:  model.NotificationEvent,
+				EventData:  mustMarshal(event),
+				RemoteAddr: "127.0.0.1:12345",
+			}
+
+			if err := sched.HandleWorkerEvent(testCtx, envelope); err != nil {
+				t.Fatalf("Failed to handle %s event: %v", step.notifType, err)
+			}
+
+			job, _ = repo.GetJob(testCtx, job.Id.String())
 		}
-
-		err := sched.HandleWorkerEvent(testCtx, envelope)
-		if err != nil {
-			t.Fatalf("Failed to handle download complete: %v", err)
-		}
-
-		t.Logf("✅ Download completed")
-
-		// Simular encoding
-		ffmpegCompleteEvent := &model.TaskEventType{
-			Event: model.Event{
-				EventTime:  time.Now(),
-				WorkerName: workerName,
-			},
-			JobId:            job.Id,
-			EventID:          job.Events.GetLatest().EventID + 1,
-			NotificationType: model.FFMPEGSNotification,
-			Status:           model.CompletedNotificationStatus,
-			Message:          "Encoding completed",
-		}
-
-		envelope = &model.EnvelopEvent{
-			EventType:  model.NotificationEvent,
-			EventData:  mustMarshal(ffmpegCompleteEvent),
-			RemoteAddr: "127.0.0.1:12345",
-		}
-
-		err = sched.HandleWorkerEvent(testCtx, envelope)
-		if err != nil {
-			t.Fatalf("Failed to handle ffmpeg complete: %v", err)
-		}
-
-		t.Logf("✅ Encoding completed")
-
-		// Simular upload
-		uploadCompleteEvent := &model.TaskEventType{
-			Event: model.Event{
-				EventTime:  time.Now(),
-				WorkerName: workerName,
-			},
-			JobId:            job.Id,
-			EventID:          job.Events.GetLatest().EventID + 1,
-			NotificationType: model.UploadNotification,
-			Status:           model.CompletedNotificationStatus,
-			Message:          "Upload completed",
-		}
-
-		envelope = &model.EnvelopEvent{
-			EventType:  model.NotificationEvent,
-			EventData:  mustMarshal(uploadCompleteEvent),
-			RemoteAddr: "127.0.0.1:12345",
-		}
-
-		err = sched.HandleWorkerEvent(testCtx, envelope)
-		if err != nil {
-			t.Fatalf("Failed to handle upload complete: %v", err)
-		}
-
-		t.Logf("✅ Upload completed")
 	})
 
-	// Test 5: Completar el job
 	t.Run("Complete Job", func(t *testing.T) {
-		jobs, _ := repo.GetJobsByStatus(testCtx, model.JobNotification, model.StartedNotificationStatus)
-		if len(jobs) == 0 {
-			t.Fatal("No started jobs found")
+		job, err := repo.GetJob(testCtx, jobID)
+		if err != nil {
+			t.Fatalf("Failed to get job: %v", err)
 		}
 
-		job := jobs[0]
-		workerName := "test-worker-1"
-
-		// Reportar job completado
 		completeEvent := &model.TaskEventType{
 			Event: model.Event{
 				EventTime:  time.Now(),
@@ -383,13 +265,11 @@ func TestServerWorkerIntegration(t *testing.T) {
 			RemoteAddr: "127.0.0.1:12345",
 		}
 
-		err := sched.HandleWorkerEvent(testCtx, envelope)
-		if err != nil {
+		if err := sched.HandleWorkerEvent(testCtx, envelope); err != nil {
 			t.Fatalf("Failed to handle complete event: %v", err)
 		}
 
-		// Verificar estado final
-		job, err = repo.GetJob(testCtx, job.Id.String())
+		job, err = repo.GetJob(testCtx, jobID)
 		if err != nil {
 			t.Fatalf("Failed to get final job: %v", err)
 		}
@@ -399,56 +279,39 @@ func TestServerWorkerIntegration(t *testing.T) {
 			t.Errorf("Expected status %s, got %s", model.CompletedNotificationStatus, status)
 		}
 
-		// Verificar que se actualizó el tamaño del target
 		if job.TargetSize == 0 {
 			t.Error("Target size should be updated")
 		}
 
-		// Verificar que el archivo existe
 		targetPath := filepath.Join(tmpDir, job.TargetPath)
 		if _, err := os.Stat(targetPath); os.IsNotExist(err) {
 			t.Error("Target file should exist")
 		}
 
-		t.Logf("✅ Job completed successfully!")
-		t.Logf("   Source: %s (%d bytes)", job.SourcePath, job.SourceSize)
-		t.Logf("   Target: %s (%d bytes)", job.TargetPath, job.TargetSize)
+		t.Logf("Source: %s (%d bytes)", job.SourcePath, job.SourceSize)
+		t.Logf("Target: %s (%d bytes)", job.TargetPath, job.TargetSize)
 		if job.SourceSize > 0 {
-			t.Logf("   Compression: %.2f%%", (1.0-float64(job.TargetSize)/float64(job.SourceSize))*100)
+			t.Logf("Compression: %.2f%%", (1.0-float64(job.TargetSize)/float64(job.SourceSize))*100)
 		}
 	})
 
-	// Test 6: Verificar historial de eventos
 	t.Run("Verify Event History", func(t *testing.T) {
-		jobs, _ := repo.GetJobsByStatus(testCtx, model.JobNotification, model.CompletedNotificationStatus)
-		if len(jobs) == 0 {
-			t.Fatal("No completed jobs found")
+		job, err := repo.GetJob(testCtx, jobID)
+		if err != nil {
+			t.Fatalf("Failed to get job: %v", err)
 		}
 
-		job := jobs[0]
-
-		expectedEvents := []model.NotificationType{
-			model.JobNotification,      // Queued
-			model.JobNotification,      // Assigned
-			model.JobNotification,      // Started
-			model.DownloadNotification, // Download complete
-			model.FFMPEGSNotification,  // Encoding complete
-			model.UploadNotification,   // Upload complete
-			model.JobNotification,      // Job complete
+		expectedMinEvents := 7
+		if len(job.Events) < expectedMinEvents {
+			t.Errorf("Expected at least %d events, got %d", expectedMinEvents, len(job.Events))
 		}
 
-		if len(job.Events) < len(expectedEvents) {
-			t.Errorf("Expected at least %d events, got %d", len(expectedEvents), len(job.Events))
-		}
-
-		t.Logf("✅ Event history verified (%d events)", len(job.Events))
+		t.Logf("Event history (%d events):", len(job.Events))
 		for i, event := range job.Events {
-			t.Logf("   %d. %s - %s: %s", i+1, event.NotificationType, event.Status, event.Message)
+			t.Logf("  %d. %s - %s: %s", i+1, event.NotificationType, event.Status, event.Message)
 		}
 	})
 }
-
-// Helper functions
 
 func createTestVideoFile(path string, size int64) error {
 	file, err := os.Create(path)
@@ -457,7 +320,6 @@ func createTestVideoFile(path string, size int64) error {
 	}
 	defer file.Close()
 
-	// Escribir datos dummy
 	written := int64(0)
 	buffer := make([]byte, 4096)
 	for written < size {

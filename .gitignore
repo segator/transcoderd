@@ -21,3 +21,6 @@ integration/testdata/*.mkv
 .secrets
 .env.act
 
+# mise
+.mise/
+

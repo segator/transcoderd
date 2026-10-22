@@ -144,6 +144,8 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 		return err
 	}
 
+	jobContext.TargetMediaProbe = ffmpeg.ProbeDataToMediaProbe(ffprobeData)
+
 	sha256str, err := hashFileSHA256(targetPath)
 	if err != nil {
 		return err

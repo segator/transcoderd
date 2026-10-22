@@ -107,6 +107,29 @@ func (s *Server) addJobs(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
+func (s *Server) getJob(writer http.ResponseWriter, request *http.Request) {
+	vars := mux.Vars(request)
+	jobId := vars["jobid"]
+	if jobId == "" {
+		webError(writer, fmt.Errorf("jobId is mandatory"), 400)
+		return
+	}
+	job, err := s.scheduler.GetJob(s.ctx, jobId)
+	if webError(writer, err, 500) {
+		return
+	}
+	b, err := json.MarshalIndent(job, "", "\t")
+	if webError(writer, err, 500) {
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(200)
+	_, err = writer.Write(b)
+	if err != nil {
+		log.Errorf("Error writing response %v", err)
+	}
+}
+
 func (s *Server) cancelJobs(writer http.ResponseWriter, request *http.Request) {
 	vars := mux.Vars(request)
 	jobId := vars["jobid"]
@@ -302,8 +325,9 @@ func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update
 		},
 	}
 	rtr.Handle("/api/v1/job/", webServer.AuthFunc(webServer.addJobs)).Methods("POST")
-	rtr.Handle("/api/v1/job/{jobid}", webServer.AuthFunc(webServer.cancelJobs)).Methods("DELETE")
 	rtr.Handle("/api/v1/job/request", webServer.AuthFunc(webServer.requestJob)).Methods("GET")
+	rtr.Handle("/api/v1/job/{jobid}", webServer.AuthFunc(webServer.getJob)).Methods("GET")
+	rtr.Handle("/api/v1/job/{jobid}", webServer.AuthFunc(webServer.cancelJobs)).Methods("DELETE")
 	rtr.Handle("/api/v1/event", webServer.AuthFunc(webServer.handleWorkerEvent)).Methods("POST")
 	rtr.HandleFunc("/api/v1/download", webServer.download).Methods("GET")
 	rtr.HandleFunc("/api/v1/checksum", webServer.checksum).Methods("GET")

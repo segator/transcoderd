@@ -75,31 +75,30 @@ docker run -d \
 The current behavior contracts are in [OpenSpec](./openspec/specs/). Start with the [baseline map and known gaps](./openspec/BASELINE.md), [configuration reference](./openspec/CONFIGURATION.md), and [HTTP protocol reference](./openspec/PROTOCOL.md) before changing a capability; contributor guidance is in [AGENTS.md](./AGENTS.md).
 
 ### Prerequisites
-- [Go 1.25](https://go.dev/dl/)
+- [Go 1.26](https://go.dev/dl/)
 - [golangci-lint](https://golangci-lint.run/welcome/install/)
 - Docker with [buildx](https://docs.docker.com/build/install-buildx/) (for container builds)
 - PostgreSQL (for integration tests, provided via testcontainers)
 
-Alternatively, install [Devbox](https://www.jetify.com/devbox) which provides all Go and lint tooling via Nix.
+Install [mise](https://mise.jdx.dev/) for Go, Mage, and Dagger tooling. Dagger runs builds and tests in reproducible containers.
 
 ### Build
 
 ```bash
-make build              # Build Go binaries + Docker containers
-make buildgo            # Build Go binaries only (no Docker)
-make buildgo-server     # Build server binary only -> dist/transcoderd-server
-make buildgo-worker     # Build worker binary only -> dist/transcoderd-worker
+mage build:all          # Build server and worker binaries
+mage docker:all         # Build server and worker Docker images
+mage docker:server      # Build only the server image
+mage docker:worker      # Build only the worker image
 ```
 
 ### Test
 
 ```bash
-make test               # Unit tests with coverage
-make test-race          # Unit tests with race detector
-make test-short         # Unit tests in short mode
-make test-integration   # Integration tests (requires Docker for testcontainers)
-make test-all           # Unit + integration tests
-make test-coverage      # Run tests and open coverage report in browser
+mage test:unit          # Unit tests with coverage
+mage test:race          # Unit tests with race detector
+mage test:short         # Unit tests in short mode
+mage test:integration   # Integration tests via Dagger services
+mage test:all           # Unit + integration tests
 
 # Run a single test
 go test -v -run TestFunctionName ./path/to/package/...
@@ -108,50 +107,37 @@ go test -v -run TestFunctionName ./path/to/package/...
 ### Lint
 
 ```bash
-make lint               # Run golangci-lint
-make lint-fix           # Run golangci-lint with auto-fix
-make fmt                # Run go fmt
+mage lint:check         # Run golangci-lint
+mage lint:fix           # Run golangci-lint with auto-fix
 ```
 
 ### Docker
 
-The server and worker images reuse a published FFmpeg builder image; the worker
-also reuses a PGS builder image. The default FFmpeg builder tag is
-`builder-ffmpeg-9.0.2-av1`; it contains FFmpeg 9.0.2
-with `libsvtav1`, `libaom-av1`, and `av1_nvenc`. The worker still defaults to
-HEVC (`libx265`). AV1 job settings and production quality/throughput tuning are
-separate work.
+The versioned FFmpeg builder contains FFmpeg 9.0.2 with `libsvtav1`,
+`libaom-av1`, and `av1_nvenc`; the PGS builder contains the OCR assets used by
+the worker. App image builds reuse these validated builders. CI checks their
+registry tags and builds/publishes any missing builder through Dagger. Rebuilding
+the FFmpeg builder from source takes about 50 minutes; it is a separate target,
+so ordinary app builds do not repeat that work. Builder compilation does not
+require a GPU. GPU encoding at runtime requires a compatible NVIDIA GPU and
+driver exposed to the worker container.
+On Linux, configure NVIDIA Container Toolkit and run with `--gpus all`. The
+worker image has also been tested on an RTX 5080 under WSL2 using direct device
+and driver mounts. See [AV1/NVENC validation](docs/av1-nvenc-validation.md).
 
 ```bash
-make build-builder-ffmpeg   # Compile the FFmpeg builder and load it locally
-make buildcontainer-server   # Build server Docker image (loads locally)
-make buildcontainer-worker   # Build worker Docker image (loads locally)
-make publishcontainer-server # Build and push server image to registry
-make publishcontainer-worker # Build and push worker image to registry
+mage docker:ffmpeg      # Build FFmpeg builder tarball locally
+mage docker:pgs         # Build PGS builder tarball locally
+mage publish:ffmpeg     # Build and push the FFmpeg builder
+mage publish:pgs        # Build and push the PGS builder
+mage publish:app        # Push server and worker images
 ```
-
-The FFmpeg builder uses the pinned upstream build script with CUDA development
-tools; compiling it locally does not require a GPU. It defaults to four parallel
-jobs; set `FFMPEG_BUILD_JOBS=6` or another value to match available memory. To
-publish builder images after verifying them:
-
-```bash
-make publish-builder-ffmpeg
-make publish-builder-pgs
-```
-
-Running `av1_nvenc` also requires a compatible NVIDIA GPU and driver exposed
-to the worker container. On a Docker host configured with the NVIDIA Container
-Toolkit, use `--gpus all`. The worker image has also been tested on an RTX 5080
-under WSL2 using direct device and driver mounts. See
-[AV1/NVENC validation](docs/av1-nvenc-validation.md) for the exact command,
-results, and limits of the preliminary quality comparison.
 
 ### CI Pipeline
 
 - **Lint**: runs `golangci-lint` on every push and PR
-- **Build + Test + E2E**: runs Go tests, builds both Docker images, and runs Docker E2E on pushes and PRs
-- **Docker Publish**: pushes server and worker images on `main`; a missing versioned builder is built and published once before the application build
+- **Build + Test + E2E**: runs Mage/Dagger tests, builds both Docker images, and runs Docker E2E on pushes and PRs
+- **Docker Publish**: pushes server and worker images on `main`
 - **Release**: managed by [Release Please](https://github.com/googleapis/release-please) on `main` using conventional commits
 
 ### Project Structure

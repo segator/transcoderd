@@ -128,6 +128,9 @@ func (u *Updater) runApplication(ctx context.Context) {
 }
 
 func (u *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
+	if u.noUpdates {
+		return nil, false, nil
+	}
 	if time.Since(u.lastCheckTime) <= *u.checkInterval {
 		return u.lastRelease, false, nil
 	}
@@ -147,11 +150,6 @@ func (u *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
 		"latestVersion":  latestReleaseVersion.String(),
 	})
 	if latestReleaseVersion.GT(u.currentVersion) {
-		if u.noUpdates {
-			l.Warn("Newer version available but updates are disabled")
-			return nil, false, nil
-		}
-
 		l.Info("Newer version available")
 		return latestRelease, true, nil
 	}

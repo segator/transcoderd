@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-TranscoderD is a distributed video transcoding system (server/worker architecture) written in **Go 1.25**.
+TranscoderD is a distributed video transcoding system (server/worker architecture) written in **Go 1.26**.
 Module name: `transcoder`. License: GPLv3.
 
 ## OpenSpec
@@ -16,23 +16,26 @@ Module name: `transcoder`. License: GPLv3.
 ## Build & Run Commands
 
 ```bash
-make build              # Build both Go binaries + Docker containers
-make buildgo-server     # Build server binary only → dist/transcoderd-server
-make buildgo-worker     # Build worker binary only → dist/transcoderd-worker
-make fmt                # Run go fmt ./...
-make lint               # Run golangci-lint (gocritic + gofmt)
-make lint-fix           # Run golangci-lint --fix
+mage build:all          # Build server and worker binaries via Dagger
+mage build:server       # Build only the server binary
+mage build:worker       # Build only the worker binary
+mage docker:all         # Build server and worker images via Dagger
+mage docker:server      # Build only the server image
+mage docker:worker      # Build only the worker image
+mage lint:fmt           # Format Go source
+mage lint:check         # Run golangci-lint in Dagger
+mage lint:fix           # Apply golangci-lint fixes in Dagger
 ```
 
 ## Test Commands
 
 ```bash
-make test               # Unit tests with coverage
-make test-race          # Unit tests with race detector
-make test-short         # Unit tests in short mode
-make test-integration   # Integration tests (requires Docker for testcontainers)
-make test-e2e           # Docker end-to-end test (requires built images)
-make test-all           # Unit + integration tests
+mage test:unit          # Unit tests with coverage
+mage test:race          # Unit tests with race detector
+mage test:short         # Unit tests in short mode
+mage test:integration   # Integration tests via Dagger services
+mage test:e2e           # Docker end-to-end test via Dagger
+mage test:all           # Unit + integration tests
 
 # Run a single test by name
 go test -v -run TestFunctionName ./path/to/package/...
@@ -46,10 +49,10 @@ go test -tags=integration -v -timeout 5m ./integration/...
 
 ## CI Pipeline
 
-- **Lint**: `golangci-lint` via `.github/workflows/lint.yml` (Go 1.25)
-- **Build+Test+E2E**: `devbox run -- make test`, `devbox run -- make build`, and `devbox run -- make test-e2e` via `.github/workflows/main.yml` (E2E requires Docker images)
+- **Lint**: `mage lint:check` via `.github/workflows/lint.yml` (Go 1.26)
+- **Build+Test+E2E**: Mage targets backed by Dagger via `.github/workflows/main.yml`
 - **Release**: Release Please (conventional commits) on push to `main`
-- Dev environment managed by **Devbox** (Nix): `go@1.25.0`, `golangci-lint@latest`
+- Dev environment managed by **mise**: Go 1.26.0, Mage, and Dagger
 
 ## Code Style Guidelines
 

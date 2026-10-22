@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"fmt"
 	_ "github.com/lib/pq"
 	log "github.com/sirupsen/logrus"
@@ -348,15 +349,22 @@ func (s *SQLRepository) GetTimeoutJobs(ctx context.Context, timeout time.Duratio
 }
 
 func (s *SQLRepository) getJob(ctx context.Context, tx SQLDBOperations, uuid string) (*model.Job, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT id, source_path, source_size, target_path, target_size FROM jobs WHERE id=$1", uuid)
+	rows, err := tx.QueryContext(ctx, "SELECT id, source_path, source_size, target_path, target_size, source_probe, target_probe FROM jobs WHERE id=$1", uuid)
 	if err != nil {
 		return nil, err
 	}
 	job := model.Job{}
 	found := false
 	if rows.Next() {
-		err := rows.Scan(&job.Id, &job.SourcePath, &job.SourceSize, &job.TargetPath, &job.TargetSize)
+		var sourceProbeJSON, targetProbeJSON sql.NullString
+		err := rows.Scan(&job.Id, &job.SourcePath, &job.SourceSize, &job.TargetPath, &job.TargetSize, &sourceProbeJSON, &targetProbeJSON)
 		if err != nil {
+			return nil, err
+		}
+		if err := unmarshalProbe(sourceProbeJSON, &job.SourceProbe); err != nil {
+			return nil, err
+		}
+		if err := unmarshalProbe(targetProbeJSON, &job.TargetProbe); err != nil {
 			return nil, err
 		}
 		found = true
@@ -455,15 +463,22 @@ func (s *SQLRepository) getJobStatus(ctx context.Context, tx SQLDBOperations, uu
 }
 
 func (s *SQLRepository) getJobByPath(ctx context.Context, tx SQLDBOperations, path string) (*model.Job, error) {
-	rows, err := tx.QueryContext(ctx, "select * from jobs where source_path=$1", path)
+	rows, err := tx.QueryContext(ctx, "SELECT id, source_path, target_path, source_size, target_size, source_probe, target_probe FROM jobs WHERE source_path=$1", path)
 	if err != nil {
 		return nil, err
 	}
 	job := model.Job{}
 	found := false
 	if rows.Next() {
-		err := rows.Scan(&job.Id, &job.SourcePath, &job.TargetPath, &job.SourceSize, &job.TargetSize)
+		var sourceProbeJSON, targetProbeJSON sql.NullString
+		err := rows.Scan(&job.Id, &job.SourcePath, &job.TargetPath, &job.SourceSize, &job.TargetSize, &sourceProbeJSON, &targetProbeJSON)
 		if err != nil {
+			return nil, err
+		}
+		if err := unmarshalProbe(sourceProbeJSON, &job.SourceProbe); err != nil {
+			return nil, err
+		}
+		if err := unmarshalProbe(targetProbeJSON, &job.TargetProbe); err != nil {
 			return nil, err
 		}
 		found = true
@@ -570,8 +585,16 @@ func (s *SQLRepository) AddJob(ctx context.Context, job *model.Job) error {
 }
 
 func (s *SQLRepository) addJob(ctx context.Context, tx SQLDBOperations, job *model.Job) error {
-	_, err := tx.ExecContext(ctx, "INSERT INTO jobs (id, source_path,target_path,source_size,target_size)"+
-		" VALUES ($1,$2,$3,$4,$5)", job.Id.String(), job.SourcePath, job.TargetPath, job.SourceSize, job.TargetSize)
+	sourceProbeJSON, err := marshalProbe(job.SourceProbe)
+	if err != nil {
+		return fmt.Errorf("failed to marshal source_probe: %w", err)
+	}
+	targetProbeJSON, err := marshalProbe(job.TargetProbe)
+	if err != nil {
+		return fmt.Errorf("failed to marshal target_probe: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO jobs (id, source_path,target_path,source_size,target_size,source_probe,target_probe)"+
+		" VALUES ($1,$2,$3,$4,$5,$6,$7)", job.Id.String(), job.SourcePath, job.TargetPath, job.SourceSize, job.TargetSize, sourceProbeJSON, targetProbeJSON)
 	return err
 }
 
@@ -584,7 +607,16 @@ func (s *SQLRepository) UpdateJob(ctx context.Context, job *model.Job) error {
 }
 
 func (s *SQLRepository) updateJob(ctx context.Context, tx SQLDBOperations, job *model.Job) error {
-	_, err := tx.ExecContext(ctx, "UPDATE jobs SET source_path=$1, target_path=$2, source_size=$3, target_size=$4 WHERE id=$5", job.SourcePath, job.TargetPath, job.SourceSize, job.TargetSize, job.Id.String())
+	sourceProbeJSON, err := marshalProbe(job.SourceProbe)
+	if err != nil {
+		return fmt.Errorf("failed to marshal source_probe: %w", err)
+	}
+	targetProbeJSON, err := marshalProbe(job.TargetProbe)
+	if err != nil {
+		return fmt.Errorf("failed to marshal target_probe: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, "UPDATE jobs SET source_path=$1, target_path=$2, source_size=$3, target_size=$4, source_probe=$5, target_probe=$6 WHERE id=$7",
+		job.SourcePath, job.TargetPath, job.SourceSize, job.TargetSize, sourceProbeJSON, targetProbeJSON, job.Id.String())
 	return err
 }
 
@@ -702,4 +734,23 @@ func (s *SQLRepository) getAllProgressJobs(ctx context.Context, conn SQLDBOperat
 		progressJobs = append(progressJobs, progress)
 	}
 	return progressJobs, nil
+}
+
+func marshalProbe(probe *model.MediaProbe) ([]byte, error) {
+	if probe == nil {
+		return nil, nil
+	}
+	return json.Marshal(probe)
+}
+
+func unmarshalProbe(ns sql.NullString, probe **model.MediaProbe) error {
+	if !ns.Valid || ns.String == "" {
+		return nil
+	}
+	p := &model.MediaProbe{}
+	if err := json.Unmarshal([]byte(ns.String), p); err != nil {
+		return fmt.Errorf("failed to unmarshal probe: %w", err)
+	}
+	*probe = p
+	return nil
 }

@@ -35,6 +35,7 @@ var (
 	imageName           = envOrDefault("IMAGE_NAME", "ghcr.io/segator/transcoderd")
 	ffmpegBuilderTag    = envOrDefault("FFMPEG_BUILDER_TAG", "builder-ffmpeg-9.0.2-av1")
 	pgsBuilderTag       = envOrDefault("PGS_BUILDER_TAG", "builder-pgs")
+	githubCLIVersion    = "2.103.0"
 	projectVersion      = ""
 	gitCommitSHA        = ""
 	gitBranchName       = ""
@@ -265,6 +266,24 @@ func (Test) Race(ctx context.Context) error {
 // Short runs unit tests in short mode via Dagger.
 func (Test) Short(ctx context.Context) error {
 	return runGoTest(ctx, []string{"go", "test", "-v", "-short", "./..."})
+}
+
+// Av1Lab runs the AV1 benchmark utility tests in a pinned Python container.
+func (Test) Av1lab(ctx context.Context) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+
+	src := projectSource(client)
+	_, err = client.Container().
+		From("python:3.13.7-slim-trixie").
+		WithDirectory("/src/scripts", src.Directory("scripts")).
+		WithWorkdir("/src").
+		WithExec([]string{"python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py", "-v"}).
+		Sync(ctx)
+	return err
 }
 
 // Integration runs integration tests via Dagger with Postgres as a Dagger Service.
@@ -559,11 +578,16 @@ func (Publish) App(ctx context.Context) error {
 	defer client.Close()
 
 	src := projectSource(client)
+	secret, err := ghcrSecret(client)
+	if err != nil {
+		return err
+	}
 	for _, component := range []string{"server", "worker"} {
 		ctr, err := containerImage(ctx, client, src, component)
 		if err != nil {
 			return err
 		}
+		ctr = ctr.WithRegistryAuth("ghcr.io", os.Getenv("GHCR_USERNAME"), secret)
 		for _, tag := range imageTags(component) {
 			addr, err := ctr.Publish(ctx, tag)
 			if err != nil {
@@ -583,7 +607,13 @@ func (Publish) Ffmpeg(ctx context.Context) error {
 	}
 	defer client.Close()
 
-	addr, err := buildFFmpegBuilderImage(client).Publish(ctx, imageName+":"+ffmpegBuilderTag)
+	secret, err := ghcrSecret(client)
+	if err != nil {
+		return err
+	}
+	addr, err := buildFFmpegBuilderImage(client).
+		WithRegistryAuth("ghcr.io", os.Getenv("GHCR_USERNAME"), secret).
+		Publish(ctx, imageName+":"+ffmpegBuilderTag)
 	if err != nil {
 		return fmt.Errorf("publish builder-ffmpeg: %w", err)
 	}
@@ -599,11 +629,85 @@ func (Publish) Pgs(ctx context.Context) error {
 	}
 	defer client.Close()
 
-	addr, err := buildPgsBuilderImage(client).Publish(ctx, imageName+":"+pgsBuilderTag)
+	secret, err := ghcrSecret(client)
+	if err != nil {
+		return err
+	}
+	addr, err := buildPgsBuilderImage(client).
+		WithRegistryAuth("ghcr.io", os.Getenv("GHCR_USERNAME"), secret).
+		Publish(ctx, imageName+":"+pgsBuilderTag)
 	if err != nil {
 		return fmt.Errorf("publish builder-pgs: %w", err)
 	}
 	fmt.Printf("Published %s\n", addr)
+	return nil
+}
+
+func ghcrSecret(client *dagger.Client) (*dagger.Secret, error) {
+	username := os.Getenv("GHCR_USERNAME")
+	if username == "" {
+		return nil, fmt.Errorf("GHCR_USERNAME is required to publish images")
+	}
+	token := os.Getenv("GHCR_TOKEN")
+	if token == "" {
+		return nil, fmt.Errorf("GHCR_TOKEN is required to publish images")
+	}
+	return client.SetSecret("ghcr-token", token), nil
+}
+
+// Release contains targets for publishing GitHub release assets.
+type Release mg.Namespace
+
+// Upload uploads dist artifacts using GitHub CLI inside Dagger.
+func (Release) Upload(ctx context.Context) error {
+	token := os.Getenv("GH_TOKEN")
+	if token == "" {
+		return fmt.Errorf("GH_TOKEN is required to upload release assets")
+	}
+	tag := os.Getenv("RELEASE_TAG")
+	if tag == "" {
+		return fmt.Errorf("RELEASE_TAG is required to upload release assets")
+	}
+
+	distPath := filepath.Join(projectRoot(), "dist")
+	entries, err := os.ReadDir(distPath)
+	if err != nil {
+		return fmt.Errorf("read release assets: %w", err)
+	}
+	args := []string{"gh", "release", "upload", tag}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			args = append(args, "/dist/"+entry.Name())
+		}
+	}
+	if len(args) == 4 {
+		return fmt.Errorf("no release assets found in %s", distPath)
+	}
+	args = append(args, "--clobber")
+
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+
+	_, err = client.Container().
+		From("debian:trixie-slim").
+		WithExec([]string{"sh", "-c", "apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tar && rm -rf /var/lib/apt/lists/*"}).
+		WithExec([]string{"sh", "-c", fmt.Sprintf(
+			"curl -fsSL https://github.com/cli/cli/releases/download/v%s/gh_%s_linux_amd64.tar.gz -o /tmp/gh.tar.gz && "+
+				"tar -xzf /tmp/gh.tar.gz --strip-components=2 -C /usr/local/bin gh_%s_linux_amd64/bin/gh && "+
+				"gh --version | grep -Fq 'gh version %s' && rm /tmp/gh.tar.gz",
+			githubCLIVersion, githubCLIVersion, githubCLIVersion, githubCLIVersion,
+		)}).
+		WithDirectory("/dist", client.Host().Directory(distPath)).
+		WithEnvVariable("GH_REPO", "segator/transcoderd").
+		WithSecretVariable("GH_TOKEN", client.SetSecret("github-token", token)).
+		WithExec(args).
+		Sync(ctx)
+	if err != nil {
+		return fmt.Errorf("upload release assets: %w", err)
+	}
 	return nil
 }
 

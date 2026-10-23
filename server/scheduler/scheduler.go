@@ -582,15 +582,30 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string,
 	if err != nil {
 		return nil, err
 	}
+	stagingName, err := filepath.Rel(r.config.SourcePath, temporalPath)
+	if err != nil || !filepath.IsLocal(stagingName) {
+		return nil, fmt.Errorf("resolve upload staging path for job %s", video.Id)
+	}
 	err = os.MkdirAll(filepath.Dir(temporalPath), os.ModePerm)
 	if err != nil {
 		return nil, err
 	}
-	uploadFile, err := os.CreateTemp(filepath.Dir(temporalPath), "."+uploadStagingName(video.Id.String())+"-*.tmp")
+	root, err := os.OpenRoot(r.config.SourcePath)
 	if err != nil {
 		return nil, err
 	}
-	return &UploadJobStream{JobStream: &JobStream{file: uploadFile}, stagingRoot: r.config.SourcePath, finalPath: temporalPath}, nil
+	attemptName := filepath.Join(filepath.Dir(stagingName), "."+uploadStagingName(video.Id.String())+"-"+uuid.NewString()+".tmp")
+	uploadFile, err := root.OpenFile(attemptName, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if err != nil {
+		_ = root.Close()
+		return nil, err
+	}
+	return &UploadJobStream{
+		JobStream:   &JobStream{file: uploadFile},
+		root:        root,
+		attemptName: attemptName,
+		stagingName: stagingName,
+	}, nil
 }
 
 func (r *RuntimeScheduler) GetChecksum(ctx context.Context, uuid string) (string, error) {

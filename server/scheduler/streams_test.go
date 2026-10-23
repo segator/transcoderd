@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,11 +9,21 @@ import (
 
 func newTestUploadStream(t *testing.T, dir, finalPath, name string) *UploadJobStream {
 	t.Helper()
-	file, err := os.Create(filepath.Join(dir, name))
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &UploadJobStream{JobStream: &JobStream{file: file}, stagingRoot: dir, finalPath: finalPath}
+	file, err := root.Create(name)
+	if err != nil {
+		_ = root.Close()
+		t.Fatal(err)
+	}
+	return &UploadJobStream{
+		JobStream:   &JobStream{file: file},
+		root:        root,
+		attemptName: name,
+		stagingName: filepath.Base(finalPath),
+	}
 }
 
 func TestUploadAttemptsHaveIsolatedStagingFiles(t *testing.T) {
@@ -104,5 +115,30 @@ func TestUploadCommitIsIdempotentAndRejectsDifferentContents(t *testing.T) {
 	contents, err := os.ReadFile(finalPath)
 	if err != nil || string(contents) != "same upload" {
 		t.Errorf("existing staged contents changed: contents=%q err=%v", contents, err)
+	}
+}
+
+func TestUploadCommitCannotEscapeRoot(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "root")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	upload := newTestUploadStream(t, dir, filepath.Join(dir, "job.upload"), "attempt.tmp")
+	upload.stagingName = "../escaped.upload"
+	if _, err := upload.Write([]byte("upload")); err != nil {
+		t.Fatal(err)
+	}
+	if err := upload.Close(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := upload.Commit(); err == nil {
+		t.Fatal("Commit() escaped the upload root")
+	}
+	if err := upload.Clean(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(parent, "escaped.upload")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("escaped upload exists or could not be checked: %v", err)
 	}
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.6](https://github.com/segator/transcoderd/compare/v2.5.5...v2.5.6) (2026-10-23)
+
+
+### 🐛 Bug Fixes
+
+* **server:** isolate upload retry staging ([#151](https://github.com/segator/transcoderd/issues/151)) ([1e0dd77](https://github.com/segator/transcoderd/commit/1e0dd7782403968e9d96d65845eb47b7a6a5c55e))
+
 ## [2.5.5](https://github.com/segator/transcoderd/compare/v2.5.4...v2.5.5) (2026-10-23)
 
 

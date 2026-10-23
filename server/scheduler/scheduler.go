@@ -195,6 +195,9 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 	if err != nil {
 		return err
 	}
+	if !filepath.IsLocal(video.SourcePath) || !filepath.IsLocal(video.TargetPath) {
+		return fmt.Errorf("job %s has a non-local source or target path", jobEvent.JobId)
+	}
 	sourcePath := filepath.Join(r.config.SourcePath, video.SourcePath)
 	stagingPath := filepath.Join(r.config.SourcePath, filepath.Dir(video.TargetPath), "."+video.Id.String()+".upload")
 	target := filepath.Join(r.config.SourcePath, video.TargetPath)
@@ -508,6 +511,9 @@ func (r *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string
 	if err != nil {
 		return nil, err
 	}
+	if !filepath.IsLocal(video.SourcePath) {
+		return nil, fmt.Errorf("job %s has a non-local source path", video.Id)
+	}
 	filePath := filepath.Join(r.config.SourcePath, video.SourcePath)
 	downloadFile, err := os.Open(filePath)
 	if err != nil {
@@ -538,6 +544,9 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 	video, err := r.isValidStremeableJob(ctx, uuid, workerName)
 	if err != nil {
 		return nil, err
+	}
+	if !filepath.IsLocal(video.TargetPath) {
+		return nil, fmt.Errorf("job %s has a non-local target path", video.Id)
 	}
 
 	filePath := filepath.Join(r.config.SourcePath, video.TargetPath)

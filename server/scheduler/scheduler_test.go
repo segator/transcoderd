@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -96,7 +97,7 @@ func TestCompletedJobFinalizesBeforeDeleteOnComplete(t *testing.T) {
 			if err := repo.AddJob(context.Background(), job); err != nil {
 				t.Fatal(err)
 			}
-			staging := uploadStagingPath(root, id.String())
+			staging := uploadStagingPath(root, job.SourcePath, id.String())
 			if err := os.MkdirAll(filepath.Dir(staging), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -150,6 +151,70 @@ func TestCompletedJobFinalizesBeforeDeleteOnComplete(t *testing.T) {
 				t.Errorf("replaying completed event should be idempotent: %v", err)
 			}
 		})
+	}
+}
+
+func TestCompletedJobMigratesLegacyStagingAcrossFilesystems(t *testing.T) {
+	mediaRoot, err := os.MkdirTemp("/dev/shm", "transcoderd-media-")
+	if err != nil {
+		t.Skipf("/dev/shm is unavailable for cross-filesystem test: %v", err)
+	}
+	defer os.RemoveAll(mediaRoot)
+	root := t.TempDir()
+	mediaLink := filepath.Join(root, "Movies")
+	if err := os.Symlink(mediaRoot, mediaLink); err != nil {
+		t.Skipf("cannot create cross-filesystem media mount simulation: %v", err)
+	}
+	bin := t.TempDir()
+	ffprobe := filepath.Join(bin, "ffprobe")
+	if err := os.WriteFile(ffprobe, []byte("#!/bin/sh\ncat <<'EOF'\n{\"format\":{\"duration\":\"12.5\"},\"streams\":[{\"codec_type\":\"video\",\"codec_name\":\"av1\",\"width\":1920,\"height\":1080}]}\nEOF\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	id := uuid.New()
+	job := &model.Job{Id: id, SourcePath: "Movies/Film x265.mkv", TargetPath: "Movies/Film x265.mkv"}
+	if err := os.WriteFile(filepath.Join(mediaRoot, "Film x265.mkv"), []byte("original source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.NewInMemoryRepository()
+	if err := repo.AddJob(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	legacyStage := filepath.Join(uploadStagingDirectory(root), uploadStagingName(id.String()))
+	if err := os.MkdirAll(filepath.Dir(legacyStage), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyStage, []byte("encoded output"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := &RuntimeScheduler{config: &Config{SourcePath: root}, repo: repo}
+	event := model.TaskEventType{JobId: id, EventID: 0, NotificationType: model.JobNotification, Status: model.CompletedNotificationStatus}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope := &model.EnvelopEvent{EventType: model.NotificationEvent, EventData: payload}
+	if err := scheduler.processEvent(context.Background(), envelope); err != nil {
+		t.Fatalf("processEvent() failed to finalize cross-filesystem upload: %v", err)
+	}
+	stored, err := repo.GetJob(context.Background(), id.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.TargetPath != "Movies/Film av1.mkv" {
+		t.Errorf("target path = %q, want Movies/Film av1.mkv", stored.TargetPath)
+	}
+	if stored.TargetSize != int64(len("encoded output")) {
+		t.Errorf("target size = %d, want %d", stored.TargetSize, len("encoded output"))
+	}
+	if _, err := os.Stat(legacyStage); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("legacy staging file was not cleaned up: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(mediaRoot, "Film av1.mkv")); err != nil {
+		t.Errorf("final output is missing from media filesystem: %v", err)
+	}
+	if err := scheduler.processEvent(context.Background(), envelope); err != nil {
+		t.Errorf("retry after migration should be idempotent: %v", err)
 	}
 }
 

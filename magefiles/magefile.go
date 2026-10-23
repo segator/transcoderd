@@ -141,13 +141,17 @@ func projectSource(client *dagger.Client) *dagger.Directory {
 }
 
 func goContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container {
+	return goContainerBase(client).
+		WithDirectory("/src", src).
+		WithWorkdir("/src")
+}
+
+func goContainerBase(client *dagger.Client) *dagger.Container {
 	return client.Container().
 		From("golang:1.26.10-trixie").
 		WithMountedCache("/root/.cache/go-build", client.CacheVolume("go-build"), dagger.ContainerWithMountedCacheOpts{Sharing: dagger.CacheSharingModeShared}).
 		WithMountedCache("/go/pkg/mod", client.CacheVolume("go-mod"), dagger.ContainerWithMountedCacheOpts{Sharing: dagger.CacheSharingModeShared}).
-		WithEnvVariable("CGO_ENABLED", "0").
-		WithDirectory("/src", src).
-		WithWorkdir("/src")
+		WithEnvVariable("CGO_ENABLED", "0")
 }
 
 func lintContainer(client *dagger.Client, src *dagger.Directory) *dagger.Container {
@@ -370,11 +374,17 @@ func (Test) E2e(ctx context.Context) error {
 
 	// Test runner. PostgreSQL is a service binding; server and worker are local
 	// background processes so readiness is checked with a real HTTP request.
-	out, err := goContainer(client, src).
+	// Keep OS provisioning independent of the application source so a code
+	// change does not invalidate the cached package installation layers.
+	runner := goContainerBase(client).
 		WithExec([]string{"apt-get", "update"}).
 		WithExec([]string{"apt-get", "install", "-y", "--no-install-recommends", "ca-certificates", "mkvtoolnix", "libva-drm2", "libtesseract-dev", "wget", "curl"}).
 		WithExec([]string{"update-ca-certificates"}).
-		WithExec([]string{"sh", "-c", "curl -ksSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && chmod +x /tmp/dotnet-install.sh && /tmp/dotnet-install.sh --channel 8.0 --runtime dotnet --install-dir /usr/share/dotnet && ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet && rm /tmp/dotnet-install.sh"}).
+		WithExec([]string{"sh", "-c", "curl -ksSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && chmod +x /tmp/dotnet-install.sh && /tmp/dotnet-install.sh --channel 8.0 --runtime dotnet --install-dir /usr/share/dotnet && ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet && rm /tmp/dotnet-install.sh"})
+
+	out, err := runner.
+		WithDirectory("/src", src).
+		WithWorkdir("/src").
 		WithFile("/usr/bin/ffmpeg", ffmpegBins.File("/app/ffmpeg-build-script/workspace/bin/ffmpeg")).
 		WithFile("/usr/bin/ffprobe", ffmpegBins.File("/app/ffmpeg-build-script/workspace/bin/ffprobe")).
 		WithDirectory("/app/tessdata", pgsBins.Directory("/src/tessdata")).

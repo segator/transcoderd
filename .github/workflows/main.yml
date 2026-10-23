@@ -76,13 +76,9 @@ jobs:
 
       - name: Publish
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE_VERSION_ALIASES: ${{ steps.release.outputs.release_created == 'true' && format('v{0}.{1},v{0}', steps.release.outputs.major, steps.release.outputs.minor) || '' }}
         run: mage publish:app
-
-      - name: Publish release tags
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.release.outputs.release_created
-        run: |
-          PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }} mage publish:app
-          PROJECT_VERSION=v${{ steps.release.outputs.major }} mage publish:app
 
       - name: Upload release assets
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.release.outputs.release_created

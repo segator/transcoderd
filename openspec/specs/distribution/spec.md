@@ -35,6 +35,10 @@ Publishing SHALL tag server and worker images with their role and requested vers
 - **WHEN** both images are published for a version
 - **THEN** `server-<version>` and `worker-<version>` tags are available
 
+#### Scenario: Release aliases retain the canonical application version
+- **WHEN** a release image is published under full, minor, and major version tags
+- **THEN** all tags for each role resolve to the same image artifact built with the full semantic release version
+
 ### Requirement: AV1-capable FFmpeg in the worker image
 The worker image SHALL bundle FFmpeg 9.0.2 with `libsvtav1`, `libaom-av1`, and `av1_nvenc` available. It SHALL retain `libx265` for explicit HEVC rollback and `libfdk_aac` for the default audio setting. When a compatible NVIDIA GPU and driver are exposed to the worker container, its bundled FFmpeg SHALL be able to encode 10-bit AV1 with the worker's default `av1_nvenc` video profile.
 

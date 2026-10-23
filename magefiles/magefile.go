@@ -32,13 +32,14 @@ import (
 // ---------------------------------------------------------------------------
 
 var (
-	imageName        = envOrDefault("IMAGE_NAME", "ghcr.io/segator/transcoderd")
-	ffmpegBuilderTag = envOrDefault("FFMPEG_BUILDER_TAG", "builder-ffmpeg-9.0.2-av1")
-	pgsBuilderTag    = envOrDefault("PGS_BUILDER_TAG", "builder-pgs")
-	projectVersion   = ""
-	gitCommitSHA     = ""
-	gitBranchName    = ""
-	buildDate        = ""
+	imageName           = envOrDefault("IMAGE_NAME", "ghcr.io/segator/transcoderd")
+	ffmpegBuilderTag    = envOrDefault("FFMPEG_BUILDER_TAG", "builder-ffmpeg-9.0.2-av1")
+	pgsBuilderTag       = envOrDefault("PGS_BUILDER_TAG", "builder-pgs")
+	projectVersion      = ""
+	gitCommitSHA        = ""
+	gitBranchName       = ""
+	buildDate           = ""
+	imageVersionAliases []string
 )
 
 const e2eServerConfig = `server:
@@ -65,6 +66,7 @@ func init() {
 	gitCommitSHA = gitOutput("rev-parse", "--short", "HEAD")
 	gitBranchName = sanitizeBranch(gitOutput("rev-parse", "--abbrev-ref", "HEAD"))
 	buildDate = time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	imageVersionAliases = parseImageVersionAliases(os.Getenv("IMAGE_VERSION_ALIASES"))
 }
 
 func envOrDefault(key, fallback string) string {
@@ -785,8 +787,40 @@ func buildPgsBuilderImage(client *dagger.Client) *dagger.Container {
 }
 
 func imageTags(component string) []string {
-	return []string{
-		fmt.Sprintf("%s:%s-%s", imageName, component, projectVersion),
-		fmt.Sprintf("%s:%s-%s", imageName, component, gitBranchName),
+	return imageTagsFor(imageName, component, projectVersion, gitBranchName, imageVersionAliases)
+}
+
+func parseImageVersionAliases(value string) []string {
+	seen := make(map[string]struct{})
+	var aliases []string
+	for _, alias := range strings.Split(value, ",") {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			continue
+		}
+		if _, exists := seen[alias]; exists {
+			continue
+		}
+		seen[alias] = struct{}{}
+		aliases = append(aliases, alias)
 	}
+	return aliases
+}
+
+func imageTagsFor(registry, component, version, branch string, aliases []string) []string {
+	seen := make(map[string]struct{})
+	var tags []string
+	for _, suffix := range append([]string{version, branch}, aliases...) {
+		suffix = strings.TrimSpace(suffix)
+		if suffix == "" {
+			continue
+		}
+		tag := fmt.Sprintf("%s:%s-%s", registry, component, suffix)
+		if _, exists := seen[tag]; exists {
+			continue
+		}
+		seen[tag] = struct{}{}
+		tags = append(tags, tag)
+	}
+	return tags
 }

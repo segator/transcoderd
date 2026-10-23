@@ -565,8 +565,8 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 		JobStream: &JobStream{
 			file: uploadFile,
 		},
-		stagingDir:  filepath.Dir(temporalPath),
-		stagingName: filepath.Base(temporalPath),
+		stagingDir:  uploadStagingDirectory(r.config.SourcePath),
+		stagingName: uploadStagingName(video.Id.String()),
 	}, nil
 }
 

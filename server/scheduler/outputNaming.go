@@ -45,7 +45,15 @@ func probeOutput(ctx context.Context, path string) (ffprobeOutput, error) {
 }
 
 func uploadStagingPath(sourceRoot string, jobID string) string {
-	return filepath.Join(sourceRoot, ".transcoderd-upload", jobID+".upload")
+	return filepath.Join(uploadStagingDirectory(sourceRoot), uploadStagingName(jobID))
+}
+
+func uploadStagingDirectory(sourceRoot string) string {
+	return filepath.Join(sourceRoot, ".transcoderd-upload")
+}
+
+func uploadStagingName(jobID string) string {
+	return jobID + ".upload"
 }
 
 func outputCodecLabel(codec string) string {

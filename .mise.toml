@@ -1,4 +1,4 @@
 [tools]
 go = "1.26.10"
 mage = "latest"
-dagger = "latest"
+dagger = "0.20.6"

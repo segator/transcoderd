@@ -185,13 +185,7 @@ builder supplies .NET/OCR binaries and language data. The server and worker
 images copy the needed files from those builders. An NVIDIA GPU is not needed
 to compile these images.
 
-`.github/workflows/main.yml` runs on pushes and pull requests targeting `main`,
-plus manual dispatch. It logs into GHCR, runs Go tests and the AV1 benchmark
-lab, checks the versioned FFmpeg and PGS builder manifests, builds and publishes
-a missing builder when needed, builds server/worker images, and runs the Docker
-E2E test. Publishing application/release images is restricted to non-PR runs.
-The builder step needs package push access when a builder is absent; fork runs
-without that access need an available published builder or a maintainer build.
+`mage docker:all` consumes the FFmpeg and PGS builders through their Dagger build graphs. Dagger reuses each unchanged operation from the local Engine cache and rebuilds operations whose graph inputs change; no GHCR manifest probe or builder-image fallback is needed in CI. Since the Engines are node-local, a cold cache on another node can rebuild the builder there. `mage publish:ffmpeg` and `mage publish:pgs` remain explicit targets for publishing versioned builder artifacts, not prerequisites for application builds.
 
 The ordinary CI E2E run selects **SVT-AV1 CPU**, so a hosted runner needs no
 GPU. CI validates compilation and the CPU pipeline; it cannot validate NVENC

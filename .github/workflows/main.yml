@@ -15,14 +15,35 @@ permissions:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
-    env:
-      _EXPERIMENTAL_DAGGER_CACHE_CONFIG: type=registry,ref=ghcr.io/segator/transcoderd:dagger-cache,mode=max
-      _EXPERIMENTAL_DAGGER_SHUTDOWN_TIMEOUT: 180s
+    runs-on: transcoderd
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
-      - uses: docker/setup-buildx-action@v3
+
+      - name: Benchmark FFmpeg builder (manual dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DAGGER_LOG: "1"
+        run: |
+          echo "benchmark=FFmpeg builder export (no registry publish)"
+          echo "runner=$(hostname)"
+          date -u +"started_at=%Y-%m-%dT%H:%M:%SZ"
+          time mage docker:ffmpeg
+          date -u +"finished_at=%Y-%m-%dT%H:%M:%SZ"
+          du -h dist/builder-ffmpeg.tar
+          rm -f dist/builder-ffmpeg.tar
+
+      - name: Install crane
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+
+      - name: Authenticate to GHCR
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | "$RUNNER_TEMP/bin/crane" auth login ghcr.io --username "$GHCR_USERNAME" --password-stdin
 
       - name: Release please
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -37,13 +58,6 @@ jobs:
         if: steps.release.outputs.release_created
         run: echo "PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}" >> $GITHUB_ENV
 
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Test
         run: mage test:unit
 
@@ -52,18 +66,6 @@ jobs:
 
       - name: Build
         run: mage build:all
-
-      # Reuse the validated, versioned builders on ordinary app builds. If a
-      # builder tag is missing, the Dagger target compiles and publishes it.
-      - name: Ensure builder images exist
-        run: |
-          ffmpeg_image="ghcr.io/segator/transcoderd:builder-ffmpeg-9.0.2-av1"
-          if ! docker manifest inspect "$ffmpeg_image" > /dev/null 2>&1; then
-            mage publish:ffmpeg
-          fi
-          if ! docker manifest inspect ghcr.io/segator/transcoderd:builder-pgs > /dev/null 2>&1; then
-            mage publish:pgs
-          fi
 
       - name: Build Containers
         run: mage docker:all

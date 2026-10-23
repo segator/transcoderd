@@ -562,10 +562,11 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 		return nil, err
 	}
 	return &UploadJobStream{
-		&JobStream{
-			file:         uploadFile,
-			temporalPath: temporalPath,
+		JobStream: &JobStream{
+			file: uploadFile,
 		},
+		stagingDir:  filepath.Dir(temporalPath),
+		stagingName: filepath.Base(temporalPath),
 	}, nil
 }
 

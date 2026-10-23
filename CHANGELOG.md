@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.5](https://github.com/segator/transcoderd/compare/v2.5.4...v2.5.5) (2026-10-23)
+
+
+### 🐛 Bug Fixes
+
+* **server:** finalize uploads across filesystems ([#149](https://github.com/segator/transcoderd/issues/149)) ([2701158](https://github.com/segator/transcoderd/commit/2701158a734a8a993f0cd4ef40b41ae21aeb4e26))
+
 ## [2.5.4](https://github.com/segator/transcoderd/compare/v2.5.3...v2.5.4) (2026-10-23)
 
 

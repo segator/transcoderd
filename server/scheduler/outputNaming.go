@@ -45,8 +45,11 @@ func probeOutput(ctx context.Context, path string) (ffprobeOutput, error) {
 	return probe, errors.New("uploaded output has no video stream")
 }
 
-func uploadStagingPath(sourceRoot, sourcePath, jobID string) string {
-	return filepath.Join(filepath.Dir(filepath.Join(sourceRoot, sourcePath)), ".transcoderd-upload", uploadStagingName(jobID))
+func uploadStagingPath(sourceRoot, sourcePath, jobID string) (string, error) {
+	if !filepath.IsLocal(sourcePath) {
+		return "", fmt.Errorf("source path %q must be relative to the configured source root", sourcePath)
+	}
+	return filepath.Join(filepath.Dir(filepath.Join(sourceRoot, sourcePath)), ".transcoderd-upload", uploadStagingName(jobID)), nil
 }
 
 func uploadStagingDirectory(sourceRoot string) string {

@@ -3,7 +3,10 @@ package scheduler
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"hash"
+	"io"
 	"os"
 	"transcoder/model"
 )
@@ -22,6 +25,9 @@ type JobStream struct {
 
 type UploadJobStream struct {
 	*JobStream
+	root        *os.Root
+	attemptName string
+	stagingName string
 }
 
 type DownloadJobStream struct {
@@ -77,6 +83,41 @@ func (u *UploadJobStream) Close(pushChecksum bool) error {
 	return u.file.Close()
 }
 
+// Commit publishes a fully received, validated upload at its job staging path.
+// Each HTTP upload attempt writes a separate temporary file, so cleanup from a
+// failed retry cannot unlink a later successful attempt.
+func (u *UploadJobStream) Commit() error {
+	if u.root == nil || u.attemptName == "" || u.stagingName == "" {
+		return errors.New("upload staging paths are not initialized")
+	}
+	if err := u.root.Link(u.attemptName, u.stagingName); err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("publish upload staging file: %w", err)
+		}
+		existingChecksum, checksumErr := rootChecksum(u.root, u.stagingName)
+		if checksumErr != nil {
+			return fmt.Errorf("verify existing upload staging file: %w", checksumErr)
+		}
+		if existingChecksum != u.GetHash() {
+			return errors.New("an upload with different contents is already staged for this job")
+		}
+	}
+	return nil
+}
+
+func rootChecksum(root *os.Root, name string) (string, error) {
+	file, err := root.Open(name)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
 func (j *JobStream) Close(pushChecksum bool) error {
 	err := j.file.Sync()
 	if err != nil {
@@ -92,5 +133,14 @@ func (j *JobStream) Close(pushChecksum bool) error {
 	return nil
 }
 func (u *UploadJobStream) Clean() error {
-	return os.Remove(u.file.Name())
+	if u.root == nil {
+		return nil
+	}
+	removeErr := u.root.Remove(u.attemptName)
+	closeErr := u.root.Close()
+	u.root = nil
+	if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return removeErr
+	}
+	return closeErr
 }

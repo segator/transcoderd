@@ -199,7 +199,10 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 		return fmt.Errorf("job %s has a non-local source or target path", jobEvent.JobId)
 	}
 	sourcePath := filepath.Join(r.config.SourcePath, video.SourcePath)
-	stagingPath := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
+	stagingPath, err := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
+	if err != nil {
+		return err
+	}
 	legacyStagingPath := filepath.Join(uploadStagingDirectory(r.config.SourcePath), uploadStagingName(video.Id.String()))
 	target := filepath.Join(r.config.SourcePath, video.TargetPath)
 	l := log.WithFields(log.Fields{
@@ -559,25 +562,50 @@ func (r *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string
 
 }
 
-func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, workerName string) (*UploadJobStream, error) {
-	video, err := r.isValidStremeableJob(ctx, uuid, workerName)
+func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string, workerName string) (*UploadJobStream, error) {
+	parsedJobID, err := uuid.Parse(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid job ID %q: %w", jobID, err)
+	}
+	video, err := r.isValidStremeableJob(ctx, parsedJobID.String(), workerName)
 	if err != nil {
 		return nil, err
+	}
+	if !filepath.IsLocal(video.SourcePath) {
+		return nil, fmt.Errorf("job %s has a non-local source path", video.Id)
 	}
 	if !filepath.IsLocal(video.TargetPath) {
 		return nil, fmt.Errorf("job %s has a non-local target path", video.Id)
 	}
 
-	temporalPath := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
+	temporalPath, err := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
+	if err != nil {
+		return nil, err
+	}
+	stagingName, err := filepath.Rel(r.config.SourcePath, temporalPath)
+	if err != nil || !filepath.IsLocal(stagingName) {
+		return nil, fmt.Errorf("resolve upload staging path for job %s", video.Id)
+	}
 	err = os.MkdirAll(filepath.Dir(temporalPath), os.ModePerm)
 	if err != nil {
 		return nil, err
 	}
-	uploadFile, err := os.OpenFile(temporalPath, os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)
+	root, err := os.OpenRoot(r.config.SourcePath)
 	if err != nil {
 		return nil, err
 	}
-	return &UploadJobStream{JobStream: &JobStream{file: uploadFile}}, nil
+	attemptName := filepath.Join(filepath.Dir(stagingName), "."+uploadStagingName(video.Id.String())+"-"+uuid.NewString()+".tmp")
+	uploadFile, err := root.OpenFile(attemptName, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if err != nil {
+		_ = root.Close()
+		return nil, err
+	}
+	return &UploadJobStream{
+		JobStream:   &JobStream{file: uploadFile},
+		root:        root,
+		attemptName: attemptName,
+		stagingName: stagingName,
+	}, nil
 }
 
 func (r *RuntimeScheduler) GetChecksum(ctx context.Context, uuid string) (string, error) {

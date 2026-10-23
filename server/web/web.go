@@ -166,14 +166,13 @@ func (s *Server) upload(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	closed := false
-	keepUpload := false
 	defer func() {
 		if !closed {
 			_ = uploadStream.Close(false)
 		}
-		if !keepUpload {
-			_ = uploadStream.Clean()
-		}
+		// The committed staging path is a hard link to this attempt file.
+		// Remove the attempt's name on every exit; the staging link remains.
+		_ = uploadStream.Clean()
 	}()
 	closeUpload := func(clean bool) error {
 		if closed {
@@ -239,8 +238,10 @@ loop:
 		webError(writer, fmt.Errorf("could not persist uploaded output: %w", err), 500)
 		return
 	}
-	keepUpload = true
-
+	if err = uploadStream.Commit(); err != nil {
+		webError(writer, fmt.Errorf("could not publish uploaded output: %w", err), 500)
+		return
+	}
 	writer.WriteHeader(201)
 }
 

@@ -552,7 +552,6 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 		return nil, fmt.Errorf("job %s has a non-local target path", video.Id)
 	}
 
-	filePath := filepath.Join(r.config.SourcePath, video.TargetPath)
 	temporalPath := uploadStagingPath(r.config.SourcePath, video.Id.String())
 	err = os.MkdirAll(filepath.Dir(temporalPath), os.ModePerm)
 	if err != nil {
@@ -564,9 +563,7 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 	}
 	return &UploadJobStream{
 		&JobStream{
-			video:        video,
 			file:         uploadFile,
-			path:         filePath,
 			temporalPath: temporalPath,
 		},
 	}, nil

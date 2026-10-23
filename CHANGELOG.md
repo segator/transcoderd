@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.3](https://github.com/segator/transcoderd/compare/v2.5.2...v2.5.3) (2026-10-23)
+
+
+### 🐛 Bug Fixes
+
+* **ci:** install GitHub CLI on release runner ([#141](https://github.com/segator/transcoderd/issues/141)) ([5f0b2af](https://github.com/segator/transcoderd/commit/5f0b2af48a8d55971b91025f8d68e55e73a77096))
+
 ## [2.5.2](https://github.com/segator/transcoderd/compare/v2.5.1...v2.5.2) (2026-10-23)
 
 

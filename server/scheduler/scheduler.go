@@ -199,7 +199,7 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 		return fmt.Errorf("job %s has a non-local source or target path", jobEvent.JobId)
 	}
 	sourcePath := filepath.Join(r.config.SourcePath, video.SourcePath)
-	stagingPath := filepath.Join(r.config.SourcePath, filepath.Dir(video.TargetPath), "."+video.Id.String()+".upload")
+	stagingPath := uploadStagingPath(r.config.SourcePath, video.Id.String())
 	target := filepath.Join(r.config.SourcePath, video.TargetPath)
 	l := log.WithFields(log.Fields{
 		"job_id":      jobEvent.JobId.String(),
@@ -337,6 +337,9 @@ func (r *RuntimeScheduler) createNewJobRequestByJobRequestDirectory(ctx context.
 			return fmt.Errorf("search for new Jobs canceled")
 		default:
 			if f.IsDir() {
+				if pathFile == filepath.Join(r.config.SourcePath, ".transcoderd-upload") {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if f.Size() < r.config.MinFileSize {
@@ -550,11 +553,11 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 	}
 
 	filePath := filepath.Join(r.config.SourcePath, video.TargetPath)
-	err = os.MkdirAll(filepath.Dir(filePath), os.ModePerm)
+	temporalPath := uploadStagingPath(r.config.SourcePath, video.Id.String())
+	err = os.MkdirAll(filepath.Dir(temporalPath), os.ModePerm)
 	if err != nil {
 		return nil, err
 	}
-	temporalPath := filepath.Join(filepath.Dir(filePath), "."+video.Id.String()+".upload")
 	uploadFile, err := os.OpenFile(temporalPath, os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)
 	if err != nil {
 		return nil, err

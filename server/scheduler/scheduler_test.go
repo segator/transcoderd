@@ -96,7 +96,10 @@ func TestCompletedJobFinalizesBeforeDeleteOnComplete(t *testing.T) {
 			if err := repo.AddJob(context.Background(), job); err != nil {
 				t.Fatal(err)
 			}
-			staging := filepath.Join(root, filepath.Dir(job.TargetPath), "."+id.String()+".upload")
+			staging := uploadStagingPath(root, id.String())
+			if err := os.MkdirAll(filepath.Dir(staging), 0o700); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(staging, []byte("encoded data"), 0o600); err != nil {
 				t.Fatal(err)
 			}

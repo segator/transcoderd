@@ -206,7 +206,7 @@ func TestServerWorkerIntegration(t *testing.T) {
 			}
 		})
 
-		targetPath := filepath.Join(tmpDir, filepath.Dir(job.TargetPath), "."+job.Id.String()+".upload")
+		targetPath := filepath.Join(tmpDir, ".transcoderd-upload", job.Id.String()+".upload")
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 			t.Fatalf("Failed to create target dir: %v", err)
 		}

@@ -44,6 +44,10 @@ func probeOutput(ctx context.Context, path string) (ffprobeOutput, error) {
 	return probe, errors.New("uploaded output has no video stream")
 }
 
+func uploadStagingPath(sourceRoot string, jobID string) string {
+	return filepath.Join(sourceRoot, ".transcoderd-upload", jobID+".upload")
+}
+
 func outputCodecLabel(codec string) string {
 	switch strings.ToLower(codec) {
 	case "av1":

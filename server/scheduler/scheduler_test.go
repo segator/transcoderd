@@ -1,8 +1,240 @@
 package scheduler
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"transcoder/model"
+	"transcoder/server/repository"
+
+	"github.com/google/uuid"
 )
+
+func TestProbeOutputRejectsInvalidMedia(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+	}{
+		{name: "ffprobe failure", script: "#!/bin/sh\nexit 1\n"},
+		{name: "no video stream", script: "#!/bin/sh\nprintf '%s\\n' '{\"streams\":[{\"codec_type\":\"audio\",\"codec_name\":\"aac\"}]}'\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bin := t.TempDir()
+			if err := os.WriteFile(filepath.Join(bin, "ffprobe"), []byte(tt.script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			if _, err := probeOutput(context.Background(), "uploaded.mkv"); err == nil {
+				t.Fatal("probeOutput() succeeded for invalid output, want error")
+			}
+		})
+	}
+}
+
+func TestOutputNameForCodec(t *testing.T) {
+	tests := []struct {
+		name, source, codec, want string
+	}{
+		{name: "h264 input to av1", source: "Movies/Film (2024) x264.mkv", codec: "av1", want: "Movies/Film (2024) av1.mkv"},
+		{name: "h264 output convention", source: "Film.mkv", codec: "h264", want: "Film.x264.mkv"},
+		{name: "hevc input to av1", source: "Series/Episode H265.mp4", codec: "av1", want: "Series/Episode av1.mkv"},
+		{name: "hevc output convention", source: "Film h264.mkv", codec: "hevc", want: "Film x265.mkv"},
+		{name: "codec missing", source: "Film.mkv", codec: "av1", want: "Film.av1.mkv"},
+		{name: "codec-like substring in title", source: "The H264ers.mkv", codec: "av1", want: "The H264ers.av1.mkv"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := outputNameForCodec(tt.source, tt.codec); got != tt.want {
+				t.Errorf("outputNameForCodec(%q, %q) = %q, want %q", tt.source, tt.codec, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatTargetNameRecognizesHEVCLabels(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "Movies/Film.h265.mp4", want: "Movies/Film.x265.mkv"},
+		{input: "Movies/Film.HEVC.mkv", want: "Movies/Film.x265.mkv"},
+		{input: "Movies/The H264ers.mkv", want: "Movies/The H264ers.mkv"},
+	}
+	for _, tt := range tests {
+		if got := formatTargetName(tt.input); got != tt.want {
+			t.Errorf("formatTargetName(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestCompletedJobFinalizesBeforeDeleteOnComplete(t *testing.T) {
+	for _, deleteSource := range []bool{false, true} {
+		name := "preserve source"
+		if deleteSource {
+			name = "delete source after completion"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			bin := t.TempDir()
+			ffprobe := filepath.Join(bin, "ffprobe")
+			if err := os.WriteFile(ffprobe, []byte("#!/bin/sh\ncat <<'EOF'\n{\"format\":{\"duration\":\"12.5\"},\"streams\":[{\"codec_type\":\"video\",\"codec_name\":\"av1\",\"width\":1920,\"height\":1080}]}\nEOF\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			oldPath := os.Getenv("PATH")
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+oldPath)
+			id := uuid.New()
+			sourcePath := filepath.Join(root, "Movie x265.AC3.mkv")
+			if err := os.WriteFile(sourcePath, []byte("source"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			job := &model.Job{Id: id, SourcePath: "Movie x265.AC3.mkv", TargetPath: "Movie x265.AAC.mkv"}
+			repo := repository.NewInMemoryRepository()
+			if err := repo.AddJob(context.Background(), job); err != nil {
+				t.Fatal(err)
+			}
+			staging := uploadStagingPath(root, id.String())
+			if err := os.MkdirAll(filepath.Dir(staging), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(staging, []byte("encoded data"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			occupiedPath := filepath.Join(root, "Movie av1.AAC.mkv")
+			if err := os.WriteFile(occupiedPath, []byte("keep existing"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			scheduler := &RuntimeScheduler{config: &Config{SourcePath: root, DeleteSourceOnComplete: deleteSource}, repo: repo}
+			event := model.TaskEventType{JobId: id, EventID: 0, NotificationType: model.JobNotification, Status: model.CompletedNotificationStatus}
+			payload, err := json.Marshal(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := scheduler.processEvent(context.Background(), &model.EnvelopEvent{EventType: model.NotificationEvent, EventData: payload}); err != nil {
+				t.Fatal(err)
+			}
+			stored, err := repo.GetJob(context.Background(), id.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.TargetPath != "Movie av1.AAC_encoded.mkv" {
+				t.Errorf("stored target path = %q, want Movie av1.AAC_encoded.mkv", stored.TargetPath)
+			}
+			if stored.TargetSize != int64(len("encoded data")) {
+				t.Errorf("stored target size = %d", stored.TargetSize)
+			}
+			if stored.TargetProbe == nil || len(stored.TargetProbe.Streams) == 0 || stored.TargetProbe.Streams[0].CodecName != "av1" {
+				t.Errorf("stored target probe = %#v, want AV1 video stream", stored.TargetProbe)
+			}
+			if stored.Status != string(model.CompletedNotificationStatus) {
+				t.Errorf("stored status = %q, want completed", stored.Status)
+			}
+			_, sourceErr := os.Stat(sourcePath)
+			if deleteSource && !os.IsNotExist(sourceErr) {
+				t.Errorf("source should be deleted after completion, stat error = %v", sourceErr)
+			}
+			if !deleteSource && sourceErr != nil {
+				t.Errorf("source should be preserved, stat error = %v", sourceErr)
+			}
+			if _, err := os.Stat(filepath.Join(root, stored.TargetPath)); err != nil {
+				t.Errorf("final output does not exist: %v", err)
+			}
+			occupied, err := os.ReadFile(occupiedPath)
+			if err != nil || string(occupied) != "keep existing" {
+				t.Errorf("existing output was modified: contents=%q err=%v", occupied, err)
+			}
+			if err := scheduler.processEvent(context.Background(), &model.EnvelopEvent{EventType: model.NotificationEvent, EventData: payload}); err != nil {
+				t.Errorf("replaying completed event should be idempotent: %v", err)
+			}
+		})
+	}
+}
+
+func TestLinkOutputWithoutOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	stage := filepath.Join(dir, ".job.upload")
+	if err := os.WriteFile(stage, []byte("encoded"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	desired := filepath.Join(dir, "Film.av1.mkv")
+	if err := os.WriteFile(desired, []byte("existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := linkOutputWithoutOverwrite(stage, desired, filepath.Join(dir, "source.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "Film.av1_encoded.mkv"); got != want {
+		t.Fatalf("linkOutputWithoutOverwrite() = %q, want %q", got, want)
+	}
+	contents, err := os.ReadFile(desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "existing" {
+		t.Errorf("occupied destination was modified: got %q", contents)
+	}
+	contents, err = os.ReadFile(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "encoded" {
+		t.Errorf("alternate destination contents = %q, want encoded", contents)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Film.av1_encoded-2.mkv"), []byte("occupied"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Film.av1_encoded.mkv"), []byte("occupied"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = linkOutputWithoutOverwrite(stage, desired, filepath.Join(dir, "source.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "Film.av1_encoded.mkv"); got != want {
+		t.Fatalf("retry linkOutputWithoutOverwrite() = %q, want existing idempotent path %q", got, want)
+	}
+	stage2 := filepath.Join(dir, ".another-job.upload")
+	if err := os.WriteFile(stage2, []byte("second encoded"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = linkOutputWithoutOverwrite(stage2, desired, filepath.Join(dir, "another-source.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "Film.av1_encoded-3.mkv"); got != want {
+		t.Fatalf("numbered collision path = %q, want %q", got, want)
+	}
+}
+
+func TestLinkOutputAvoidsSourcePath(t *testing.T) {
+	dir := t.TempDir()
+	stage := filepath.Join(dir, ".job.upload")
+	if err := os.WriteFile(stage, []byte("encoded"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "Film.av1.mkv")
+	if err := os.WriteFile(source, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := linkOutputWithoutOverwrite(stage, source, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "Film.av1_encoded.mkv"); got != want {
+		t.Fatalf("linkOutputWithoutOverwrite() = %q, want %q", got, want)
+	}
+	contents, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "original" {
+		t.Errorf("source file was modified: got %q", contents)
+	}
+}
 
 func TestVerifyFailureMessage(t *testing.T) {
 	tests := []struct {

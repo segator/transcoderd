@@ -165,9 +165,29 @@ func (s *Server) upload(writer http.ResponseWriter, request *http.Request) {
 	case webError(writer, err, 500):
 		return
 	}
-	defer func(uploadStream *scheduler.UploadJobStream, pushChecksum bool) {
-		_ = uploadStream.Close(pushChecksum)
-	}(uploadStream, false)
+	closed := false
+	keepUpload := false
+	defer func() {
+		if !closed {
+			_ = uploadStream.Close(false)
+		}
+		if !keepUpload {
+			_ = uploadStream.Clean()
+		}
+	}()
+	closeUpload := func(clean bool) error {
+		if closed {
+			return nil
+		}
+		closed = true
+		if err := uploadStream.Close(false); err != nil {
+			return err
+		}
+		if clean {
+			return uploadStream.Clean()
+		}
+		return nil
+	}
 
 	size, err := strconv.ParseUint(request.Header.Get("Content-Length"), 10, 64)
 	if err != nil {
@@ -205,20 +225,21 @@ loop:
 		}
 	}
 	if size != readed {
-		defer func(uploadStream *scheduler.UploadJobStream) {
-			_ = uploadStream.Clean()
-		}(uploadStream)
+		_ = closeUpload(true)
 		webError(writer, fmt.Errorf("invalid size, expected %d, received %d", size, readed), 400)
 		return
 	}
 	checksumUpload := uploadStream.GetHash()
 	if checksumUpload != checksum {
-		defer func(uploadStream *scheduler.UploadJobStream) {
-			_ = uploadStream.Clean()
-		}(uploadStream)
+		_ = closeUpload(true)
 		webError(writer, fmt.Errorf("invalid checksum, received %s, calculated %s", checksum, checksumUpload), 400)
 		return
 	}
+	if err = closeUpload(false); err != nil {
+		webError(writer, fmt.Errorf("could not persist uploaded output: %w", err), 500)
+		return
+	}
+	keepUpload = true
 
 	writer.WriteHeader(201)
 }

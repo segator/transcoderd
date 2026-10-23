@@ -18,7 +18,6 @@ type JobStream struct {
 	path              string
 	file              *os.File
 	checksumPublisher chan PathChecksum
-	temporalPath      string
 }
 
 type UploadJobStream struct {
@@ -75,8 +74,7 @@ func (u *UploadJobStream) Close(pushChecksum bool) error {
 	if err != nil {
 		return err
 	}
-	u.file.Close()
-	return os.Rename(u.temporalPath, u.path)
+	return u.file.Close()
 }
 
 func (j *JobStream) Close(pushChecksum bool) error {
@@ -94,5 +92,5 @@ func (j *JobStream) Close(pushChecksum bool) error {
 	return nil
 }
 func (u *UploadJobStream) Clean() error {
-	return os.Remove(u.path)
+	return os.Remove(u.file.Name())
 }

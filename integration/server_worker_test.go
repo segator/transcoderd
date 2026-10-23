@@ -32,6 +32,15 @@ func TestServerWorkerIntegration(t *testing.T) {
 		t.Skip("Integration env vars not set (INTEGRATION_PG_HOST, INTEGRATION_PG_PORT, INTEGRATION_PG_USER, INTEGRATION_PG_PASSWORD, INTEGRATION_PG_DATABASE)")
 	}
 
+	ffprobeDir := t.TempDir()
+	ffprobePath := filepath.Join(ffprobeDir, "ffprobe")
+	ffprobeJSON := `{"format":{"duration":"1.0"},"streams":[{"codec_type":"video","codec_name":"av1","width":640,"height":360}]}`
+	ffprobeScript := "#!/bin/sh\nprintf '%s\\n' '" + ffprobeJSON + "'\n"
+	if err := os.WriteFile(ffprobePath, []byte(ffprobeScript), 0o700); err != nil {
+		t.Fatalf("Failed to create ffprobe fixture: %v", err)
+	}
+	t.Setenv("PATH", ffprobeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
 	pgPort, err := strconv.Atoi(pgPortStr)
 	if err != nil {
 		t.Fatalf("Invalid INTEGRATION_PG_PORT: %v", err)
@@ -197,7 +206,7 @@ func TestServerWorkerIntegration(t *testing.T) {
 			}
 		})
 
-		targetPath := filepath.Join(tmpDir, job.TargetPath)
+		targetPath := filepath.Join(tmpDir, ".transcoderd-upload", job.Id.String()+".upload")
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 			t.Fatalf("Failed to create target dir: %v", err)
 		}

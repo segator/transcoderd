@@ -57,6 +57,21 @@ docker run -d \
 - Add postgres as datasource for grafana.
 - Import this [grafana-dashboard](./grafana-dashboard.json) and change the data source to your own Postgres database.
 
+### Completed output names
+
+The server names completed outputs from the video codec detected in the uploaded
+file, rather than from the worker's configured codec. AV1 outputs use an `av1`
+label; H.264 uses `x264`; and HEVC/H.265 uses the library's conventional `x265`
+label. Audio codec labels are normalized to `AAC`, and completed outputs use the
+`.mkv` extension. If a destination already exists, the server preserves it and
+tries `_encoded`, `_encoded-2`, and higher numbered suffixes until it reserves a
+free name. The server verifies the output and saves its final path before it
+records the job as complete.
+
+`deleteOnComplete` only attempts to remove the source after the output has been
+verified, the final path and size have been saved, and the completion event has
+been stored. With `deleteOnComplete: false`, the original is preserved.
+
 
 ## Worker Installation
 

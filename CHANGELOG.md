@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.5.4](https://github.com/segator/transcoderd/compare/v2.5.3...v2.5.4) (2026-10-23)
+
+
+### 🐛 Bug Fixes
+
+* **server:** name outputs from probed video codec ([#143](https://github.com/segator/transcoderd/issues/143)) ([65190b1](https://github.com/segator/transcoderd/commit/65190b1cd73782996df47e15152f398b8bddc644))
+
+
+### ⚡ Performance Improvements
+
+* **ci:** improve Dagger cache reuse ([#147](https://github.com/segator/transcoderd/issues/147)) ([e69fe69](https://github.com/segator/transcoderd/commit/e69fe69bb71fba0e02184f63ee547c1220ce67b7))
+
+
+### 🤖 Continuous Integration
+
+* make Dagger own the build pipeline ([#145](https://github.com/segator/transcoderd/issues/145)) ([ee1867d](https://github.com/segator/transcoderd/commit/ee1867debcfd48d41fe6d6a15393b8b8dbb2c698))
+* preserve E2E package install cache ([#146](https://github.com/segator/transcoderd/issues/146)) ([81986fc](https://github.com/segator/transcoderd/commit/81986fc31deb8a372abe4499631096c798e1b16e))
+* simplify pipeline and install Mage binary ([#148](https://github.com/segator/transcoderd/issues/148)) ([ab1d308](https://github.com/segator/transcoderd/commit/ab1d308dfc8cfd64f532f5211e29d929bba2bc33))
+
 ## [2.5.3](https://github.com/segator/transcoderd/compare/v2.5.2...v2.5.3) (2026-10-23)
 
 

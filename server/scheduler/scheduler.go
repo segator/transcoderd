@@ -199,7 +199,8 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 		return fmt.Errorf("job %s has a non-local source or target path", jobEvent.JobId)
 	}
 	sourcePath := filepath.Join(r.config.SourcePath, video.SourcePath)
-	stagingPath := uploadStagingPath(r.config.SourcePath, video.Id.String())
+	stagingPath := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
+	legacyStagingPath := filepath.Join(uploadStagingDirectory(r.config.SourcePath), uploadStagingName(video.Id.String()))
 	target := filepath.Join(r.config.SourcePath, video.TargetPath)
 	l := log.WithFields(log.Fields{
 		"job_id":      jobEvent.JobId.String(),
@@ -208,7 +209,16 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 	})
 	probePath := stagingPath
 	if _, err := os.Stat(stagingPath); errors.Is(err, os.ErrNotExist) {
-		probePath = target
+		if _, legacyErr := os.Stat(legacyStagingPath); legacyErr == nil {
+			if err := copyUploadToDestinationFilesystem(legacyStagingPath, stagingPath); err != nil {
+				l.Warnf("could not migrate legacy upload staging file to destination filesystem: %v", err)
+				return err
+			}
+		} else if errors.Is(legacyErr, os.ErrNotExist) {
+			probePath = target
+		} else {
+			return legacyErr
+		}
 	} else if err != nil {
 		return err
 	}
@@ -234,6 +244,7 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 	desiredPath := filepath.Join(r.config.SourcePath, outputNameForCodec(video.SourcePath, codec))
 	finalPath, linkErr := linkOutputWithoutOverwrite(probePath, desiredPath, filepath.Join(r.config.SourcePath, video.SourcePath))
 	if linkErr != nil {
+		l.Warnf("could not publish verified upload as final output: %v", linkErr)
 		return linkErr
 	}
 	target = finalPath
@@ -263,6 +274,11 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 	if !samePath(probePath, finalPath) {
 		if removeErr := os.Remove(probePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 			l.Warnf("final output saved but uploaded staging file could not be removed: %v", removeErr)
+		}
+	}
+	if !samePath(legacyStagingPath, probePath) {
+		if removeErr := os.Remove(legacyStagingPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			l.Warnf("final output saved but legacy upload staging file could not be removed: %v", removeErr)
 		}
 	}
 
@@ -552,7 +568,7 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 		return nil, fmt.Errorf("job %s has a non-local target path", video.Id)
 	}
 
-	temporalPath := uploadStagingPath(r.config.SourcePath, video.Id.String())
+	temporalPath := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
 	err = os.MkdirAll(filepath.Dir(temporalPath), os.ModePerm)
 	if err != nil {
 		return nil, err

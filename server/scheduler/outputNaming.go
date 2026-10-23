@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,12 +45,56 @@ func probeOutput(ctx context.Context, path string) (ffprobeOutput, error) {
 	return probe, errors.New("uploaded output has no video stream")
 }
 
-func uploadStagingPath(sourceRoot string, jobID string) string {
-	return filepath.Join(uploadStagingDirectory(sourceRoot), uploadStagingName(jobID))
+func uploadStagingPath(sourceRoot, sourcePath, jobID string) string {
+	return filepath.Join(filepath.Dir(filepath.Join(sourceRoot, sourcePath)), ".transcoderd-upload", uploadStagingName(jobID))
 }
 
 func uploadStagingDirectory(sourceRoot string) string {
 	return filepath.Join(sourceRoot, ".transcoderd-upload")
+}
+
+// copyUploadToDestinationFilesystem migrates an upload made by older versions
+// from the source root staging directory to a directory beside the source.
+// The copy is written to a temporary file and linked into place only after it is synced,
+// so a retry never mistakes a partial copy for a complete upload.
+func copyUploadToDestinationFilesystem(sourcePath, destinationPath string) error {
+	if _, err := os.Stat(destinationPath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(destinationPath), os.ModePerm); err != nil {
+		return err
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("open legacy upload staging file: %w", err)
+	}
+	defer source.Close()
+	temporary, err := os.CreateTemp(filepath.Dir(destinationPath), ".transcoderd-migrate-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create destination-local upload staging file: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if _, err = io.Copy(temporary, source); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("copy legacy upload staging file: %w", err)
+	}
+	if err = temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("sync migrated upload staging file: %w", err)
+	}
+	if err = temporary.Close(); err != nil {
+		return fmt.Errorf("close migrated upload staging file: %w", err)
+	}
+	if err = os.Link(temporaryPath, destinationPath); err != nil {
+		if _, statErr := os.Stat(destinationPath); statErr == nil {
+			return nil
+		}
+		return fmt.Errorf("publish migrated upload staging file: %w", err)
+	}
+	return nil
 }
 
 func uploadStagingName(jobID string) string {

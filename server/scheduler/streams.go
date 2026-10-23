@@ -3,10 +3,8 @@ package scheduler
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"hash"
 	"os"
-	"path/filepath"
 	"transcoder/model"
 )
 
@@ -24,8 +22,6 @@ type JobStream struct {
 
 type UploadJobStream struct {
 	*JobStream
-	stagingDir  string
-	stagingName string
 }
 
 type DownloadJobStream struct {
@@ -96,8 +92,5 @@ func (j *JobStream) Close(pushChecksum bool) error {
 	return nil
 }
 func (u *UploadJobStream) Clean() error {
-	if !filepath.IsLocal(u.stagingName) {
-		return fmt.Errorf("invalid upload staging filename %q", u.stagingName)
-	}
-	return os.Remove(filepath.Join(u.stagingDir, u.stagingName))
+	return os.Remove(u.file.Name())
 }

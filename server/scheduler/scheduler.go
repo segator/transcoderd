@@ -573,11 +573,11 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 	if err != nil {
 		return nil, err
 	}
-	uploadFile, err := os.OpenFile(temporalPath, os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)
+	uploadFile, err := os.CreateTemp(filepath.Dir(temporalPath), "."+uploadStagingName(video.Id.String())+"-*.tmp")
 	if err != nil {
 		return nil, err
 	}
-	return &UploadJobStream{JobStream: &JobStream{file: uploadFile}}, nil
+	return &UploadJobStream{JobStream: &JobStream{file: uploadFile}, finalPath: temporalPath}, nil
 }
 
 func (r *RuntimeScheduler) GetChecksum(ctx context.Context, uuid string) (string, error) {

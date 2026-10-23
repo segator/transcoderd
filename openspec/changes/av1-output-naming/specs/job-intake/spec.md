@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Destination naming
-The scheduler SHALL generate a provisional `.mkv` upload destination path, replacing recognized source video codec labels with `x265` and recognized source audio codec labels with `AAC`. If that path equals the source path, it SHALL add `_encoded.mkv`. The server SHALL stage each upload in a job-specific path separate from final destinations. Staging and finalization SHALL work when the staging root and media destination are on different filesystems. After upload, the server SHALL probe the output video stream, finalize a non-conflicting path that reflects the actual codec, and persist that path before recording the job as completed.
+The scheduler SHALL generate a provisional `.mkv` upload destination path, replacing recognized source video codec labels with `x265` and recognized source audio codec labels with `AAC`. If that path equals the source path, it SHALL add `_encoded.mkv`. The server SHALL stage each upload in a job-specific path separate from final destinations. Staging and finalization SHALL work when the staging root and media destination are on different filesystems. Each upload attempt SHALL use an isolated temporary file and publish it to the job staging path only after the complete body and checksum are validated, so cleanup of a failed retry cannot remove a successful attempt. After upload, the server SHALL probe the output video stream, finalize a non-conflicting path that reflects the actual codec, and persist that path before recording the job as completed.
 
 #### Scenario: Codec labels in the name
 - **WHEN** the scheduler accepts the source path `shows/episode.x264.dts.avi`
@@ -45,3 +45,8 @@ The scheduler SHALL generate a provisional `.mkv` upload destination path, repla
 - **WHEN** an upload is staged on a filesystem different from the final media destination
 - **THEN** the server transfers it to a destination-local staging file and finalizes it without overwriting an existing file
 - **AND** the server records the final path and size before recording the job as completed
+
+#### Scenario: A failed upload retry cannot remove a successful upload
+- **WHEN** one upload attempt fails while another attempt for the same job succeeds
+- **THEN** the failed attempt's cleanup removes only its own temporary file
+- **AND** the complete, checksum-validated upload remains available for finalization

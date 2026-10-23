@@ -239,6 +239,10 @@ loop:
 		webError(writer, fmt.Errorf("could not persist uploaded output: %w", err), 500)
 		return
 	}
+	if err = uploadStream.Commit(); err != nil {
+		webError(writer, fmt.Errorf("could not publish uploaded output: %w", err), 500)
+		return
+	}
 	keepUpload = true
 
 	writer.WriteHeader(201)

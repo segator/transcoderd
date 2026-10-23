@@ -12,12 +12,14 @@
 - [x] 2.3 Ensure completion finalization is idempotent on retries and that `deleteOnComplete` runs only after successful probe, rename, and persistence; verify scheduler tests cover retries and both deletion setting values.
 - [x] 2.4 Verify token-boundary matching preserves codec-like text inside ordinary title words by adding negative filename tests and running `go test ./server/scheduler/...`.
 - [x] 2.5 Place new upload staging files on the destination filesystem and migrate legacy root-staged uploads across filesystems before finalization; verify cross-filesystem finalization, no-overwrite behavior, and idempotent retries.
+- [x] 2.6 Give each upload request an isolated temporary file and publish it to the canonical staging path only after size and checksum validation; verify failed-attempt cleanup cannot remove a successful concurrent retry.
 
 ## 3. Contract validation
 
 - [x] 3.1 Run relevant server and scheduler tests, then run `openspec validate --all --strict`; resolve any failures before completing the change.
 - [x] 3.2 Verify the real PostgreSQL integration stores the probed AV1 final path and size before the completion event; verify HEVC and H.264 label mapping with scheduler unit tests.
 - [x] 3.3 Reproduce an overlay-to-bind-mount staging layout and verify the server can finalize it without `EXDEV`, including after a retry.
+- [x] 3.4 Simulate overlapping failed and successful upload attempts and verify only the successful checksum-validated file is finalized.
 
 ## Workflow follow-up
 

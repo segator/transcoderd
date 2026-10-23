@@ -199,7 +199,10 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 		return fmt.Errorf("job %s has a non-local source or target path", jobEvent.JobId)
 	}
 	sourcePath := filepath.Join(r.config.SourcePath, video.SourcePath)
-	stagingPath := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
+	stagingPath, err := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
+	if err != nil {
+		return err
+	}
 	legacyStagingPath := filepath.Join(uploadStagingDirectory(r.config.SourcePath), uploadStagingName(video.Id.String()))
 	target := filepath.Join(r.config.SourcePath, video.TargetPath)
 	l := log.WithFields(log.Fields{
@@ -568,7 +571,10 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 		return nil, fmt.Errorf("job %s has a non-local target path", video.Id)
 	}
 
-	temporalPath := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
+	temporalPath, err := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
+	if err != nil {
+		return nil, err
+	}
 	err = os.MkdirAll(filepath.Dir(temporalPath), os.ModePerm)
 	if err != nil {
 		return nil, err

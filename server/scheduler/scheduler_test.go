@@ -72,6 +72,17 @@ func TestFormatTargetNameRecognizesHEVCLabels(t *testing.T) {
 	}
 }
 
+func TestUploadStagingPathRejectsNonLocalSourcePaths(t *testing.T) {
+	tests := []string{"../outside.mkv", "/absolute/movie.mkv"}
+	for _, sourcePath := range tests {
+		t.Run(sourcePath, func(t *testing.T) {
+			if _, err := uploadStagingPath(t.TempDir(), sourcePath, uuid.NewString()); err == nil {
+				t.Fatalf("uploadStagingPath(%q) succeeded, want non-local path error", sourcePath)
+			}
+		})
+	}
+}
+
 func TestCompletedJobFinalizesBeforeDeleteOnComplete(t *testing.T) {
 	for _, deleteSource := range []bool{false, true} {
 		name := "preserve source"
@@ -97,7 +108,10 @@ func TestCompletedJobFinalizesBeforeDeleteOnComplete(t *testing.T) {
 			if err := repo.AddJob(context.Background(), job); err != nil {
 				t.Fatal(err)
 			}
-			staging := uploadStagingPath(root, job.SourcePath, id.String())
+			staging, err := uploadStagingPath(root, job.SourcePath, id.String())
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := os.MkdirAll(filepath.Dir(staging), 0o700); err != nil {
 				t.Fatal(err)
 			}

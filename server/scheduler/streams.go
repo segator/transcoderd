@@ -8,6 +8,7 @@ import (
 	"hash"
 	"io"
 	"os"
+	"path/filepath"
 	"transcoder/model"
 )
 
@@ -25,7 +26,8 @@ type JobStream struct {
 
 type UploadJobStream struct {
 	*JobStream
-	finalPath string
+	stagingRoot string
+	finalPath   string
 }
 
 type DownloadJobStream struct {
@@ -85,35 +87,46 @@ func (u *UploadJobStream) Close(pushChecksum bool) error {
 // Each HTTP upload attempt writes a separate temporary file, so cleanup from a
 // failed retry cannot unlink a later successful attempt.
 func (u *UploadJobStream) Commit() error {
-	if u.finalPath == "" {
-		return errors.New("upload staging destination is empty")
+	if u.stagingRoot == "" || u.finalPath == "" {
+		return errors.New("upload staging root or destination is empty")
 	}
-	if err := os.Link(u.file.Name(), u.finalPath); err != nil {
+	root, err := os.OpenRoot(u.stagingRoot)
+	if err != nil {
+		return fmt.Errorf("open upload staging root: %w", err)
+	}
+	defer root.Close()
+	attemptRelative, err := filepath.Rel(u.stagingRoot, u.file.Name())
+	if err != nil || !filepath.IsLocal(attemptRelative) {
+		return errors.New("upload attempt path is outside the configured source root")
+	}
+	destinationRelative, err := filepath.Rel(u.stagingRoot, u.finalPath)
+	if err != nil || !filepath.IsLocal(destinationRelative) || destinationRelative == "." {
+		return errors.New("upload staging destination is outside the configured source root")
+	}
+	if filepath.Dir(attemptRelative) != filepath.Dir(destinationRelative) {
+		return errors.New("upload attempt and staging destination must share a directory")
+	}
+	if err := root.Link(attemptRelative, destinationRelative); err != nil {
 		if !errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("publish upload staging file: %w", err)
 		}
-		existingChecksum, checksumErr := checksumFile(u.finalPath)
-		if checksumErr != nil {
-			return fmt.Errorf("verify existing upload staging file: %w", checksumErr)
+		existing, openErr := root.Open(destinationRelative)
+		if openErr != nil {
+			return fmt.Errorf("open existing upload staging file: %w", openErr)
 		}
-		if existingChecksum != u.GetHash() {
+		existingHash := sha256.New()
+		if _, copyErr := io.Copy(existingHash, existing); copyErr != nil {
+			_ = existing.Close()
+			return fmt.Errorf("hash existing upload staging file: %w", copyErr)
+		}
+		if closeErr := existing.Close(); closeErr != nil {
+			return fmt.Errorf("close existing upload staging file: %w", closeErr)
+		}
+		if hex.EncodeToString(existingHash.Sum(nil)) != u.GetHash() {
 			return errors.New("an upload with different contents is already staged for this job")
 		}
 	}
 	return nil
-}
-
-func checksumFile(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func (j *JobStream) Close(pushChecksum bool) error {

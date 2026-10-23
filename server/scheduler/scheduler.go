@@ -590,7 +590,7 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string,
 	if err != nil {
 		return nil, err
 	}
-	return &UploadJobStream{JobStream: &JobStream{file: uploadFile}, finalPath: temporalPath}, nil
+	return &UploadJobStream{JobStream: &JobStream{file: uploadFile}, stagingRoot: r.config.SourcePath, finalPath: temporalPath}, nil
 }
 
 func (r *RuntimeScheduler) GetChecksum(ctx context.Context, uuid string) (string, error) {

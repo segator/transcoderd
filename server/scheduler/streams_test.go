@@ -12,7 +12,7 @@ func newTestUploadStream(t *testing.T, dir, finalPath, name string) *UploadJobSt
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &UploadJobStream{JobStream: &JobStream{file: file}, finalPath: finalPath}
+	return &UploadJobStream{JobStream: &JobStream{file: file}, stagingRoot: dir, finalPath: finalPath}
 }
 
 func TestUploadAttemptsHaveIsolatedStagingFiles(t *testing.T) {

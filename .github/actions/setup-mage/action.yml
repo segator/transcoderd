@@ -1,0 +1,28 @@
+name: Setup Mage
+description: Install the pinned Mage CLI binary and verify its checksum.
+runs:
+  using: composite
+  steps:
+    - name: Setup Go for Magefiles
+      uses: actions/setup-go@v6
+      with:
+        go-version: 1.26.10
+        cache-dependency-path: magefiles/go.sum
+    - name: Download and install Mage
+      shell: bash
+      run: |
+        set -euo pipefail
+        version=1.17.2
+        archive="mage_${version}_Linux-64bit.tar.gz"
+        expected_sha256=b1dd189f5a4d38484176dd5be3b651eb7cbc0b78eaf4bb9715738aa24edec644
+        archive_path="$RUNNER_TEMP/$archive"
+        install_dir="$RUNNER_TEMP/mage/bin"
+
+        curl --fail --silent --show-error --location \
+          "https://github.com/magefile/mage/releases/download/v${version}/${archive}" \
+          --output "$archive_path"
+        echo "$expected_sha256  $archive_path" | sha256sum --check --status
+        mkdir -p "$install_dir"
+        tar -xzf "$archive_path" --directory "$install_dir" mage
+        echo "$install_dir" >> "$GITHUB_PATH"
+        "$install_dir/mage" -version

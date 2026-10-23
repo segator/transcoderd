@@ -698,9 +698,11 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 	}
 }
 
-// ffmpegBuilderImage imports the versioned, validated FFmpeg build from GHCR.
+// ffmpegBuilderImage uses Dagger's content-addressed build graph. The Engine
+// reuses the compiled builder when its inputs are unchanged and rebuilds it
+// automatically when the graph changes.
 func ffmpegBuilderImage(client *dagger.Client) *dagger.Container {
-	return client.Container().From(imageName + ":" + ffmpegBuilderTag)
+	return buildFFmpegBuilderImage(client)
 }
 
 // buildFFmpegBuilderImage builds the same FFmpeg toolchain as the published image.
@@ -736,9 +738,10 @@ func buildFFmpegBuilderImage(client *dagger.Client) *dagger.Container {
 		})
 }
 
-// pgsBuilderImage imports the PGS tools and OCR data from GHCR.
+// pgsBuilderImage uses Dagger's content-addressed build graph so the Engine
+// reuses PGS/OCR outputs when the pinned inputs and build steps are unchanged.
 func pgsBuilderImage(client *dagger.Client) *dagger.Container {
-	return client.Container().From(imageName + ":" + pgsBuilderTag)
+	return buildPgsBuilderImage(client)
 }
 
 // buildPgsBuilderImage builds the PGS tools and OCR data as a pure Dagger pipeline.

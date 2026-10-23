@@ -67,18 +67,6 @@ jobs:
       - name: Build
         run: mage build:all
 
-      # Reuse the validated, versioned builders on ordinary app builds. If a
-      # builder tag is missing, the Dagger target compiles and publishes it.
-      - name: Ensure builder images exist
-        run: |
-          ffmpeg_image="ghcr.io/segator/transcoderd:builder-ffmpeg-9.0.2-av1"
-          if ! "$RUNNER_TEMP/bin/crane" manifest "$ffmpeg_image" > /dev/null 2>&1; then
-            mage publish:ffmpeg
-          fi
-          if ! "$RUNNER_TEMP/bin/crane" manifest ghcr.io/segator/transcoderd:builder-pgs > /dev/null 2>&1; then
-            mage publish:pgs
-          fi
-
       - name: Build Containers
         run: mage docker:all
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.5.2](https://github.com/segator/transcoderd/compare/v2.5.1...v2.5.2) (2026-10-23)
+
+
+### 🐛 Bug Fixes
+
+* publish release aliases from canonical image ([#140](https://github.com/segator/transcoderd/issues/140)) ([2e76688](https://github.com/segator/transcoderd/commit/2e76688b57379c768dd5b55fe76714c26e69d628))
+* **security:** distrust compromised eMudhra certificates ([#136](https://github.com/segator/transcoderd/issues/136)) ([df7b08e](https://github.com/segator/transcoderd/commit/df7b08e08d1592dcba60db14392ebc80a39bdc14))
+
+
+### 🤖 Continuous Integration
+
+* prepare Transcoderd workflows for K3s ARC ([#138](https://github.com/segator/transcoderd/issues/138)) ([086f946](https://github.com/segator/transcoderd/commit/086f94671c5250b8e9bb754911b5e94de8384c38))
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/sirupsen/logrus from 1.9.4 to 1.10.2 ([#139](https://github.com/segator/transcoderd/issues/139)) ([f1d7184](https://github.com/segator/transcoderd/commit/f1d7184d1a774542197365ffe4bdc2deba976e57))
+
 ## [2.5.1](https://github.com/segator/transcoderd/compare/v2.5.0...v2.5.1) (2026-10-22)
 
 

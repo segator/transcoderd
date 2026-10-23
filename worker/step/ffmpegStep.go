@@ -303,7 +303,8 @@ func (f *FFMPEGGenerator) setInputFilters(jobContext *job.Context) {
 	// Add PGS and extracted subtitle SRTs in source track order so their FFmpeg
 	// input indexes match the order used by setSubtFilters.
 	for _, subt := range source.FFProbeData.Subtitle {
-		if subt.IsImageTypeSubtitle() || subt.NeedsMKVExtraction() {
+		switch {
+		case subt.IsImageTypeSubtitle() || subt.NeedsMKVExtraction():
 			srtPath := filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%d.srt", subt.Id))
 			f.inputPaths = append(f.inputPaths, srtPath)
 		}

@@ -218,8 +218,8 @@ func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 	outputIndex := 0
 	for _, subtitle := range container.Subtitle {
 		if subtitle.IsImageTypeSubtitle() || subtitle.NeedsMKVExtraction() {
-			// Both PGS (OCR'd to SRT) and extracted unsupported codecs (converted to SRT)
-			// are fed as separate input files. Map from the corresponding input index.
+			// PGS (OCR'd to SRT) and externally extracted unsupported codecs are
+			// fed as separate input files. Map from the corresponding input index.
 			subtitleArgs := []string{"-map", fmt.Sprintf("%d:0", subtInputIndex),
 				fmt.Sprintf("-c:s:%d", outputIndex), "srt"}
 
@@ -247,6 +247,25 @@ func (f *FFMPEGGenerator) setSubtFilters(container *ffmpeg.NormalizedFFProbe) {
 				"-max_interleave_delta", "0")
 			f.SubtitleFilter = append(f.SubtitleFilter, subtitleArgs)
 			subtInputIndex++
+			outputIndex++
+		} else if subtitle.NeedsDirectSRTConversion() {
+			subtitleArgs := []string{"-map", fmt.Sprintf("0:%d", subtitle.Id),
+				fmt.Sprintf("-c:s:%d", outputIndex), "srt"}
+			var dispositions []string
+			if subtitle.Forced {
+				dispositions = append(dispositions, "forced", "default")
+			}
+			if subtitle.Comment {
+				dispositions = append(dispositions, "comment")
+			}
+			if len(dispositions) > 0 {
+				subtitleArgs = append(subtitleArgs, fmt.Sprintf("-disposition:s:%d", outputIndex), strings.Join(dispositions, "+"))
+			}
+			subtitleArgs = append(subtitleArgs,
+				fmt.Sprintf("-metadata:s:s:%d", outputIndex), "language="+subtitle.Language,
+				fmt.Sprintf("-metadata:s:s:%d", outputIndex), "title="+subtitle.Title,
+				"-max_interleave_delta", "0")
+			f.SubtitleFilter = append(f.SubtitleFilter, subtitleArgs)
 			outputIndex++
 		} else {
 			f.SubtitleFilter = append(f.SubtitleFilter, []string{"-map", fmt.Sprintf("0:%d", subtitle.Id),
@@ -281,19 +300,13 @@ func (f *FFMPEGGenerator) buildArguments(threads uint8, extraArgs string, output
 func (f *FFMPEGGenerator) setInputFilters(jobContext *job.Context) {
 	source := jobContext.Source
 	f.inputPaths = append(f.inputPaths, source.FilePath)
-	// Add PGS-to-SRT converted files as separate inputs
-	if source.FFProbeData.HaveImageTypeSubtitle() {
-		for _, subt := range source.FFProbeData.Subtitle {
-			if subt.IsImageTypeSubtitle() {
-				srtEncodedFile := filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%d.srt", subt.Id))
-				f.inputPaths = append(f.inputPaths, srtEncodedFile)
-			}
+	// Add PGS and extracted subtitle SRTs in source track order so their FFmpeg
+	// input indexes match the order used by setSubtFilters.
+	for _, subt := range source.FFProbeData.Subtitle {
+		if subt.IsImageTypeSubtitle() || subt.NeedsMKVExtraction() {
+			srtPath := filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%d.srt", subt.Id))
+			f.inputPaths = append(f.inputPaths, srtPath)
 		}
-	}
-	// Add extracted-and-converted subtitle files (e.g. WebVTT -> SRT) as separate inputs
-	for _, subt := range source.FFProbeData.GetExtractableSubtitles() {
-		srtConvertedFile := filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%d.srt", subt.Id))
-		f.inputPaths = append(f.inputPaths, srtConvertedFile)
 	}
 }
 

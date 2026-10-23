@@ -43,7 +43,7 @@ func TestSubtitleNeedsMKVExtraction(t *testing.T) {
 	}{
 		{"Empty format (ffprobe unknown codec)", "", true},
 		{"None format (ffprobe unrecognized)", "none", true},
-		{"mov_text (MP4-only codec)", "mov_text", true},
+		{"mov_text is converted directly by FFmpeg", "mov_text", false},
 		{"SRT subtitle", "srt", false},
 		{"Subrip subtitle", "subrip", false},
 		{"ASS subtitle", "ass", false},
@@ -58,6 +58,26 @@ func TestSubtitleNeedsMKVExtraction(t *testing.T) {
 			got := sub.NeedsMKVExtraction()
 			if got != tt.want {
 				t.Errorf("NeedsMKVExtraction() = %v, want %v for format %q", got, tt.want, tt.format)
+			}
+		})
+	}
+}
+
+func TestSubtitleNeedsDirectSRTConversion(t *testing.T) {
+	tests := []struct {
+		name   string
+		format string
+		want   bool
+	}{
+		{"mov_text", "mov_text", true},
+		{"mov_text case insensitive", "MOV_TEXT", true},
+		{"SRT", "srt", false},
+		{"unknown format", "none", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := (&Subtitle{Format: tt.format}).NeedsDirectSRTConversion(); got != tt.want {
+				t.Errorf("NeedsDirectSRTConversion() = %v, want %v for format %q", got, tt.want, tt.format)
 			}
 		})
 	}
@@ -124,12 +144,12 @@ func TestNormalizedFFProbeGetExtractableSubtitles(t *testing.T) {
 			wantCount: 2,
 		},
 		{
-			name: "Has mov_text subtitle",
+			name: "mov_text does not need external extraction",
 			subtitles: []*Subtitle{
 				{Id: 1, Format: "srt", Language: "eng"},
 				{Id: 2, Format: "mov_text", Language: "spa"},
 			},
-			wantCount: 1,
+			wantCount: 0,
 		},
 		{
 			name: "PGS is not extractable (handled by OCR pipeline)",
@@ -205,6 +225,13 @@ func TestNormalizedFFProbeHaveExtractableSubtitle(t *testing.T) {
 			subtitles: []*Subtitle{
 				{Format: "srt"},
 				{Format: "ass"},
+			},
+			want: false,
+		},
+		{
+			name: "mov_text is converted directly by FFmpeg",
+			subtitles: []*Subtitle{
+				{Format: "mov_text"},
 			},
 			want: false,
 		},

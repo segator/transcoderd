@@ -40,15 +40,53 @@ A new job SHALL receive a UUID, a source path relative to the configured media r
 - **THEN** the server stores a new job and its first queued event
 
 ### Requirement: Destination naming
-The scheduler SHALL generate a `.mkv` destination path, replacing recognized video codec labels with `x265` and recognized audio codec labels with `AAC`. If that generated path equals the source path, it SHALL add `_encoded.mkv` to avoid using the same file as input and output.
+The scheduler SHALL generate a provisional `.mkv` path, replacing recognized video and audio labels with `x265` and `AAC`, and add `_encoded` when it would equal the source. The server SHALL isolate each upload attempt, publish only complete checksum-validated data, support finalization across filesystems, probe the actual video codec, choose a non-conflicting codec-derived path, and persist it before recording `Job/completed`.
 
 #### Scenario: Codec labels in the name
-- **WHEN** the source path is `shows/episode.x264.dts.avi`
-- **THEN** the generated destination path is `shows/episode.x265.AAC.mkv`
+- **WHEN** the scheduler accepts the source path `shows/episode.x264.dts.avi`
+- **THEN** the provisional upload destination path is `shows/episode.x265.AAC.mkv`
+
+#### Scenario: H.265 and HEVC source labels are recognized
+- **WHEN** the source path contains an `h265` or `hevc` label and the uploaded output's video codec is `av1`
+- **THEN** the generated destination path replaces that label with `av1`
 
 #### Scenario: Name otherwise unchanged
-- **WHEN** the source path is `movies/film.mkv` and no codec label changes
-- **THEN** the destination path is `movies/film_encoded.mkv`
+- **WHEN** the source path is `movies/film.mkv` and no video or audio codec label changes
+- **THEN** the provisional upload destination path is `movies/film_encoded.mkv`
+
+#### Scenario: H.264 source encoded to AV1
+- **WHEN** the source path is `movies/film.x264.AC3.mkv` and the uploaded output's video codec is `av1`
+- **THEN** the final destination path is `movies/film.av1.AAC.mkv`
+
+#### Scenario: HEVC source encoded to AV1
+- **WHEN** the source path is `movies/film.x265.AAC.mkv` and the uploaded output's video codec is `av1`
+- **THEN** the final destination path is `movies/film.av1.AAC.mkv`
+
+#### Scenario: AV1 source encoded to HEVC
+- **WHEN** the source path is `movies/film.av1.AAC.mkv` and the uploaded output's video codec is `hevc`
+- **THEN** the final destination path is `movies/film.x265.AAC.mkv`
+
+#### Scenario: Output filename has no codec label
+- **WHEN** the source path is `movies/film.mkv` and the uploaded output's video codec is `av1`
+- **THEN** the final destination path is `movies/film.av1.mkv`
+
+#### Scenario: Final path would overwrite an existing file
+- **WHEN** the codec-derived final destination already exists and is not the source file
+- **THEN** the server preserves the existing file and chooses the next available alternative name, such as `_encoded.mkv`, `_encoded-2.mkv`, or a higher numbered suffix, until it finds a free destination
+
+#### Scenario: Output codec cannot be verified
+- **WHEN** the server cannot probe the uploaded output or it contains no video stream
+- **THEN** the job is not recorded as completed and the source file is not deleted
+
+#### Scenario: Staging and library are on different filesystems
+- **WHEN** an upload is staged on a filesystem different from the final media destination
+- **THEN** the server transfers it to a destination-local staging file and finalizes it without overwriting an existing file
+- **AND** the server records the final path and size before recording the job as completed
+
+#### Scenario: A failed upload retry cannot remove a successful upload
+- **WHEN** one upload attempt fails while another attempt for the same job succeeds
+- **THEN** the failed attempt's cleanup removes only its own temporary file
+- **AND** the complete, checksum-validated upload remains available for finalization
 
 ### Requirement: Requeue an existing job
 A persisted job SHALL return to `queued` through a user request only when the request provides the force flag matching its `completed`, `failed`, or `canceled` state. Internal timeout recovery is specified in `maintenance-and-recovery`.

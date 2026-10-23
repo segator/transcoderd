@@ -64,7 +64,7 @@ func (c *NormalizedFFProbe) GetPGSSubtitles() []*Subtitle {
 }
 
 // GetExtractableSubtitles returns subtitle streams that need mkvextract + conversion to SRT.
-// These are streams with codecs that FFmpeg cannot read from MKV (e.g. S_TEXT/WEBVTT).
+// These are streams with codecs that FFmpeg cannot read directly from the source (e.g. S_TEXT/WEBVTT).
 func (c *NormalizedFFProbe) GetExtractableSubtitles() []*Subtitle {
 	var extractable []*Subtitle
 	for _, subt := range c.Subtitle {
@@ -98,12 +98,10 @@ func (s *Subtitle) IsImageTypeSubtitle() bool {
 }
 
 // NeedsMKVExtraction returns true if the subtitle stream has an unknown or unsupported codec
-// that FFmpeg cannot read directly from MKV but can be handled by extracting with mkvextract
-// and converting to SRT.
+// that can be extracted with mkvextract and converted to SRT.
 // This happens when MKV files contain subtitle tracks with codec IDs that FFmpeg doesn't
 // recognize (e.g. S_TEXT/WEBVTT from mkvmerge v85+), causing ffprobe to report the codec
-// as empty/"none". It also catches codecs incompatible with MKV output (e.g. mov_text).
-// These streams are extracted via mkvextract, converted to SRT, and fed back to FFmpeg.
+// as empty/"none". MP4 mov_text streams are converted directly by FFmpeg instead.
 func (s *Subtitle) NeedsMKVExtraction() bool {
 	if s.IsImageTypeSubtitle() {
 		return false
@@ -112,10 +110,13 @@ func (s *Subtitle) NeedsMKVExtraction() bool {
 	if format == "" || format == "none" {
 		return true
 	}
-	if format == "mov_text" {
-		return true
-	}
 	return false
+}
+
+// NeedsDirectSRTConversion reports whether the subtitle must be converted to SRT
+// by FFmpeg while reading the original media, instead of being copied or extracted.
+func (s *Subtitle) NeedsDirectSRTConversion() bool {
+	return strings.EqualFold(s.Format, "mov_text")
 }
 
 func ExtractFFProbeData(ctx context.Context, inputFile string) (data *ffprobe.ProbeData, err error) {

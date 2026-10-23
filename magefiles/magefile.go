@@ -66,8 +66,21 @@ func init() {
 	projectVersion = envOrDefault("PROJECT_VERSION", readVersionFile()+"-dev")
 	gitCommitSHA = gitOutput("rev-parse", "--short", "HEAD")
 	gitBranchName = sanitizeBranch(gitOutput("rev-parse", "--abbrev-ref", "HEAD"))
-	buildDate = time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	buildDate = sourceDate()
 	imageVersionAliases = parseImageVersionAliases(os.Getenv("IMAGE_VERSION_ALIASES"))
+}
+
+// sourceDate keeps build metadata stable for identical source revisions so
+// Dagger can reuse compiled binaries across repeated invocations.
+func sourceDate() string {
+	if date := os.Getenv("BUILD_DATE"); date != "" {
+		return date
+	}
+	date := gitOutput("show", "-s", "--format=%cI", "HEAD")
+	if parsed, err := time.Parse(time.RFC3339, date); err == nil {
+		return parsed.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	return "0000-00-00T00:00:00Z"
 }
 
 func envOrDefault(key, fallback string) string {
@@ -136,7 +149,10 @@ func daggerClient(ctx context.Context) (*dagger.Client, error) {
 
 func projectSource(client *dagger.Client) *dagger.Directory {
 	return client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
-		Exclude: []string{".git", "build", "dist", "magefiles"},
+		Exclude: []string{
+			".git", ".github", ".agents", "build", "dist", "magefiles",
+			"docs", "openspec", "scripts", "AGENTS.md", "README*", "CHANGELOG*",
+		},
 	})
 }
 
@@ -280,10 +296,9 @@ func (Test) Av1lab(ctx context.Context) error {
 	}
 	defer client.Close()
 
-	src := projectSource(client)
 	_, err = client.Container().
 		From("python:3.13.7-slim-trixie").
-		WithDirectory("/src/scripts", src.Directory("scripts")).
+		WithDirectory("/src/scripts", client.Host().Directory(filepath.Join(projectRoot(), "scripts"))).
 		WithWorkdir("/src").
 		WithExec([]string{"python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py", "-v"}).
 		Sync(ctx)
@@ -353,7 +368,6 @@ func (Test) E2e(ctx context.Context) error {
 	goBinaries := goContainer(client, src).
 		WithEnvVariable("GOOS", "linux").
 		WithEnvVariable("GOARCH", "amd64").
-		WithEnvVariable("CACHE_BUSTER", buildDate).
 		WithExec([]string{
 			"go", "build",
 			"-ldflags", ldflags("transcoderd-server"),
@@ -756,7 +770,6 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 	goBinary := goContainer(client, src).
 		WithEnvVariable("GOOS", "linux").
 		WithEnvVariable("GOARCH", "amd64").
-		WithEnvVariable("CACHE_BUSTER", buildDate).
 		WithExec([]string{
 			"go", "build",
 			"-ldflags", ldflags("transcoderd-" + component),

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,8 +22,8 @@ import (
 )
 
 var (
-	x264ex = regexp.MustCompile(`(?i)((([xh])264)|mpeg-4|mpeg-1|mpeg-2|mpeg|xvid|divx|vc-1|av1|vp8|vp9|wmv3|mp43)`)
-	ac3ex  = regexp.MustCompile(`(?i)(ac3|eac3|pcm|flac|mp2|dts|mp3|truehd|wma|vorbis|opus|mpeg audio)`)
+	videoCodecNameEx = regexp.MustCompile(`(?i)(^|[^a-z0-9])(x264|h264|x265|h265|hevc|av1|vp8|vp9|mpeg-4|mpeg-1|mpeg-2|mpeg|xvid|divx|vc-1|wmv3|mp43)([^a-z0-9]|$)`)
+	ac3ex            = regexp.MustCompile(`(?i)(ac3|eac3|pcm|flac|mp2|dts|mp3|truehd|wma|vorbis|opus|mpeg audio)`)
 )
 
 type Scheduler interface {
@@ -136,14 +137,37 @@ func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.Envelo
 		if err = json.Unmarshal(event.EventData, &taskEvent); err != nil {
 			return err
 		}
-		if err = r.repo.AddNewTaskEvent(ctx, &taskEvent); err != nil {
-			return err
+		if taskEvent.IsCompleted() {
+			if err = r.completeJob(ctx, &taskEvent); err != nil {
+				return err
+			}
 		}
-		if !taskEvent.IsCompleted() {
-			return nil
+		alreadyRecorded := false
+		if taskEvent.IsCompleted() {
+			video, getErr := r.repo.GetJob(ctx, taskEvent.JobId.String())
+			if getErr != nil {
+				return getErr
+			}
+			for _, storedEvent := range video.Events {
+				if storedEvent.EventID == taskEvent.EventID && storedEvent.IsCompleted() {
+					alreadyRecorded = true
+					break
+				}
+			}
 		}
-		if err = r.completeJob(ctx, &taskEvent); err != nil {
-			return err
+		if !alreadyRecorded {
+			if err = r.repo.AddNewTaskEvent(ctx, &taskEvent); err != nil {
+				return err
+			}
+		}
+		if taskEvent.IsCompleted() && r.config.DeleteSourceOnComplete {
+			video, getErr := r.repo.GetJob(ctx, taskEvent.JobId.String())
+			if getErr != nil {
+				return getErr
+			}
+			if removeErr := os.Remove(filepath.Join(r.config.SourcePath, video.SourcePath)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				return fmt.Errorf("remove source after successful output finalization: %w", removeErr)
+			}
 		}
 	case model.ProgressEvent:
 		taskProgress := model.TaskProgressType{}
@@ -172,39 +196,74 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 		return err
 	}
 	sourcePath := filepath.Join(r.config.SourcePath, video.SourcePath)
+	stagingPath := filepath.Join(r.config.SourcePath, filepath.Dir(video.TargetPath), "."+video.Id.String()+".upload")
 	target := filepath.Join(r.config.SourcePath, video.TargetPath)
 	l := log.WithFields(log.Fields{
 		"job_id":      jobEvent.JobId.String(),
 		"source_path": sourcePath,
 		"target_path": target,
 	})
+	probePath := stagingPath
+	if _, err := os.Stat(stagingPath); errors.Is(err, os.ErrNotExist) {
+		probePath = target
+	} else if err != nil {
+		return err
+	}
+	probe, err := probeOutput(ctx, probePath)
+	if err != nil {
+		l.Warnf("uploaded target cannot be verified: %v", err)
+		return err
+	}
+	codec := ""
+	mediaProbe := &model.MediaProbe{}
+	if probe.Format.Duration != "" {
+		mediaProbe.DurationSeconds, _ = strconv.ParseFloat(probe.Format.Duration, 64)
+	}
+	for _, stream := range probe.Streams {
+		mediaProbe.Streams = append(mediaProbe.Streams, model.MediaStream{CodecType: stream.CodecType, CodecName: stream.CodecName, Width: stream.Width, Height: stream.Height, Language: stream.Tags.Language, Title: stream.Tags.Title})
+		if codec == "" && stream.CodecType == "video" {
+			codec = stream.CodecName
+		}
+	}
+	if codec == "" {
+		return fmt.Errorf("uploaded target does not contain a video stream")
+	}
+	desiredPath := filepath.Join(r.config.SourcePath, outputNameForCodec(video.SourcePath, codec))
+	finalPath, linkErr := linkOutputWithoutOverwrite(probePath, desiredPath, filepath.Join(r.config.SourcePath, video.SourcePath))
+	if linkErr != nil {
+		return linkErr
+	}
+	target = finalPath
+	video.TargetPath, err = filepath.Rel(r.config.SourcePath, finalPath)
+	if err != nil {
+		if !samePath(finalPath, probePath) {
+			_ = os.Remove(finalPath)
+		}
+		return err
+	}
 	targetStat, err := os.Stat(target)
 	if err != nil {
-		l.Warnf("target path can not be found because: %v", err)
+		l.Warnf("target path cannot be found: %v", err)
 		return err
 	}
 	video.TargetSize = targetStat.Size()
-
-	if jobEvent.TargetProbe != nil {
-		video.TargetProbe = jobEvent.TargetProbe
-	}
+	video.TargetProbe = mediaProbe
 
 	err = r.repo.UpdateJob(ctx, video)
 	if err != nil {
+		if !samePath(finalPath, probePath) {
+			_ = os.Remove(target)
+		}
 		l.Warnf("target job can not be updated because %v", err)
 		return err
 	}
-
-	l.Infof("Job completed")
-
-	if r.config.DeleteSourceOnComplete {
-		l.Info("Job completed, removing source file")
-		err = os.Remove(sourcePath)
-		if err != nil {
-			l.Warnf("Job completed, source file can not be removed because %v", err)
-			return err
+	if !samePath(probePath, finalPath) {
+		if removeErr := os.Remove(probePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			l.Warnf("final output saved but uploaded staging file could not be removed: %v", removeErr)
 		}
 	}
+
+	l.Infof("Job completed")
 
 	return nil
 }
@@ -486,7 +545,7 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, 
 	if err != nil {
 		return nil, err
 	}
-	temporalPath := filePath + ".upload"
+	temporalPath := filepath.Join(filepath.Dir(filePath), "."+video.Id.String()+".upload")
 	uploadFile, err := os.OpenFile(temporalPath, os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)
 	if err != nil {
 		return nil, err
@@ -757,7 +816,7 @@ func verifyFailureMessage(message string) bool {
 }
 
 func formatTargetName(path string) string {
-	p := x264ex.ReplaceAllString(path, "x265")
+	p := videoCodecNameEx.ReplaceAllString(path, `${1}x265${3}`)
 	p = ac3ex.ReplaceAllString(p, "AAC")
 	extension := filepath.Ext(p)
 	p = strings.Replace(p, extension, ".mkv", 1)

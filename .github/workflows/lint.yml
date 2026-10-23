@@ -16,5 +16,13 @@ jobs:
     runs-on: transcoderd
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.10
+          cache: false
+      - uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: 0.20.6
+      - name: Install Mage CLI
+        run: go install github.com/magefile/mage@v1.17.2
       - run: mage lint:check

@@ -115,12 +115,13 @@ URL and matching token rather than a direct media-library mount.
 The current behavior contracts are in [OpenSpec](./openspec/specs/). Start with the [baseline map and known gaps](./openspec/BASELINE.md), [configuration reference](./openspec/CONFIGURATION.md), and [HTTP protocol reference](./openspec/PROTOCOL.md) before changing a capability; contributor guidance is in [AGENTS.md](./AGENTS.md).
 
 ### Prerequisites
-- [Go 1.26](https://go.dev/dl/)
-- [golangci-lint](https://golangci-lint.run/welcome/install/)
+- [Go 1.26.10](https://go.dev/dl/)
+- [Dagger CLI 0.20.6](https://docs.dagger.io/getting-started/install/)
+- Mage CLI 1.17.2 (`go install github.com/magefile/mage@v1.17.2`)
 - Docker with [buildx](https://docs.docker.com/build/install-buildx/) (for container builds)
 - PostgreSQL (for integration tests, provided via testcontainers)
 
-Install [mise](https://mise.jdx.dev/) for Go, Mage, and Dagger tooling. Dagger runs builds and tests in reproducible containers.
+Mage is the local command interface; it delegates builds, tests, image publication, and release asset uploads to Dagger containers. CI pins Go, Mage, and Dagger directly and runs the same Mage targets.
 
 ### Build
 
@@ -138,6 +139,7 @@ mage test:unit          # Unit tests with coverage
 mage test:race          # Unit tests with race detector
 mage test:short         # Unit tests in short mode
 mage test:integration   # Integration tests via Dagger services
+mage test:av1lab        # AV1 benchmark utility unit tests in Dagger
 mage test:all           # Unit + integration tests
 
 # Run a single test
@@ -180,7 +182,7 @@ mage publish:app        # Push server and worker images
 - **Lint**: runs `golangci-lint` on every push and PR
 - **Build + Test + E2E**: runs Mage/Dagger tests, builds both Docker images, and runs Docker E2E on pushes and PRs
 - **Docker Publish**: pushes server and worker images on `main`
-- **Release**: managed by [Release Please](https://github.com/googleapis/release-please) on `main` using conventional commits
+- **Release**: [Release Please](https://github.com/googleapis/release-please) creates versioned releases on `main`; Dagger uploads the built release assets
 
 ### Project Structure
 

@@ -18,7 +18,15 @@ jobs:
     runs-on: transcoderd
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.10
+          cache: false
+      - uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: 0.20.6
+      - name: Install Mage CLI
+        run: go install github.com/magefile/mage@v1.17.2
 
       - name: Benchmark FFmpeg builder (manual dispatch only)
         if: github.event_name == 'workflow_dispatch'
@@ -32,18 +40,6 @@ jobs:
           date -u +"finished_at=%Y-%m-%dT%H:%M:%SZ"
           du -h dist/builder-ffmpeg.tar
           rm -f dist/builder-ffmpeg.tar
-
-      - name: Install crane
-        run: |
-          mkdir -p "$RUNNER_TEMP/bin"
-          GOBIN="$RUNNER_TEMP/bin" go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
-
-      - name: Authenticate to GHCR
-        env:
-          GHCR_USERNAME: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf '%s' "$GHCR_TOKEN" | "$RUNNER_TEMP/bin/crane" auth login ghcr.io --username "$GHCR_USERNAME" --password-stdin
 
       - name: Release please
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -61,8 +57,8 @@ jobs:
       - name: Test
         run: mage test:unit
 
-      - name: Test AV1 benchmark lab
-        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - name: Test AV1 lab utilities
+        run: mage test:av1lab
 
       - name: Build
         run: mage build:all
@@ -77,11 +73,14 @@ jobs:
       - name: Publish
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE_VERSION_ALIASES: ${{ steps.release.outputs.release_created == 'true' && format('v{0}.{1},v{0}', steps.release.outputs.major, steps.release.outputs.minor) || '' }}
         run: mage publish:app
 
       - name: Upload release assets
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.release.outputs.release_created
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dist/* --clobber
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+        run: mage release:upload

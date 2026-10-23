@@ -1,5 +1,0 @@
-[tools]
-go = "1.26.10"
-mage = "latest"
-dagger = "0.20.6"
-"github:cli/cli" = "2.103.0"

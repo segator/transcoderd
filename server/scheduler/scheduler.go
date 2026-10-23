@@ -562,10 +562,17 @@ func (r *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string
 
 }
 
-func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, uuid string, workerName string) (*UploadJobStream, error) {
-	video, err := r.isValidStremeableJob(ctx, uuid, workerName)
+func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string, workerName string) (*UploadJobStream, error) {
+	parsedJobID, err := uuid.Parse(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid job ID %q: %w", jobID, err)
+	}
+	video, err := r.isValidStremeableJob(ctx, parsedJobID.String(), workerName)
 	if err != nil {
 		return nil, err
+	}
+	if !filepath.IsLocal(video.SourcePath) {
+		return nil, fmt.Errorf("job %s has a non-local source path", video.Id)
 	}
 	if !filepath.IsLocal(video.TargetPath) {
 		return nil, fmt.Errorf("job %s has a non-local target path", video.Id)

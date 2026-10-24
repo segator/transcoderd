@@ -5,6 +5,7 @@
 
 ### 🎉 Features
 
+* **worker:** tune AV1 quality defaults ([#169](https://github.com/segator/transcoderd/pull/169)) ([1d26758](https://github.com/segator/transcoderd/commit/1d267589a5589f5c9e4e2342e97a607713158b6f))
 * **worker:** add runtime job admission controls ([#163](https://github.com/segator/transcoderd/issues/163)) ([25957f3](https://github.com/segator/transcoderd/commit/25957f33ee99f87a16338ebaef36caa4c3f8f2da))
 
 

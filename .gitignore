@@ -12,10 +12,11 @@ __pycache__/
 build/coverage.out
 coverage.out
 
-# Large test fixtures (keep small generated fixtures tracked)
-integration/testdata/*.mkv
+# Local media and worker scratch must never be added to the repository.
+*.mkv
 !integration/testdata/test_pgs_fixture.mkv
 !integration/testdata/e2e_fixture.mkv
+/worker/worker-wsl2-rtx5080-av1/
 
 # act (GitHub Actions local runner)
 .secrets

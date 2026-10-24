@@ -87,7 +87,8 @@ func NewUpdater(currentVersionString string, assetName string, noUpdates bool, t
 func (u *Updater) Run(wg *sync.WaitGroup, ctx context.Context) {
 	wg.Add(1)
 	go func() {
-		for {
+		defer wg.Done()
+		for ctx.Err() == nil {
 			latestVersion, newUpdate, err := u.CheckForUpdate()
 			if err != nil {
 				log.Error(err)
@@ -119,7 +120,10 @@ func (u *Updater) runApplication(ctx context.Context) {
 		SetStdoutFunc(func(buffer []byte, exit bool) {
 			os.Stdout.Write(buffer)
 		}).RunWithContext(ctx, command.NewAllowedCodesOption(ExitCode))
-	if err != nil && !errors.Is(err, context.Canceled) {
+	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			return
+		}
 		panic(err)
 	}
 	if ecode != ExitCode {

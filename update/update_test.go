@@ -1,6 +1,11 @@
 package update
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +32,51 @@ func TestCleanVersion(t *testing.T) {
 				t.Errorf("cleanVersion(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUpdaterRunStopsCleanlyWhenContextIsCanceled(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX shell script")
+	}
+
+	startedPath := filepath.Join(t.TempDir(), "child-started")
+	scriptPath := filepath.Join(t.TempDir(), "child.sh")
+	script := "#!/bin/sh\ntouch " + startedPath + "\nexec sleep 30\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	updater := NewNoopUpdater()
+	updater.binaryPath = scriptPath
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	updater.Run(&wg, ctx)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(startedPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("supervised child did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Updater.Run() did not finish after context cancellation")
 	}
 }
 

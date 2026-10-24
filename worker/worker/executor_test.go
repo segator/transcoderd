@@ -13,31 +13,33 @@ import (
 	"transcoder/worker/step"
 )
 
-func TestAcceptJobsCombinesLimitAndWindow(t *testing.T) {
+func TestReserveJobSlotCombinesLimitAndWindow(t *testing.T) {
 	start, stop := time.Duration(0), 24*time.Hour
 	outsideStart, outsideStop := 24*time.Hour, 24*time.Hour
 	tests := []struct {
 		name   string
-		paused bool
 		active uint32
 		limit  int
 		start  *time.Duration
 		stop   *time.Duration
 		want   bool
 	}{
-		{"available", false, 1, 2, nil, nil, true},
-		{"paused", true, 0, 2, nil, nil, false},
-		{"at limit", false, 2, 2, nil, nil, false},
-		{"custom limit", false, 3, 4, nil, nil, true},
-		{"inside window at limit", false, 2, 2, &start, &stop, false},
-		{"inside window available", false, 1, 2, &start, &stop, true},
-		{"outside window", false, 0, 2, &outsideStart, &outsideStop, false},
+		{"available", 1, 2, nil, nil, true},
+		{"zero maximum", 0, 0, nil, nil, false},
+		{"at limit", 2, 2, nil, nil, false},
+		{"custom limit", 3, 4, nil, nil, true},
+		{"inside window at limit", 2, 2, &start, &stop, false},
+		{"inside window available", 1, 2, &start, &stop, true},
+		{"outside window", 0, 2, &outsideStart, &outsideStop, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := &JobExecutor{workerConfig: &config.Config{Paused: tt.paused, MaxActiveJobs: tt.limit, StartAfter: tt.start, StopAfter: tt.stop}, activeJobs: tt.active}
-			if got := e.AcceptJobs(); got != tt.want {
-				t.Errorf("AcceptJobs() = %v, want %v", got, tt.want)
+			e := &JobExecutor{workerConfig: &config.Config{MaxActiveJobs: tt.limit, StartAfter: tt.start, StopAfter: tt.stop}, activeJobs: tt.active, maxActiveJobs: tt.limit}
+			if got := e.ReserveJobSlot(); got != tt.want {
+				t.Errorf("ReserveJobSlot() = %v, want %v", got, tt.want)
+			}
+			if tt.want {
+				e.ReleaseJobSlot()
 			}
 		})
 	}
@@ -51,6 +53,7 @@ func TestEncodeConsumerLimit(t *testing.T) {
 		{"GPU defaults follow four active jobs", 4, 0, 4},
 		{"CPU defaults follow two active jobs", 2, 0, 2},
 		{"serial defaults", 1, 0, 1},
+		{"zero admission still resumes persisted jobs", 0, 0, 1},
 		{"explicit lower limit", 4, 2, 2},
 	}
 	for _, tt := range tests {
@@ -66,26 +69,24 @@ func TestEncodeConsumerLimit(t *testing.T) {
 	}
 }
 
-func TestAcceptJobsCombinesWeeklyScheduleWithPauseAndLimit(t *testing.T) {
+func TestAdmissionCombinesWeeklyScheduleWithLimit(t *testing.T) {
 	e := &JobExecutor{workerConfig: &config.Config{
 		MaxActiveJobs: 4,
 		Schedule:      &config.ScheduleConfig{TimeZone: "Europe/Madrid", Windows: []string{"Mon-Fri@00:00-10:00"}},
-	}, activeJobs: 3}
+	}, activeJobs: 3, maxActiveJobs: 4}
 	before := time.Date(2026, 10, 19, 7, 59, 59, 0, time.UTC)
-	if !e.acceptJobsAt(before) || e.acceptJobsAt(before.Add(time.Second)) {
-		t.Error("acceptJobsAt() did not close admission at 10:00 local time")
+	if !e.canReserveJobSlotAt(before) {
+		t.Fatal("worker did not reserve a slot inside its weekly window")
+	}
+	if e.canReserveJobSlotAt(before.Add(time.Second)) {
+		t.Error("admission did not close at 10:00 local time")
 	}
 	if e.ActiveJobs() != 3 {
 		t.Error("closing admission changed accepted job count")
 	}
-	e.workerConfig.Paused = true
-	if e.acceptJobsAt(before) {
-		t.Error("acceptJobsAt() permitted a paused worker inside a weekly window")
-	}
-	e.workerConfig.Paused = false
 	atomic.StoreUint32(&e.activeJobs, 4)
-	if e.acceptJobsAt(before) {
-		t.Error("acceptJobsAt() bypassed the active-job limit inside a weekly window")
+	if e.canReserveJobSlotAt(before) {
+		t.Error("admission bypassed the active-job limit inside a weekly window")
 	}
 }
 

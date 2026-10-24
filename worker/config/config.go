@@ -4,6 +4,9 @@ import (
 	"time"
 )
 
+// DefaultMaxActiveJobs is the number of jobs a worker accepts by default.
+const DefaultMaxActiveJobs = 2
+
 type PGSConfig struct {
 	ParallelJobs      int    `mapstructure:"parallelJobs" envconfig:"WORKER_PGS_PARALLELJOBS"`
 	DLLPath           string `mapstructure:"DLLPath" envconfig:"WORKER_PGS_TO_SRT_DLL_PATH"`
@@ -34,11 +37,10 @@ type Config struct {
 	StartAfter      *time.Duration  `mapstructure:"startAfter" envconfig:"WORKER_START_AFTER"`
 	StopAfter       *time.Duration  `mapstructure:"stopAfter" envconfig:"WORKER_STOP_AFTER"`
 	Schedule        *ScheduleConfig `mapstructure:"schedule"`
-	Paused          bool
-	MaxActiveJobs   int           `mapstructure:"maxActiveJobs" envconfig:"WORKER_MAX_ACTIVE_JOBS"`
-	PGSConfig       *PGSConfig    `mapstructure:"pgsConfig"`
-	EncodeConfig    *FFMPEGConfig `mapstructure:"ffmpegConfig"`
-	VerifyDeltaTime float64       `mapstructure:"verifyDeltaTime" envconfig:"WORKER_VERIFY_DELTA_TIME"`
+	MaxActiveJobs   int             `mapstructure:"maxActiveJobs" envconfig:"WORKER_MAX_ACTIVE_JOBS"`
+	PGSConfig       *PGSConfig      `mapstructure:"pgsConfig"`
+	EncodeConfig    *FFMPEGConfig   `mapstructure:"ffmpegConfig"`
+	VerifyDeltaTime float64         `mapstructure:"verifyDeltaTime" envconfig:"WORKER_VERIFY_DELTA_TIME"`
 }
 
 func (c Config) HaveSettedPeriodTime() bool {
@@ -48,6 +50,10 @@ func (c Config) HaveSettedPeriodTime() bool {
 func (c Config) EncodeParallelJobs() int {
 	if c.EncodeConfig != nil && c.EncodeConfig.ParallelJobs > 0 {
 		return c.EncodeConfig.ParallelJobs
+	}
+	// A zero admission limit still allows jobs already persisted on disk to resume.
+	if c.MaxActiveJobs == 0 {
+		return 1
 	}
 	return c.MaxActiveJobs
 }

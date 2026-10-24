@@ -72,30 +72,34 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(time.Second * 5):
-			if q.worker.AcceptJobs() {
+			if q.worker.ReserveJobSlot() {
 				release, requireUpdate, err := q.updater.CheckForUpdate()
 				if err != nil {
+					q.worker.ReleaseJobSlot()
 					q.logger.Errorf("Error Checking For Update: %v", err)
 					continue
 				}
 				if requireUpdate {
+					q.worker.ReleaseJobSlot()
 					q.logger.Logf("New version available %s,exiting ...", release.TagName)
 					os.Exit(update.ExitCode)
 				}
 				// The update check may have crossed an admission-window boundary.
-				if !q.worker.AcceptJobs() {
+				if !q.worker.WithinAdmissionSchedule() {
+					q.worker.ReleaseJobSlot()
 					continue
 				}
 
 				requestJobResponse, err := q.serverClient.RequestJob()
 				if err != nil {
+					q.worker.ReleaseJobSlot()
 					if !errors.Is(err, serverclient.ErrNoJobAvailable) {
 						q.logger.Errorf("Error Requesting Job: %v", err)
 					}
 					continue
 				}
 
-				if err := q.worker.ExecuteJob(requestJobResponse.Id, requestJobResponse.EventID); err != nil {
+				if err := q.worker.ExecuteReservedJob(requestJobResponse.Id, requestJobResponse.EventID); err != nil {
 					q.logger.Errorf("Error Preparing Job Execution: %v", err)
 				}
 			}

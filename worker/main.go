@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 	"transcoder/version"
 	"transcoder/worker/config"
 	"transcoder/worker/console"
+	"transcoder/worker/control"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/worker"
 
@@ -40,7 +42,7 @@ func init() {
 		defaultThreads = 16
 	}
 	pflag.Int("worker.threads", defaultThreads, "Worker Threads")
-	pflag.Int("worker.maxActiveJobs", 2, "Maximum accepted jobs on this worker")
+	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum accepted jobs; 0 disables new job requests")
 	pflag.Int("worker.pgsConfig.parallelJobs", 1, "Worker PGS Jobs in parallel")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
 	pflag.String("worker.pgsConfig.DLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")
@@ -67,6 +69,9 @@ func init() {
 	pflag.StringSlice("worker.schedule.windows", nil, "Allowed job-request windows, e.g. 22:00-10:00 or Mon-Fri@00:00-10:00")
 	pflag.StringArray("schedule", nil, "Daily job-request window HH:MM-HH:MM; repeat to add windows; follows the process timezone")
 
+	if len(os.Args) > 1 && os.Args[1] == "control" {
+		return
+	}
 	cmd.ViperConfig(&opts)
 	if pflag.Lookup("schedule").Changed {
 		schedules, err := pflag.CommandLine.GetStringArray("schedule")
@@ -91,6 +96,13 @@ func applyScheduleFlag(worker *config.Config, schedules []string) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "control" {
+		if err := control.RunCLI(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		return
+	}
 	opts.PrintVersion()
 
 	wg := &sync.WaitGroup{}
@@ -147,6 +159,15 @@ func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Upd
 
 	encodeWorker := worker.NewEncodeWorker(opts.Worker, serverClient, renderService)
 	encodeWorker.Run(wg, ctx)
+	controlServer, err := control.Start(control.SocketPath, encodeWorker)
+	if err != nil {
+		return fmt.Errorf("start worker control interface: %w", err)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		controlServer.Serve(ctx)
+	}()
 
 	coordinator := worker.NewServerCoordinator(serverClient, encodeWorker, updater, renderService.Logger())
 	coordinator.Run(wg, ctx)

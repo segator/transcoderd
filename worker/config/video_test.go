@@ -81,11 +81,15 @@ func TestWorkerConfigValidation(t *testing.T) {
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
+	zeroAdmission := Config{MaxActiveJobs: 0, EncodeConfig: &FFMPEGConfig{ParallelJobs: 0}}
+	if err := zeroAdmission.Validate(); err != nil {
+		t.Fatalf("Validate() with zero admission maximum error = %v, want nil", err)
+	}
 	tests := []struct {
 		name string
 		cfg  Config
 	}{
-		{"zero active jobs", Config{EncodeConfig: &FFMPEGConfig{ParallelJobs: 2}}},
+		{"negative active jobs", Config{MaxActiveJobs: -1, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2}}},
 		{"negative parallel encodes", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: -1}}},
 		{"unsupported codec", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2, VideoCodec: "unknown"}}},
 		{"excess threads", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2, Threads: 256}}},

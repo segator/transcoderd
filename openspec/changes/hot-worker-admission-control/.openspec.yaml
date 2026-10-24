@@ -1,4 +1,0 @@
-schema: spec-driven
-created: 2026-10-24
-goal: Let operators pause job intake and adjust the active-job limit without
-  restarting the worker

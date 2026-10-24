@@ -883,12 +883,13 @@ func buildPgsBuilderImage(client *dagger.Client) *dagger.Container {
 
 	return client.Container().
 		From("mcr.microsoft.com/dotnet/sdk:8.0.419").
+		WithDirectory("/pgs-patches", client.Host().Directory(filepath.Join(projectRoot(), "pgs-patches"))).
 		WithWorkdir("/src").
 		WithExec([]string{
 			"bash", "-c",
 			"apt-get -y update && apt-get -y upgrade && " +
 				"apt-get -y install automake ca-certificates g++ libtool libtesseract-dev " +
-				"make pkg-config wget unzip libc6-dev && " +
+				"make pkg-config wget unzip patch libc6-dev && " +
 				"apt-get clean && rm -rf /var/lib/apt/lists/*",
 		}).
 		WithExec([]string{
@@ -905,9 +906,10 @@ func buildPgsBuilderImage(client *dagger.Client) *dagger.Container {
 			fmt.Sprintf(
 				"wget -O pgstosrt.zip 'https://github.com/Tentacule/PgsToSrt/archive/%s.zip' && "+
 					"unzip pgstosrt.zip && rm pgstosrt.zip && "+
-					"cd PgsToSrt-%s/src && "+
-					"dotnet restore && "+
-					"dotnet publish -c Release -f net8.0 -o /src/PgsToSrt/out",
+					"cd PgsToSrt-%s && patch -p1 < /pgs-patches/pgstosrt-bitmap-bounds.patch && "+
+					"cd src && cp -r /pgs-patches/tests PgsToSrt.Tests && "+
+					"dotnet test PgsToSrt.Tests/PgsToSrt.RegressionTests.csproj -c Release && "+
+					"dotnet publish PgsToSrt/PgsToSrt.csproj -c Release -f net8.0 -o /src/PgsToSrt/out",
 				pgstosrtVersion, pgstosrtVersion,
 			),
 		})

@@ -1,0 +1,11 @@
+diff --git a/src/PgsToSrt/BluRaySup/BluRaySupParserExtensions.cs b/src/PgsToSrt/BluRaySup/BluRaySupParserExtensions.cs
+--- a/src/PgsToSrt/BluRaySup/BluRaySupParserExtensions.cs
++++ b/src/PgsToSrt/BluRaySup/BluRaySupParserExtensions.cs
+@@ -149,6 +149,6 @@ namespace PgsToSrt.BluRaySup
+         private static void PutPixel(Span<Rgba32> bmp, int index, Rgba32 color)
+         {
+-            if (color.A > 0)
++            if (color.A > 0 && (uint)index < (uint)bmp.Length)
+             {
+                 bmp[index] = color;
+             }

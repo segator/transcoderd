@@ -63,8 +63,8 @@ server:
 | `worker.name` | Hostname | Worker identity used in events and assignment. |
 | `worker.temporalPath` | OS temporary directory | Parent of `worker-<name>` workspaces. |
 | `worker.threads` | Number of CPUs, capped at 16 | Registered flag; the current encoder does not read this field. See `BASELINE.md`. |
-| `worker.maxActiveJobs` | `2` | Maximum accepted jobs, including jobs before and after encoding. |
-| `worker.ffmpegConfig.parallelJobs` | `0` | Inherits `worker.maxActiveJobs`; a positive advanced override limits simultaneous encodes separately. |
+| `worker.maxActiveJobs` | `2` | Maximum accepted jobs, including jobs before and after encoding; `0` disables new job requests while restored or active jobs continue. Adjustable at runtime with `control set-max-jobs`. |
+| `worker.ffmpegConfig.parallelJobs` | `0` | At startup, inherits `worker.maxActiveJobs`; a positive advanced override limits simultaneous encodes separately. Runtime changes to `worker.maxActiveJobs` do not resize the FFmpeg consumer pool. |
 | `worker.ffmpegConfig.threads` | `0` | Value passed to FFmpeg's `-threads` option; zero lets FFmpeg decide. |
 | `worker.ffmpegConfig.videoCodec` | `av1_nvenc` | Selects the AV1 GPU profile, `libsvtav1` CPU profile, or explicit `libx265` rollback. |
 | `worker.ffmpegConfig.videoPreset` | Empty | Profile default: NVENC `p7`, SVT `4`, x265 `medium`. A supplied value must be valid for the selected encoder. |
@@ -81,7 +81,6 @@ server:
 | `worker.schedule.timeZone` | `Local` | IANA timezone for advanced weekly admission windows; defaults to the worker process timezone. |
 | `worker.schedule.windows` | Empty list | OR of `Days@HH:MM-HH:MM` intervals for new requests; start inclusive, end exclusive. |
 | `--schedule` | No windows | Repeatable daily `HH:MM-HH:MM` CLI shortcut using the process timezone; overrides YAML windows when supplied. |
-| `worker.paused` | `false` when omitted | Disables requests for new jobs; no CLI flag is registered. |
 
 `worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered but does not control FFmpeg. With no nested `threads` value, the command asks FFmpeg for `-threads 0`. SVT-AV1 also manages its own internal parallelism. `worker.maxActiveJobs` bounds entire in-flight jobs and, by default, simultaneous encodes. The optional `worker.ffmpegConfig.parallelJobs` override separates the encode limit; zero inherits the active-job limit. Set only `maxActiveJobs` to `1` for serial operation. The default permits two GPU encode jobs once two accepted jobs reach that phase. This is a concurrency limit, not a promise of twice the throughput.
 
@@ -109,8 +108,10 @@ Invalid entries, invalid zones, or combining weekly windows with active legacy
 fields keep their existing duration semantics. Closing admission leaves accepted,
 queued, and restored jobs running; requests initiated before the cutoff can
 complete afterward. There is no tariff-price lookup or public-holiday calendar.
-Configuration changes require restarting the worker. See the [complete scheduling
-reference](../docs/worker-scheduling.md) for examples and overrun implications.
+Schedule changes require restarting the worker. The active-job maximum can also
+be changed at runtime with the local `control set-max-jobs` command. See the
+[complete scheduling reference](../docs/worker-scheduling.md) for examples and
+overrun implications.
 
 ### Current FFmpeg invocation
 

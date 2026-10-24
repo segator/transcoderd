@@ -114,8 +114,8 @@ func (c *Config) Validate() error {
 	if c == nil {
 		return fmt.Errorf("worker configuration is required")
 	}
-	if c.MaxActiveJobs < 1 {
-		return fmt.Errorf("worker.maxActiveJobs must be positive, got %d", c.MaxActiveJobs)
+	if c.MaxActiveJobs < 0 {
+		return fmt.Errorf("worker.maxActiveJobs must be non-negative, got %d", c.MaxActiveJobs)
 	}
 	if c.EncodeConfig == nil {
 		return fmt.Errorf("worker.ffmpegConfig is required")

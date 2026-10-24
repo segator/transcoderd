@@ -73,10 +73,6 @@ func TestConfigDefaults(t *testing.T) {
 		t.Errorf("Name default = %s, want empty", cfg.Name)
 	}
 
-	if cfg.Paused {
-		t.Error("Paused should be false by default")
-	}
-
 	if cfg.VerifyDeltaTime != 0 {
 		t.Errorf("VerifyDeltaTime default = %f, want 0", cfg.VerifyDeltaTime)
 	}
@@ -139,7 +135,6 @@ func TestConfigWithAllFields(t *testing.T) {
 		Name:            "worker-1",
 		StartAfter:      &startAfter,
 		StopAfter:       &stopAfter,
-		Paused:          true,
 		VerifyDeltaTime: 0.5,
 		PGSConfig: &PGSConfig{
 			ParallelJobs: 2,
@@ -160,10 +155,6 @@ func TestConfigWithAllFields(t *testing.T) {
 
 	if cfg.Name != "worker-1" {
 		t.Errorf("Name = %s, want worker-1", cfg.Name)
-	}
-
-	if !cfg.Paused {
-		t.Error("Paused should be true")
 	}
 
 	if cfg.VerifyDeltaTime != 0.5 {

@@ -13,6 +13,7 @@ import (
 	"transcoder/model"
 	"transcoder/worker/config"
 	"transcoder/worker/console"
+	"transcoder/worker/control"
 	"transcoder/worker/job"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/step"
@@ -22,12 +23,15 @@ import (
 )
 
 type JobExecutor struct {
-	activeJobs uint32
+	activeJobs    uint32
+	reservedJobs  int
+	maxActiveJobs int
 
 	workerConfig *config.Config
 	tempPath     string
 	wg           sync.WaitGroup
 	mu           sync.RWMutex
+	admissionMu  sync.Mutex
 	client       *serverclient.ServerClient
 
 	console       *console.RenderService
@@ -45,6 +49,7 @@ func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerCli
 		tempPath:      tempPath,
 		console:       renderService,
 		activeJobs:    0,
+		maxActiveJobs: workerConfig.MaxActiveJobs,
 	}
 	stepExecutors := setupStepExecutors(jobExecutor)
 	jobExecutor.stepExecutors = stepExecutors
@@ -194,32 +199,82 @@ func (e *JobExecutor) resumeJobs() {
 	}
 }
 
-func (e *JobExecutor) AcceptJobs() bool {
-	return e.acceptJobsAt(time.Now())
+type AdmissionStatus = control.AdmissionStatus
+
+func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	withinSchedule := e.workerConfig.AdmissionAllowedAt(time.Now())
+	return AdmissionStatus{
+		Accepting:      e.maxActiveJobs > 0 && withinSchedule,
+		ActiveJobs:     e.ActiveJobs(),
+		ReservedJobs:   e.reservedJobs,
+		MaxActiveJobs:  e.maxActiveJobs,
+		WithinSchedule: withinSchedule,
+	}
 }
 
-func (e *JobExecutor) acceptJobsAt(now time.Time) bool {
-	if e.workerConfig.Paused {
+func (e *JobExecutor) SetMaxActiveJobs(max int) error {
+	if max < 0 {
+		return fmt.Errorf("maximum active jobs must be non-negative")
+	}
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	e.maxActiveJobs = max
+	return nil
+}
+
+func (e *JobExecutor) ReserveJobSlot() bool {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	if !e.canReserveJobSlotAt(time.Now()) {
 		return false
 	}
-	if e.ActiveJobs() >= uint32(e.workerConfig.MaxActiveJobs) {
-		return false
+	e.reservedJobs++
+	return true
+}
+
+func (e *JobExecutor) canReserveJobSlotAt(now time.Time) bool {
+	return e.maxActiveJobs > 0 && e.workerConfig.AdmissionAllowedAt(now) && int(e.ActiveJobs())+e.reservedJobs < e.maxActiveJobs
+}
+
+func (e *JobExecutor) WithinAdmissionSchedule() bool {
+	return e.workerConfig.AdmissionAllowedAt(time.Now())
+}
+
+func (e *JobExecutor) ReleaseJobSlot() {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	if e.reservedJobs > 0 {
+		e.reservedJobs--
 	}
-	return e.workerConfig.AdmissionAllowedAt(now)
 }
 func (e *JobExecutor) jobLogger(jobContext *job.Context) console.LeveledLogger {
 	return e.console.Logger(console.WithMessagePrefix(fmt.Sprintf("[%s]", jobContext.JobId.String())))
 }
 func (e *JobExecutor) ExecuteJob(jobId uuid.UUID, lastEvent int) error {
+	if !e.ReserveJobSlot() {
+		return errors.New("worker is not accepting another job")
+	}
+	return e.ExecuteReservedJob(jobId, lastEvent)
+}
+
+func (e *JobExecutor) ExecuteReservedJob(jobId uuid.UUID, lastEvent int) error {
 	jobContext := job.NewContext(jobId, lastEvent, filepath.Join(e.tempPath, jobId.String()))
 
 	if err := jobContext.Init(); err != nil {
+		e.ReleaseJobSlot()
 		return err
 	}
 
 	e.publishTaskEvent(jobContext, model.JobNotification, model.StartedNotificationStatus, "")
 
+	e.admissionMu.Lock()
+	if e.reservedJobs > 0 {
+		e.reservedJobs--
+	}
 	atomic.AddUint32(&e.activeJobs, 1)
+	e.admissionMu.Unlock()
 	e.stepExecutors[model.DownloadNotification].AddJob(jobContext)
 	return nil
 }

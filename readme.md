@@ -110,6 +110,33 @@ daily from 22:00 until 10:00 in Europe/Madrid; accepted work finishes afterward.
 The worker downloads media over the server API, so it needs a reachable server
 URL and matching token rather than a direct media-library mount.
 
+### Change job admission while the worker is running
+
+Inspect or change how many jobs a running worker will request without restarting
+its container:
+
+```bash
+docker exec transcoderd-worker /app/transcoderd-worker control status
+docker exec transcoderd-worker /app/transcoderd-worker control set-max-jobs 1
+docker exec transcoderd-worker /app/transcoderd-worker control set-max-jobs 0
+docker exec transcoderd-worker /app/transcoderd-worker control set-max-jobs 2
+```
+
+The limit accepts non-negative integers. Zero stops requesting new jobs; a
+positive value sets the maximum for future assignments. Existing and restored
+jobs continue. If a request was already in flight when the limit changed, its
+reservation appears in `status` and the server may still assign that job. Lowering
+the limit below the number of active jobs does not interrupt them; the worker
+waits until it has capacity before requesting more. The schedule remains an
+additional restriction. The default is two, and `--worker.maxActiveJobs 0` starts
+with new job requests disabled. Changes made through `control` last until the
+worker restarts. This control changes job admission; it does not freeze FFmpeg.
+It also does not resize the FFmpeg consumer pool: raising the limit above the
+worker's startup maximum can admit more jobs into earlier/later pipeline stages,
+but simultaneous encodes remain bounded by the pool created at startup. Restart
+with a higher startup maximum (or explicit `worker.ffmpegConfig.parallelJobs`)
+to increase encode concurrency.
+
 ## Development
 
 The current behavior contracts are in [OpenSpec](./openspec/specs/). Start with the [baseline map and known gaps](./openspec/BASELINE.md), [configuration reference](./openspec/CONFIGURATION.md), and [HTTP protocol reference](./openspec/PROTOCOL.md) before changing a capability; contributor guidance is in [AGENTS.md](./AGENTS.md).

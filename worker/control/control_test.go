@@ -1,0 +1,124 @@
+package control
+
+import (
+	"bytes"
+	"context"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+type fakeController struct {
+	mu     sync.Mutex
+	status AdmissionStatus
+}
+
+func (f *fakeController) AdmissionStatus() AdmissionStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.status
+}
+
+func (f *fakeController) SetMaxActiveJobs(max int) error {
+	if max < 0 {
+		return os.ErrInvalid
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status.MaxActiveJobs = max
+	f.status.Accepting = max > 0
+	return nil
+}
+
+func TestControlCommandsUpdateRunningWorker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker.sock")
+	state := &fakeController{status: AdmissionStatus{Accepting: true, ActiveJobs: 4, MaxActiveJobs: 4}}
+	server, err := Start(path, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("socket permissions = %o, want 600", got)
+	}
+
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"set-max-jobs", "0"}, want: "max active jobs set to 0; accepting=false"},
+		{args: []string{"set-max-jobs", "1"}, want: "max active jobs set to 1; accepting=true"},
+		{args: []string{"status"}, want: "accepting=true active=4 reserved=0 max=1"},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args, "-"), func(t *testing.T) {
+			var output bytes.Buffer
+			if err := runCLI(tt.args, &output, path); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output.String(), tt.want) {
+				t.Fatalf("command output = %q, want it to contain %q", output.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestControlRejectsInvalidMaximumWithoutChangingState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker.sock")
+	state := &fakeController{status: AdmissionStatus{Accepting: true, MaxActiveJobs: 2}}
+	server, err := Start(path, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	for _, value := range []string{"-1", "x"} {
+		if err := runCLI([]string{"set-max-jobs", value}, &bytes.Buffer{}, path); err == nil {
+			t.Errorf("set-max-jobs %q returned no error", value)
+		}
+	}
+	if got := state.AdmissionStatus().MaxActiveJobs; got != 2 {
+		t.Fatalf("maximum after invalid commands = %d, want 2", got)
+	}
+}
+
+func TestStartRejectsActiveSocketAndRemovesStaleSocket(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &fakeController{}
+	if _, err := Start(path, state); err == nil {
+		t.Fatal("Start() succeeded with an active socket")
+	}
+	_ = listener.Close()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("test listener did not remove its socket")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	server, err := Start(path, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	server.Serve(ctx)
+	_ = server.Close()
+}

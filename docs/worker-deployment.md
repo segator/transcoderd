@@ -162,7 +162,7 @@ accepted source copies and outputs. For a local Docker server, connect both
 containers to its user-defined network and use the server's DNS alias; a remote
 server needs a URL reachable from each container.
 
-The GPU profile is the approved p7/UHQ/CQ34 recipe; CPU selection resolves its
+The GPU profile is the approved p7/UHQ/CQ38 recipe; CPU selection resolves its
 software profile automatically. Advanced preset/CRF overrides remain available
 for experiments and rollback. The [encoder reference](encoding-profiles.md)
 describes the exact current defaults. Whole-film follow-up measurements will

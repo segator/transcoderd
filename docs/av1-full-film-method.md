@@ -1,9 +1,11 @@
 # Complete-film AV1 comparison method
 
-This follow-up replaces extrapolated decision evidence with completed local
-server/worker jobs. It compares the approved GPU profile with SVT CPU presets
-6, 4 and 3 on the same complete source films. Source files remain unchanged.
-The measured report is generated only after jobs and every-frame scoring finish.
+This historical benchmark compares the then-approved GPU CQ34 profile with
+SVT CPU presets 6, 4 and 3 on the same complete source films. The current
+defaults were later adjusted to GPU CQ38 and CPU preset 4 / CRF25 based on
+representative multiclip comparisons; see [the current encoding profiles](encoding-profiles.md).
+Source files remain unchanged. The measured report is generated only after
+jobs and every-frame scoring finish.
 
 ## Workload and settings
 

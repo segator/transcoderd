@@ -68,9 +68,9 @@ server:
 | `worker.ffmpegConfig.threads` | `0` | Value passed to FFmpeg's `-threads` option; zero lets FFmpeg decide. |
 | `worker.ffmpegConfig.videoCodec` | `av1_nvenc` | Selects the AV1 GPU profile, `libsvtav1` CPU profile, or explicit `libx265` rollback. |
 | `worker.ffmpegConfig.videoPreset` | Empty | Profile default: NVENC `p7`, SVT `4`, x265 `medium`. A supplied value must be valid for the selected encoder. |
-| `worker.ffmpegConfig.videoCQ` | `0` (profile default) | NVENC CQ; zero selects `34`. Invalid with CPU or x265. |
+| `worker.ffmpegConfig.videoCQ` | `0` (profile default) | NVENC CQ; zero selects `38`. Invalid with CPU or x265. |
 | `worker.ffmpegConfig.videoQMax` | `0` (profile default) | NVENC maximum QP; zero selects `100`. Paired with `-qmin 0`. Invalid with CPU or x265. |
-| `worker.ffmpegConfig.videoCRF` | `0` (profile default) | SVT CRF `23` or x265 CRF `21` when omitted. Invalid with NVENC. |
+| `worker.ffmpegConfig.videoCRF` | `0` (profile default) | SVT CRF `25` or x265 CRF `21` when omitted. Invalid with NVENC. |
 | `worker.ffmpegConfig.videoProfile` | Empty | x265 `main10` when omitted. Invalid with AV1. |
 | `worker.ffmpegConfig.audioCodec` | `libfdk_aac` | Audio encoder passed per selected stream as `-c:a:N`. |
 | `worker.ffmpegConfig.audioVBR` | `5` | Audio quality passed per selected stream as `-vbr`. |
@@ -135,14 +135,14 @@ The video portion is one of:
 
 ```text
 AV1 GPU: -pix_fmt p010le -c:v av1_nvenc -preset p7 -tune uhq -rc vbr
-         -cq 34 -b:v 0 -multipass fullres -bf 4 -b_ref_mode middle
+         -cq 38 -b:v 0 -multipass fullres -bf 4 -b_ref_mode middle
          -split_encode_mode disabled -qmin 0 -qmax 100
-AV1 CPU: -pix_fmt yuv420p10le -c:v libsvtav1 -preset 4 -crf 23
+AV1 CPU: -pix_fmt yuv420p10le -c:v libsvtav1 -preset 4 -crf 25
 HEVC:    -pix_fmt yuv420p10le -c:v libx265 -crf 21
          -profile:v main10 -preset medium
 ```
 
-The output is probed, hashed with SHA-256, and measured in bytes. Duration verification uses `worker.verifyDeltaTime`; an encoded MKV larger than its source is rejected before upload. No VMAF prepass or automatic retry is required. The fixed GPU CQ34 profile produced good visual quality on one complete high-bitrate H.264 film, but it is not a guaranteed p5 VMAF target for every title. SVT preset 4 / CRF23 is the provisional CPU default: one full-film comparison found preset 3 took about twice as long for a 1.9% smaller output and a 0.36-point higher whole-film p5. Additional film types remain to be measured.
+The output is probed, hashed with SHA-256, and measured in bytes. Duration verification uses `worker.verifyDeltaTime`; an encoded MKV larger than its source is rejected before upload. No VMAF prepass or automatic retry is required. Current defaults are the fixed GPU p7/UHQ/CQ38 profile and SVT preset 4 / CRF25; neither guarantees a p5 VMAF target for every title. Three representative 15-second clips showed 18–49% smaller video outputs at these candidate settings, with p5 VMAF changes from -0.13 to -2.37 for NVENC and -0.48 to -1.37 for SVT. Grain, motion, resolution, source codec, and scene complexity change the result; short clips do not predict every full film.
 
 ### Example worker YAML
 
@@ -159,7 +159,7 @@ worker:
     threads: 0
     videoCodec: av1_nvenc
     parallelJobs: 2
-    videoCQ: 34
+    videoCQ: 38
     videoQMax: 100
     audioCodec: libfdk_aac
     audioVBR: 5
@@ -168,7 +168,7 @@ worker:
     parallelJobs: 2
 ```
 
-For a CPU worker set `videoCodec: libsvtav1`; the default is preset `4` / CRF `23`. Set `parallelJobs: 1` if a single SVT encode should have the CPU to itself. For x265 rollback set `videoCodec: libx265`, `videoPreset: medium`, `videoProfile: main10`, and `videoCRF: 21`. Remove NVENC-only `videoCQ` and `videoQMax` from either alternative profile. The separate `worker.threads` flag does not drive FFmpeg. The worker image supplies FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract assets.
+For a CPU worker set `videoCodec: libsvtav1`; the default is preset `4` / CRF `25`. Set `parallelJobs: 1` if a single SVT encode should have the CPU to itself. For x265 rollback set `videoCodec: libx265`, `videoPreset: medium`, `videoProfile: main10`, and `videoCRF: 21`. Remove NVENC-only `videoCQ` and `videoQMax` from either alternative profile. The separate `worker.threads` flag does not drive FFmpeg. The worker image supplies FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract assets.
 
 ### Separate CPU and GPU workers
 

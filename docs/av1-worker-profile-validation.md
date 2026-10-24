@@ -36,9 +36,11 @@ production `libfdk_aac` audio default; the
 pipeline recorded the exact output size, retained English and Spanish audio
 and subtitles, matched 10.12-second duration, and decoded the completed file.
 That tiny synthetic fixture is a functional check, not an estimate for the
-film library. CRF35 is an explicit test override, while the worker's default
-CPU profile is preset 4 / CRF23. GPU library quality remains content dependent; the
-fixed profile does not promise p5 VMAF 91–92 on every scene.
+film library. CRF35 is an explicit test override. The defaults were later
+adjusted to NVENC CQ38 and SVT preset 4 / CRF25 after multiclip comparisons;
+see [the current encoding profiles](encoding-profiles.md). GPU library quality
+remains content dependent; the fixed profile does not promise p5 VMAF 91–92 on
+every scene.
 
 An opt-in E2E run with `E2E_GPU=1` used the RTX 5080 inside the actual worker
 container. The 518,240-byte fixture became a 50,414-byte AV1 MKV with FDK audio and passed

@@ -18,7 +18,7 @@ The worker SHALL probe a fully downloaded source before encoding and SHALL probe
 - **THEN** the worker probes the output and calculates its SHA-256 checksum before verification and upload
 
 ### Requirement: Video encoder settings
-The worker SHALL map the selected source video stream and select an encoder-specific video profile from `worker.ffmpegConfig.videoCodec`. The registered default SHALL be `av1_nvenc`, with preset `p7`, UHQ tuning, VBR CQ `34`, full-resolution multipass, four B-frames with middle references, disabled split encoding, and QP range `0..100`. `libsvtav1` SHALL use preset `4` and CRF `23` by default. Explicit `libx265` SHALL retain preset `medium`, CRF `21`, and profile `main10` by default.
+The worker SHALL map the selected source video stream and select an encoder-specific video profile from `worker.ffmpegConfig.videoCodec`. The registered default SHALL be `av1_nvenc`, with preset `p7`, UHQ tuning, VBR CQ `38`, full-resolution multipass, four B-frames with middle references, disabled split encoding, and QP range `0..100`. `libsvtav1` SHALL use preset `4` and CRF `25` by default. Explicit `libx265` SHALL retain preset `medium`, CRF `21`, and profile `main10` by default.
 
 #### Scenario: Default video settings
 - **WHEN** no video encoder overrides are supplied
@@ -30,7 +30,7 @@ The worker SHALL map the selected source video stream and select an encoder-spec
 
 #### Scenario: CPU AV1 selected
 - **WHEN** `worker.ffmpegConfig.videoCodec` is `libsvtav1`
-- **THEN** the worker requests SVT-AV1 preset `4` and CRF `23`, without NVENC-only options
+- **THEN** the worker requests SVT-AV1 preset `4` and CRF `25`, without NVENC-only options
 
 #### Scenario: HEVC rollback selected
 - **WHEN** `worker.ffmpegConfig.videoCodec` is `libx265`

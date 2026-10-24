@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.6.0](https://github.com/segator/transcoderd/compare/v2.5.8...v2.6.0) (2026-10-24)
+
+
+### 🎉 Features
+
+* **worker:** add runtime job admission controls ([#163](https://github.com/segator/transcoderd/issues/163)) ([25957f3](https://github.com/segator/transcoderd/commit/25957f33ee99f87a16338ebaef36caa4c3f8f2da))
+
+
+### 🐛 Bug Fixes
+
+* **server:** make completed outputs readable over SMB ([#168](https://github.com/segator/transcoderd/issues/168)) ([8a63848](https://github.com/segator/transcoderd/commit/8a63848f8a3fabe93a2a0d0a69380fed02383811))
+* **subtitles:** guard PGS bitmap pixel bounds ([#166](https://github.com/segator/transcoderd/issues/166)) ([58eb54b](https://github.com/segator/transcoderd/commit/58eb54b667309cc5219c5279407036b9b9359afc))
+* **update:** drain active jobs before self-update ([#165](https://github.com/segator/transcoderd/issues/165)) ([8f18761](https://github.com/segator/transcoderd/commit/8f18761cef152fc3c267f585c7702c16177f5b4e))
+
+
+### 📝 Documentation
+
+* **openspec:** archive PGS OCR concurrency change ([#161](https://github.com/segator/transcoderd/issues/161)) ([9ae8186](https://github.com/segator/transcoderd/commit/9ae818629f60432322f57fcf0e49c5e66f33ebe1))
+* **openspec:** remove archived admission delta ([#164](https://github.com/segator/transcoderd/issues/164)) ([b6922ea](https://github.com/segator/transcoderd/commit/b6922ea52b3e51fb685b4c795524d9489922b69f))
+
 ## [2.5.8](https://github.com/segator/transcoderd/compare/v2.5.7...v2.5.8) (2026-10-24)
 
 

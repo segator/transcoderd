@@ -45,6 +45,15 @@ func probeOutput(ctx context.Context, path string) (ffprobeOutput, error) {
 	return probe, errors.New("uploaded output has no video stream")
 }
 
+const sharedOutputFileMode = 0o664
+
+func setSharedOutputPermissions(path string) error {
+	if err := os.Chmod(path, sharedOutputFileMode); err != nil {
+		return fmt.Errorf("set shared permissions on output %q: %w", path, err)
+	}
+	return nil
+}
+
 func uploadStagingPath(sourceRoot, sourcePath, jobID string) (string, error) {
 	if !filepath.IsLocal(sourcePath) {
 		return "", fmt.Errorf("source path %q must be relative to the configured source root", sourcePath)

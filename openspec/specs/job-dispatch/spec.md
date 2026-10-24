@@ -35,12 +35,8 @@ An active worker SHALL send a presence event approximately every five seconds an
 - **WHEN** the coordination interval elapses
 - **THEN** the worker sends a presence event and evaluates whether to request work
 
-### Requirement: Local admission policy
-A paused worker SHALL not request jobs. A worker SHALL stop requesting jobs when its active-job count reaches `worker.maxActiveJobs`, whose registered default SHALL be `2`. If a legacy time window is configured, the worker SHALL additionally request jobs only while local time elapsed since midnight lies between `startAfter` and `stopAfter`.
-
-#### Scenario: Worker paused
-- **WHEN** the worker is paused
-- **THEN** it does not request another job
+### Requirement: Local job admission limit
+A worker SHALL request a new job only when its active-job count plus in-flight reservations is below the current maximum, the maximum is greater than zero, and any configured time window permits work. The registered default maximum SHALL be two. Setting the maximum to zero at startup or runtime SHALL prevent new requests while active and restored jobs continue. Lowering the maximum SHALL affect future requests only.
 
 #### Scenario: Ordinary active-job limit
 - **WHEN** no time window is configured and two jobs are active at the default limit
@@ -50,13 +46,48 @@ A paused worker SHALL not request jobs. A worker SHALL stop requesting jobs when
 - **WHEN** `worker.maxActiveJobs` is `4` and three jobs are active
 - **THEN** the worker can request another job
 
+#### Scenario: Zero active-job limit
+- **WHEN** the active-job maximum is set to zero at startup or runtime
+- **THEN** the worker requests no new jobs and continues active or restored jobs
+
+#### Scenario: Lower maximum while jobs are active
+- **WHEN** an operator lowers the maximum below the number of active jobs
+- **THEN** active jobs continue and the worker requests no jobs until capacity is available
+
+#### Scenario: Raise maximum while worker is ready
+- **WHEN** an operator raises the maximum above the active-job count
+- **THEN** the worker may request jobs until the active-job count reaches the new maximum
+
 #### Scenario: Limit within configured window
-- **WHEN** local time is inside a configured interval but the active-job limit is reached
+- **WHEN** local time is inside a configured interval but active jobs and reservations have reached the limit
 - **THEN** the worker does not request another job
 
 #### Scenario: Outside configured window
 - **WHEN** local time is outside the configured interval
 - **THEN** the worker does not request a job
+
+### Requirement: Runtime worker admission controls
+A running worker SHALL provide a local command to report admission status, active and reserved job counts, and the current maximum, and to set the maximum to any non-negative integer. These controls SHALL be available without restarting the container and SHALL NOT expose a remotely reachable management endpoint. The controls SHALL affect job admission only; they SHALL NOT freeze active encodes or resize the FFmpeg consumer pool.
+
+#### Scenario: Read runtime admission status
+- **WHEN** an operator runs the local status command
+- **THEN** the worker reports whether admission is enabled, active and reserved jobs, the maximum, and whether the schedule permits requests
+
+#### Scenario: Disable new job requests
+- **WHEN** an operator sets the maximum to zero
+- **THEN** the worker stops starting new requests and leaves active jobs running
+
+#### Scenario: A request is already in flight
+- **WHEN** an operator sets the maximum to zero while a reserved request is waiting for the server
+- **THEN** the worker reports that reservation and does not start further requests; the server may still assign the reserved job
+
+#### Scenario: Change the maximum at runtime
+- **WHEN** an operator sets a positive maximum
+- **THEN** the worker applies it to future job requests without restarting
+
+#### Scenario: Reject invalid maximum
+- **WHEN** an operator supplies a negative or non-integer maximum
+- **THEN** the command reports an error and leaves the current maximum unchanged
 
 ### Requirement: Bounded concurrent encoding
 The worker SHALL bound simultaneous encoding jobs by the resolved encode limit while preserving a separate workspace, progress, and outcome for each job. `worker.ffmpegConfig.parallelJobs` SHALL default to `0`, meaning inherit `worker.maxActiveJobs`; a positive explicit value SHALL override that encode limit.
@@ -76,7 +107,7 @@ The worker SHALL bound simultaneous encoding jobs by the resolved encode limit w
 ### Requirement: Weekly admission schedule
 The worker SHALL accept optional `worker.schedule.windows` with default empty and `worker.schedule.timeZone` with default `Local`.
 
-With weekly windows configured, the worker SHALL initiate job requests only inside at least one window in the selected timezone. It SHALL also respect pause and active-job limits.
+With weekly windows configured, the worker SHALL initiate job requests only inside at least one window in the selected timezone. It SHALL also respect the active-job maximum.
 
 #### Scenario: Request during an open window
 - **WHEN** the worker is active, below its job limit, and inside a configured window
@@ -89,7 +120,7 @@ The worker SHALL accept repeatable top-level `--schedule=HH:MM-HH:MM` daily wind
 - **WHEN** a Monday-to-Friday window ends at 10:00 in Europe/Madrid and the local clock reaches 10:00
 - **THEN** the worker initiates no further job requests until another configured window opens
 
-#### Scenario: Resume during another window
+#### Scenario: Next admission window opens
 - **WHEN** the next configured interval opens and capacity is available
 - **THEN** the next normal coordination poll can request another job
 
@@ -99,7 +130,7 @@ The worker SHALL accept repeatable top-level `--schedule=HH:MM-HH:MM` daily wind
 
 #### Scenario: No weekly windows
 - **WHEN** the window list is empty
-- **THEN** the existing pause, limit, and optional legacy time window determine admission
+- **THEN** the active-job maximum and optional legacy time window determine admission
 
 ### Requirement: Weekly window clock semantics
 Window entries SHALL accept daily `HH:MM-HH:MM` or `Days@HH:MM-HH:MM`, with `*`, a three-letter weekday, or an inclusive weekday range as Days. Starts SHALL be inclusive and ends exclusive. Overnight windows SHALL belong to their starting weekday; `24:00` SHALL be accepted only as an end. The worker SHALL evaluate civil clock time using timezone transitions.

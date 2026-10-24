@@ -154,8 +154,10 @@ func TestCompletedJobFinalizesBeforeDeleteOnComplete(t *testing.T) {
 			if !deleteSource && sourceErr != nil {
 				t.Errorf("source should be preserved, stat error = %v", sourceErr)
 			}
-			if _, err := os.Stat(filepath.Join(root, stored.TargetPath)); err != nil {
-				t.Errorf("final output does not exist: %v", err)
+			if info, statErr := os.Stat(filepath.Join(root, stored.TargetPath)); statErr != nil {
+				t.Errorf("stat final output permissions: %v", statErr)
+			} else if got, want := info.Mode().Perm(), os.FileMode(sharedOutputFileMode); got != want {
+				t.Errorf("final output mode = %#o, want %#o", got, want)
 			}
 			occupied, err := os.ReadFile(occupiedPath)
 			if err != nil || string(occupied) != "keep existing" {

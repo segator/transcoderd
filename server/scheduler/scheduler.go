@@ -250,6 +250,10 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 		l.Warnf("could not publish verified upload as final output: %v", linkErr)
 		return linkErr
 	}
+	if err := setSharedOutputPermissions(finalPath); err != nil {
+		l.Warnf("could not set permissions on published output: %v", err)
+		return err
+	}
 	target = finalPath
 	video.TargetPath, err = filepath.Rel(r.config.SourcePath, finalPath)
 	if err != nil {

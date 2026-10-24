@@ -5,4 +5,4 @@
 - [x] Add a C# regression test for an oversized RLE run.
 - [x] Run the regression test and reconvert the reported SUP track.
 - [x] Validate the OpenSpec change and run relevant project checks.
-- [ ] Open a pull request and merge after checks pass.
+- [x] Open a pull request and merge after checks pass.

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.8](https://github.com/segator/transcoderd/compare/v2.5.7...v2.5.8) (2026-10-24)
+
+
+### 🐛 Bug Fixes
+
+* **worker:** limit default PGS OCR concurrency ([#159](https://github.com/segator/transcoderd/issues/159)) ([0ef213e](https://github.com/segator/transcoderd/commit/0ef213e114027a1d1a02bf4f5a6e57d8de615f4d))
+
 ## [2.5.7](https://github.com/segator/transcoderd/compare/v2.5.6...v2.5.7) (2026-10-24)
 
 

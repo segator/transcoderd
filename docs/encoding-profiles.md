@@ -13,7 +13,7 @@ separate CPU/GPU worker examples are in [deployment](worker-deployment.md).
 -threads 0
 -filter:v "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease"
 -pix_fmt p010le -c:v av1_nvenc -preset p7 -tune uhq
--rc vbr -cq 34 -b:v 0 -multipass fullres
+-rc vbr -cq 38 -b:v 0 -multipass fullres
 -bf 4 -b_ref_mode middle -split_encode_mode disabled
 -qmin 0 -qmax 100
 ```
@@ -27,7 +27,7 @@ separate CPU/GPU worker examples are in [deployment](worker-deployment.md).
 | `-preset p7` | Most quality-oriented NVENC preset. The user-approved film used it; it is not the fastest preset. Preset numbers cannot be compared to SVT preset numbers. |
 | `-tune uhq` | Request ultra-high-quality tuning and its additional encoder analysis. More work can improve compression/quality; it is not a guarantee for every scene. |
 | `-rc vbr` | Use variable bitrate rate control so scene complexity can influence allocation. |
-| `-cq 34` | NVENC target quality: lower generally spends more bits. It is neither a VMAF score nor equivalent to SVT CRF34. |
+| `-cq 38` | NVENC target quality: lower generally spends more bits. It is neither a VMAF score nor equivalent to SVT CRF38. This default is less conservative than CQ34 and can reduce size at some quality cost. |
 | `-b:v 0` | No fixed average bitrate target in this CQ recipe. No `maxrate` ceiling is imposed on complex scenes. |
 | `-multipass fullres` | NVENC performs its additional full-resolution analysis within the encode. It does not encode the entire film twice or run a VMAF pass. |
 | `-bf 4` | Permit four B-frames between reference pictures. They use temporal prediction to improve coding efficiency. |
@@ -52,7 +52,7 @@ validation; the full-film pilot was SDR 1080p.
 ```text
 -threads 0
 -filter:v "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease"
--pix_fmt yuv420p10le -c:v libsvtav1 -preset 4 -crf 23
+-pix_fmt yuv420p10le -c:v libsvtav1 -preset 4 -crf 25
 ```
 
 `yuv420p10le` is planar 10-bit 4:2:0. `libsvtav1` performs AV1 encoding on CPU.
@@ -61,7 +61,7 @@ are faster. CRF controls quality/bit allocation separately, with lower values
 generally producing larger, higher-quality output. Changing the preset can
 change quality at the same CRF, so compare at similar measured quality.
 
-The provisional time/size balanced fallback is preset **4 / CRF23**.
+The time/size balanced default is preset **4 / CRF25**.
 Presets **3, 5, and 6 are also selectable** through `videoPreset` (quoted
 as a YAML string), and `videoCRF` is independently configurable. SVT manages
 its own internal parallelism; automatic FFmpeg threading does not imply every
@@ -72,6 +72,12 @@ The [CPU preset comparison](av1-cpu-preset-comparison.md) records measured
 trade-offs and balanced alternatives. A fixed CRF is not a promise that every
 title meets the p5 VMAF target. CPU and GPU quality values are different scales;
 equal numeric CRF/CQ settings are not a fair comparison.
+
+Three representative 15-second clips were compared at the prior defaults and
+the new candidates. CQ38 produced 24.6–48.6% smaller video segments, with p5
+VMAF changes of -0.13 to -2.37. SVT CRF25 produced 18.4–31.9% smaller
+segments, with p5 changes of -0.48 to -1.37. These are short-scene measurements,
+not a promise for all titles; difficult grain and motion can behave differently.
 
 ## Audio, subtitles, and container
 

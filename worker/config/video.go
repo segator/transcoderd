@@ -44,7 +44,7 @@ func (c *FFMPEGConfig) ResolveVideoSettings() (VideoSettings, error) {
 		}
 		cq := c.VideoCQ
 		if cq == 0 {
-			cq = 34
+			cq = 38
 		}
 		if cq < 1 || cq > 63 {
 			return VideoSettings{}, fmt.Errorf("av1_nvenc videoCQ must be 1 through 63, got %d", cq)
@@ -71,7 +71,7 @@ func (c *FFMPEGConfig) ResolveVideoSettings() (VideoSettings, error) {
 		}
 		crf := c.VideoCRF
 		if crf == 0 {
-			crf = 23
+			crf = 25
 		}
 		if crf < 1 || crf > 63 {
 			return VideoSettings{}, fmt.Errorf("libsvtav1 videoCRF must be 1 through 63, got %d", crf)

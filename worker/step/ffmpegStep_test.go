@@ -19,14 +19,14 @@ func TestFFMPEGGeneratorVideoProfiles(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "approved NVENC",
+			name: "default NVENC",
 			cfg:  config.FFMPEGConfig{},
-			want: []string{"-pix_fmt", "p010le", "-c:v", "av1_nvenc", "-preset", "p7", "-tune", "uhq", "-rc", "vbr", "-cq", "34", "-b:v", "0", "-multipass", "fullres", "-bf", "4", "-b_ref_mode", "middle", "-split_encode_mode", "disabled", "-qmin", "0", "-qmax", "100"},
+			want: []string{"-pix_fmt", "p010le", "-c:v", "av1_nvenc", "-preset", "p7", "-tune", "uhq", "-rc", "vbr", "-cq", "38", "-b:v", "0", "-multipass", "fullres", "-bf", "4", "-b_ref_mode", "middle", "-split_encode_mode", "disabled", "-qmin", "0", "-qmax", "100"},
 		},
 		{
 			name: "SVT CPU",
 			cfg:  config.FFMPEGConfig{VideoCodec: config.AV1SVT},
-			want: []string{"-pix_fmt", "yuv420p10le", "-c:v", "libsvtav1", "-preset", "4", "-crf", "23"},
+			want: []string{"-pix_fmt", "yuv420p10le", "-c:v", "libsvtav1", "-preset", "4", "-crf", "25"},
 		},
 		{
 			name: "x265 rollback",

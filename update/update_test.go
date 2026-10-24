@@ -80,6 +80,42 @@ func TestUpdaterRunStopsCleanlyWhenContextIsCanceled(t *testing.T) {
 	}
 }
 
+func TestUpdaterRunApplicationReturnsUpdateExitCode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX shell script")
+	}
+
+	scriptPath := filepath.Join(t.TempDir(), "child.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 5\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	updater := NewNoopUpdater()
+	updater.binaryPath = scriptPath
+
+	got, err := updater.runApplication(context.Background())
+	if err != nil {
+		t.Fatalf("runApplication() error = %v", err)
+	}
+	if got != ExitCode {
+		t.Errorf("runApplication() = %d, want %d", got, ExitCode)
+	}
+}
+
+func TestInvalidateReleaseCheck(t *testing.T) {
+	updater := NewNoopUpdater()
+	updater.lastCheckTime = time.Now()
+	updater.lastRelease = &GitHubRelease{TagName: "v2.6.0"}
+
+	updater.invalidateReleaseCheck()
+
+	if !updater.lastCheckTime.IsZero() {
+		t.Errorf("lastCheckTime = %v, want zero", updater.lastCheckTime)
+	}
+	if updater.lastRelease != nil {
+		t.Errorf("lastRelease = %v, want nil", updater.lastRelease)
+	}
+}
+
 func TestNewUpdater(t *testing.T) {
 	interval := time.Minute * 15
 	tests := []struct {

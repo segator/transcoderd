@@ -8,5 +8,5 @@
 ## 2. Validate and release
 
 - [x] 2.1 Run relevant worker tests and strict OpenSpec validation.
-- [ ] 2.2 Create and merge a pull request, then publish the patch release.
-- [ ] 2.3 Set the live local worker configuration to `parallelJobs: 1`, stop the current container, and recreate it with the released image.
+- [x] 2.2 Create and merge a pull request, then publish the patch release.
+- [x] 2.3 Set the live local worker configuration to `parallelJobs: 1`, stop the current container, and recreate it with the released image.

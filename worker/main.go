@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"math"
 	"os"
 	"os/signal"
 	"runtime"
@@ -42,7 +41,7 @@ func init() {
 	}
 	pflag.Int("worker.threads", defaultThreads, "Worker Threads")
 	pflag.Int("worker.maxActiveJobs", 2, "Maximum accepted jobs on this worker")
-	pflag.Int("worker.pgsConfig.parallelJobs", int(math.Ceil(float64(runtime.NumCPU())/4)), "Worker PGS Jobs in parallel")
+	pflag.Int("worker.pgsConfig.parallelJobs", 1, "Worker PGS Jobs in parallel")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
 	pflag.String("worker.pgsConfig.DLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")
 	pflag.String("worker.pgsConfig.tessdataPath", "./tessdata", "tesseract data path")

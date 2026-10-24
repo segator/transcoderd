@@ -212,7 +212,7 @@ explain each FFmpeg parameter, including audio and the CPU preset alternatives.
 
 | Key | Registered default | Effect |
 | --- | --- | --- |
-| `worker.pgsConfig.parallelJobs` | `ceil(CPU count / 4)` | Maximum parallel OCR actions for a PGS phase. |
+| `worker.pgsConfig.parallelJobs` | `1` | Maximum parallel OCR actions for a PGS phase. Increase explicitly only when the worker has sufficient memory. |
 | `worker.pgsConfig.dotnetPath` | `dotnet` | .NET executable for PgsToSrt. |
 | `worker.pgsConfig.DLLPath` | `./PgsToSrt.dll` | OCR assembly. |
 | `worker.pgsConfig.tessdataPath` | `./tessdata` | Tesseract language data. |

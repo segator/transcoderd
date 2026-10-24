@@ -105,12 +105,21 @@ func (u *Updater) Run(wg *sync.WaitGroup, ctx context.Context) {
 					continue
 				}
 			}
-			u.runApplication(ctx)
+			exitCode, err := u.runApplication(ctx)
+			if err != nil {
+				panic(err)
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			if exitCode == ExitCode {
+				u.invalidateReleaseCheck()
+			}
 		}
 	}()
 }
 
-func (u *Updater) runApplication(ctx context.Context) {
+func (u *Updater) runApplication(ctx context.Context) (int, error) {
 	arguments := os.Args[1:]
 	arguments = append(arguments, "--noUpdateMode")
 	ecode, err := command.NewCommand(u.binaryPath, arguments...).
@@ -122,13 +131,19 @@ func (u *Updater) runApplication(ctx context.Context) {
 		}).RunWithContext(ctx, command.NewAllowedCodesOption(ExitCode))
 	if err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-			return
+			return 0, nil
 		}
-		panic(err)
+		return 0, err
 	}
 	if ecode != ExitCode {
 		os.Exit(ecode)
 	}
+	return ecode, nil
+}
+
+func (u *Updater) invalidateReleaseCheck() {
+	u.lastCheckTime = time.Time{}
+	u.lastRelease = nil
 }
 
 func (u *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {

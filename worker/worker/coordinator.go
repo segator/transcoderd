@@ -81,8 +81,15 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 				}
 				if requireUpdate {
 					q.worker.ReleaseJobSlot()
-					q.logger.Logf("New version available %s,exiting ...", release.TagName)
-					os.Exit(update.ExitCode)
+					if err := q.worker.SetMaxActiveJobs(0); err != nil {
+						q.logger.Errorf("Error stopping job admission for update: %v", err)
+						continue
+					}
+					q.logger.Logf("New version available %s; waiting for %d active jobs to finish before restarting", release.TagName, q.worker.ActiveJobs())
+					if waitForActiveJobs(ctx, q.worker.ActiveJobs, time.Second) {
+						os.Exit(update.ExitCode)
+					}
+					return
 				}
 				// The update check may have crossed an admission-window boundary.
 				if !q.worker.WithinAdmissionSchedule() {
@@ -105,4 +112,17 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func waitForActiveJobs(ctx context.Context, activeJobs func() uint32, interval time.Duration) bool {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for activeJobs() > 0 {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
+	return true
 }

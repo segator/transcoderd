@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.5.7](https://github.com/segator/transcoderd/compare/v2.5.6...v2.5.7) (2026-10-24)
+
+
+### 🐛 Bug Fixes
+
+* **update:** shut down child cleanly on cancellation ([#156](https://github.com/segator/transcoderd/issues/156)) ([f438427](https://github.com/segator/transcoderd/commit/f4384272b7c7ba0c88c14f23244755438ff99608))
+* **worker:** convert mov_text subtitles directly to SRT ([#155](https://github.com/segator/transcoderd/issues/155)) ([07ddecf](https://github.com/segator/transcoderd/commit/07ddecf981b92c93d14907ee208181545c7ae997))
+* **worker:** redraw active progress trackers ([#158](https://github.com/segator/transcoderd/issues/158)) ([191fc41](https://github.com/segator/transcoderd/commit/191fc41372be92a150a996b5036c3a1352c94c34))
+
+
+### 📝 Documentation
+
+* **openspec:** archive AV1 output naming change ([#153](https://github.com/segator/transcoderd/issues/153)) ([c632e82](https://github.com/segator/transcoderd/commit/c632e823eed264c9167b94d74733f2c3632ae5fd))
+
+
+### 🔧 Miscellaneous Chores
+
+* ignore local media files ([#157](https://github.com/segator/transcoderd/issues/157)) ([250bf60](https://github.com/segator/transcoderd/commit/250bf607f08ee95385d6aa7d17b3cafbc6755d62))
+
 ## [2.5.6](https://github.com/segator/transcoderd/compare/v2.5.5...v2.5.6) (2026-10-23)
 
 

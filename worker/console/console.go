@@ -117,10 +117,13 @@ func newProgressTracker(id string, notificationType model.NotificationType) (*pr
 		color = text.FgBlue
 	}
 	progressTracker := &progress.Tracker{
-		Message:            color.Sprintf("[%s] %s", id, notificationType),
-		Total:              0,
-		Units:              unit,
-		RemoveOnCompletion: true,
+		Message: color.Sprintf("[%s] %s", id, notificationType),
+		Total:   0,
+		Units:   unit,
+		// go-pretty only rewinds active tracker lines when they are included
+		// in its rendered output. Keeping the final line lets the writer count
+		// the active rows correctly, then moves completed trackers to scrollback.
+		RemoveOnCompletion: false,
 	}
 	return progressTracker, &color
 }

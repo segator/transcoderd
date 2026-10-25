@@ -28,7 +28,7 @@ type AdmissionStatus struct {
 
 type AdmissionController interface {
 	AdmissionStatus() AdmissionStatus
-	SetMaxActiveJobs(int) error
+	PersistMaxActiveJobs(int) error
 }
 
 type request struct {
@@ -123,7 +123,7 @@ func (s *Server) handle(conn net.Conn) {
 	switch req.Command {
 	case "status":
 	case "set-max-jobs":
-		if err := s.state.SetMaxActiveJobs(req.MaxJobs); err != nil {
+		if err := s.state.PersistMaxActiveJobs(req.MaxJobs); err != nil {
 			result.Error = err.Error()
 		}
 	default:

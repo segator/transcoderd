@@ -33,6 +33,8 @@ type Scheduler interface {
 	GetDownloadJobWriter(ctx context.Context, uuid string, workerName string) (*DownloadJobStream, error)
 	GetChecksum(ctx context.Context, uuid string) (string, error)
 	RequestJob(ctx context.Context, workerName string) (*model.RequestJobResponse, error)
+	GetWorkerMaxActiveJobs(ctx context.Context, workerName string) (*int, error)
+	SetWorkerMaxActiveJobs(ctx context.Context, workerName string, max int) error
 	HandleWorkerEvent(ctx context.Context, taskEvent *model.EnvelopEvent) error
 	CancelJob(ctx context.Context, id string) error
 	GetJob(ctx context.Context, id string) (*model.Job, error)
@@ -121,6 +123,14 @@ func (r *RuntimeScheduler) CancelJob(ctx context.Context, id string) error {
 
 func (r *RuntimeScheduler) GetJob(ctx context.Context, id string) (*model.Job, error) {
 	return r.repo.GetJob(ctx, id)
+}
+
+func (r *RuntimeScheduler) GetWorkerMaxActiveJobs(ctx context.Context, workerName string) (*int, error) {
+	return r.repo.GetWorkerMaxActiveJobs(ctx, workerName)
+}
+
+func (r *RuntimeScheduler) SetWorkerMaxActiveJobs(ctx context.Context, workerName string, max int) error {
+	return r.repo.SetWorkerMaxActiveJobs(ctx, workerName, max)
 }
 
 func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.EnvelopEvent) error {

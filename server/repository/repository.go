@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	_ "github.com/lib/pq"
 	log "github.com/sirupsen/logrus"
@@ -32,6 +33,8 @@ type Repository interface {
 	AddNewTaskEvent(ctx context.Context, event *model.TaskEventType) error
 	WithTransaction(ctx context.Context, transactionFunc func(ctx context.Context, tx Repository) error) error
 	GetWorker(ctx context.Context, name string) (*model.Worker, error)
+	GetWorkerMaxActiveJobs(ctx context.Context, name string) (*int, error)
+	SetWorkerMaxActiveJobs(ctx context.Context, name string, max int) error
 	RetrieveQueuedJob(ctx context.Context) (*model.Job, error)
 	GetAllProgressJobs(ctx context.Context) ([]model.TaskProgressType, error)
 }
@@ -41,6 +44,7 @@ type SQLDBOperations interface {
 	Prepare(query string) (*sql.Stmt, error)
 	Query(query string, args ...interface{}) (*sql.Rows, error)
 	QueryRow(query string, args ...interface{}) *sql.Row
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
@@ -68,6 +72,11 @@ func (s *SQLTransaction) Query(query string, args ...interface{}) (*sql.Rows, er
 func (s *SQLTransaction) QueryRow(query string, args ...interface{}) *sql.Row {
 	log.Debugf("QueryRow: %s, args: %v", query, args)
 	return s.tx.QueryRow(query, args...)
+}
+
+func (s *SQLTransaction) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+	log.Debugf("QueryRowContext: %s, args: %v", query, args)
+	return s.tx.QueryRowContext(ctx, query, args...)
 }
 
 func (s *SQLTransaction) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
@@ -102,6 +111,11 @@ func (s *SQLDatabase) Query(query string, args ...interface{}) (*sql.Rows, error
 func (s *SQLDatabase) QueryRow(query string, args ...interface{}) *sql.Row {
 	log.Debugf("QueryRow: %s, args: %v", query, args)
 	return s.db.QueryRow(query, args...)
+}
+
+func (s *SQLDatabase) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+	log.Debugf("QueryRowContext query: %s, args: %v", query, args)
+	return s.db.QueryRowContext(ctx, query, args...)
 }
 
 func (s *SQLDatabase) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
@@ -259,6 +273,40 @@ func (s *SQLRepository) GetWorker(ctx context.Context, name string) (worker *mod
 	worker, err = s.getWorker(ctx, db, name)
 	return worker, err
 }
+
+func (s *SQLRepository) GetWorkerMaxActiveJobs(ctx context.Context, name string) (*int, error) {
+	db, err := s.getConnection()
+	if err != nil {
+		return nil, err
+	}
+	var max int
+	err = db.QueryRowContext(ctx, "SELECT max_active_jobs FROM worker_settings WHERE worker_name=$1", name).Scan(&max)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &max, nil
+}
+
+func (s *SQLRepository) SetWorkerMaxActiveJobs(ctx context.Context, name string, max int) error {
+	if name == "" {
+		return fmt.Errorf("worker name is required")
+	}
+	if max < 0 {
+		return fmt.Errorf("maximum active jobs must be non-negative")
+	}
+	db, err := s.getConnection()
+	if err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, `INSERT INTO worker_settings (worker_name, max_active_jobs, updated_at)
+		VALUES ($1, $2, CURRENT_TIMESTAMP)
+		ON CONFLICT (worker_name) DO UPDATE SET max_active_jobs=$2, updated_at=CURRENT_TIMESTAMP`, name, max)
+	return err
+}
+
 func (s *SQLRepository) getWorker(ctx context.Context, db SQLDBOperations, name string) (*model.Worker, error) {
 	rows, err := db.QueryContext(ctx, "select * from workers where name=$1", name)
 	if err != nil {

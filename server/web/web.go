@@ -56,6 +56,56 @@ func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
+type workerSettingsRequest struct {
+	MaxActiveJobs *int `json:"maxActiveJobs"`
+}
+
+type workerSettingsResponse struct {
+	MaxActiveJobs *int `json:"maxActiveJobs"`
+}
+
+func workerNameFromRequest(request *http.Request) string {
+	return strings.TrimSpace(request.Header.Get("workerName"))
+}
+
+func (s *Server) getWorkerSettings(writer http.ResponseWriter, request *http.Request) {
+	workerName := workerNameFromRequest(request)
+	if workerName == "" {
+		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), http.StatusBadRequest)
+		return
+	}
+	max, err := s.scheduler.GetWorkerMaxActiveJobs(s.ctx, workerName)
+	if webError(writer, err, http.StatusInternalServerError) {
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(writer).Encode(workerSettingsResponse{MaxActiveJobs: max}); err != nil {
+		log.Errorf("Error writing worker settings response: %v", err)
+	}
+}
+
+func (s *Server) setWorkerSettings(writer http.ResponseWriter, request *http.Request) {
+	workerName := workerNameFromRequest(request)
+	if workerName == "" {
+		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), http.StatusBadRequest)
+		return
+	}
+	defer request.Body.Close()
+	var settings workerSettingsRequest
+	if err := json.NewDecoder(request.Body).Decode(&settings); err != nil {
+		webError(writer, fmt.Errorf("invalid worker settings: %w", err), http.StatusBadRequest)
+		return
+	}
+	if settings.MaxActiveJobs == nil || *settings.MaxActiveJobs < 0 {
+		webError(writer, fmt.Errorf("maxActiveJobs must be a non-negative integer"), http.StatusBadRequest)
+		return
+	}
+	if err := s.scheduler.SetWorkerMaxActiveJobs(s.ctx, workerName, *settings.MaxActiveJobs); webError(writer, err, http.StatusInternalServerError) {
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleWorkerEvent(writer http.ResponseWriter, request *http.Request) {
 	envelopEvent := &model.EnvelopEvent{
 		RemoteAddr: strings.Split(request.RemoteAddr, ":")[0],
@@ -348,6 +398,8 @@ func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update
 	}
 	rtr.Handle("/api/v1/job/", webServer.AuthFunc(webServer.addJobs)).Methods("POST")
 	rtr.Handle("/api/v1/job/request", webServer.AuthFunc(webServer.requestJob)).Methods("GET")
+	rtr.Handle("/api/v1/worker/settings", webServer.AuthFunc(webServer.getWorkerSettings)).Methods("GET")
+	rtr.Handle("/api/v1/worker/settings", webServer.AuthFunc(webServer.setWorkerSettings)).Methods("PUT")
 	rtr.Handle("/api/v1/job/{jobid}", webServer.AuthFunc(webServer.getJob)).Methods("GET")
 	rtr.Handle("/api/v1/job/{jobid}", webServer.AuthFunc(webServer.cancelJobs)).Methods("DELETE")
 	rtr.Handle("/api/v1/event", webServer.AuthFunc(webServer.handleWorkerEvent)).Methods("POST")

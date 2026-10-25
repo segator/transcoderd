@@ -67,6 +67,9 @@ func (q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
 }
 
 func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
+	if !q.loadPersistedWorkerSettings(ctx) {
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -110,6 +113,37 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 					q.logger.Errorf("Error Preparing Job Execution: %v", err)
 				}
 			}
+		}
+	}
+}
+
+func (q *ServerCoordinator) loadPersistedWorkerSettings(ctx context.Context) bool {
+	for {
+		q.worker.settingsMu.Lock()
+		settingsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		settings, err := q.serverClient.GetWorkerSettings(settingsCtx)
+		cancel()
+		if err == nil {
+			if settings.MaxActiveJobs != nil {
+				if err := q.worker.SetMaxActiveJobs(*settings.MaxActiveJobs); err != nil {
+					q.worker.settingsMu.Unlock()
+					q.logger.Errorf("Error applying persisted worker job limit: %v", err)
+					return false
+				}
+				q.logger.Logf("Applied persisted worker job limit %d", *settings.MaxActiveJobs)
+			}
+			q.worker.MarkWorkerSettingsResolved()
+			q.worker.settingsMu.Unlock()
+			return true
+		}
+		q.worker.settingsMu.Unlock()
+		q.logger.Errorf("Error loading persisted worker settings; job admission remains closed: %v", err)
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
 		}
 	}
 }

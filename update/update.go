@@ -5,11 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/avast/retry-go"
-	"github.com/blang/semver/v4"
-	"github.com/minio/selfupdate"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
 	"io"
 	"net/http"
 	"os"
@@ -17,6 +12,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/blang/semver/v4"
+	"github.com/minio/selfupdate"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/pflag"
+
 	"transcoder/helper/command"
 )
 
@@ -38,14 +39,15 @@ type GitHubAsset struct {
 }
 
 type Updater struct {
-	binaryPath     string
-	currentVersion semver.Version
-	assetName      string
-	tmpPath        string
-	noUpdates      bool
-	lastCheckTime  time.Time
-	lastRelease    *GitHubRelease
-	checkInterval  *time.Duration
+	binaryPath         string
+	currentVersion     semver.Version
+	assetName          string
+	tmpPath            string
+	noUpdates          bool
+	lastCheckTime      time.Time
+	lastRelease        *GitHubRelease
+	checkInterval      *time.Duration
+	latestReleaseCheck func() (*GitHubRelease, error)
 }
 
 func PFlags() {
@@ -157,11 +159,19 @@ func (u *Updater) CheckForUpdate() (*GitHubRelease, bool, error) {
 	if time.Since(u.lastCheckTime) <= *u.checkInterval {
 		return u.lastRelease, false, nil
 	}
-	latestRelease, err := GetGitHubLatestVersion()
-	if err != nil {
-		return nil, false, err
-	}
+	// Cache failed checks for the normal interval too. Otherwise every worker
+	// poll retries GitHub's API and can keep the worker from accepting jobs when
+	// the unauthenticated API rate limit is exhausted.
 	u.lastCheckTime = time.Now()
+	checkLatestRelease := u.latestReleaseCheck
+	if checkLatestRelease == nil {
+		checkLatestRelease = GetGitHubLatestVersion
+	}
+	latestRelease, err := checkLatestRelease()
+	if err != nil {
+		log.WithError(err).Warn("Unable to check for updates; continuing with the current version")
+		return nil, false, nil
+	}
 	u.lastRelease = latestRelease
 
 	latestReleaseVersion, err := semver.Parse(cleanVersion(latestRelease.TagName))
@@ -239,36 +249,33 @@ func cleanVersion(version string) string {
 }
 
 func GetGitHubLatestVersion() (*GitHubRelease, error) {
-	var latestRelease GitHubRelease
+	url := fmt.Sprintf(latestReleasesURL, repoOwner, repoName)
+	client := &http.Client{Timeout: 15 * time.Second}
+	return getGitHubLatestVersion(client, url)
+}
 
-	err := retry.Do(func() error {
-		url := fmt.Sprintf(latestReleasesURL, repoOwner, repoName)
-		resp, err := http.Get(url)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return err
-		}
-
-		err = json.Unmarshal(body, &latestRelease)
-		if err != nil {
-			return err
-		}
-
-		return nil
-	},
-		retry.Delay(time.Second*5),
-		retry.Attempts(100),
-		retry.LastErrorOnly(true))
-
+func getGitHubLatestVersion(client *http.Client, url string) (*GitHubRelease, error) {
+	request, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/vnd.github+json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		if len(body) == 0 {
+			return nil, fmt.Errorf("unexpected status code: %d", response.StatusCode)
+		}
+		return nil, fmt.Errorf("unexpected status code: %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var latestRelease GitHubRelease
+	if err := json.NewDecoder(response.Body).Decode(&latestRelease); err != nil {
 		return nil, err
 	}
 

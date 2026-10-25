@@ -2,6 +2,9 @@ package update
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -74,6 +77,54 @@ func TestUpdaterRunStopsCleanlyWhenContextIsCanceled(t *testing.T) {
 		close(done)
 	}()
 
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Updater.Run() did not finish after context cancellation")
+	}
+}
+
+func TestUpdaterRunStartsCurrentBinaryWhenReleaseCheckFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX shell script")
+	}
+
+	startedPath := filepath.Join(t.TempDir(), "worker-started")
+	scriptPath := filepath.Join(t.TempDir(), "worker.sh")
+	script := "#!/bin/sh\ntouch " + startedPath + "\nexec sleep 30\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	updater := NewNoopUpdater()
+	updater.noUpdates = false
+	updater.binaryPath = scriptPath
+	updater.latestReleaseCheck = func() (*GitHubRelease, error) {
+		return nil, errors.New("GitHub API rate limit exceeded")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	updater.Run(&wg, ctx)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(startedPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("worker did not start after the release check failed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -216,6 +267,49 @@ func TestUpdaterFields(t *testing.T) {
 
 	if *updater.checkInterval != time.Minute*10 {
 		t.Errorf("checkInterval = %v, want %v", *updater.checkInterval, time.Minute*10)
+	}
+}
+
+func TestGetGitHubLatestVersionRateLimitDoesNotRetry(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, `{"message":"API rate limit exceeded"}`, http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	_, err := getGitHubLatestVersion(server.Client(), server.URL)
+	if err == nil || !strings.Contains(err.Error(), "API rate limit exceeded") {
+		t.Fatalf("getGitHubLatestVersion() error = %v, want rate-limit error", err)
+	}
+	if calls != 1 {
+		t.Errorf("GitHub API request count = %d, want 1", calls)
+	}
+}
+
+func TestCheckForUpdateCachesFailedCheckAndContinuesCurrentVersion(t *testing.T) {
+	interval := 15 * time.Minute
+	updater, err := NewUpdater("v2.7.1", "worker", false, t.TempDir(), &interval)
+	if err != nil {
+		t.Fatalf("NewUpdater() error = %v", err)
+	}
+	calls := 0
+	updater.latestReleaseCheck = func() (*GitHubRelease, error) {
+		calls++
+		return nil, errors.New("API rate limit exceeded")
+	}
+
+	for i := 0; i < 2; i++ {
+		latest, found, err := updater.CheckForUpdate()
+		if err != nil {
+			t.Fatalf("CheckForUpdate() error = %v, want no fatal error", err)
+		}
+		if latest != nil || found {
+			t.Errorf("CheckForUpdate() = (%v, %v), want (nil, false)", latest, found)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("latest release check count = %d, want 1 within update interval", calls)
 	}
 }
 

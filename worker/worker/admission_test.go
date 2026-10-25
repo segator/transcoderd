@@ -102,7 +102,8 @@ func TestReservationCountsAgainstConcurrentLimitChange(t *testing.T) {
 
 func TestScheduleAndMaximumBothGateAdmission(t *testing.T) {
 	now := time.Now()
-	elapsed := time.Duration(now.Hour())*time.Hour + time.Duration(now.Minute())*time.Minute
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	elapsed := now.Sub(midnight)
 	start := elapsed + time.Hour
 	stop := start + time.Hour
 	worker := testAdmissionWorker(1)

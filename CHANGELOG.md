@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.1](https://github.com/segator/transcoderd/compare/v2.7.0...v2.7.1) (2026-10-25)
+
+
+### 🐛 Bug Fixes
+
+* **update:** target canonical executable during self-update ([#177](https://github.com/segator/transcoderd/issues/177)) ([9fa3d82](https://github.com/segator/transcoderd/commit/9fa3d824e35e158e501389199440e8515656b9d4))
+
 ## [2.7.0](https://github.com/segator/transcoderd/compare/v2.6.1...v2.7.0) (2026-10-25)
 
 

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 type ffprobeOutput struct {
@@ -63,6 +64,22 @@ func uploadStagingPath(sourceRoot, sourcePath, jobID string) (string, error) {
 
 func uploadStagingDirectory(sourceRoot string) string {
 	return filepath.Join(sourceRoot, ".transcoderd-upload")
+}
+
+// removeUploadStagingFile removes a finalized upload and its parent directory
+// when the directory is empty. os.Remove is intentionally used for the
+// directory so concurrent upload attempts keep the shared directory alive.
+func removeUploadStagingFile(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Remove(filepath.Dir(path)); err != nil &&
+		!errors.Is(err, os.ErrNotExist) &&
+		!errors.Is(err, syscall.ENOTEMPTY) &&
+		!errors.Is(err, syscall.EEXIST) {
+		return err
+	}
+	return nil
 }
 
 // copyUploadToDestinationFilesystem migrates an upload made by older versions

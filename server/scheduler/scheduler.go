@@ -278,14 +278,18 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 		l.Warnf("target job can not be updated because %v", err)
 		return err
 	}
-	if !samePath(probePath, finalPath) {
-		if removeErr := os.Remove(probePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			l.Warnf("final output saved but uploaded staging file could not be removed: %v", removeErr)
+	for _, stagingFile := range []struct {
+		path string
+		name string
+	}{
+		{path: stagingPath, name: "uploaded"},
+		{path: legacyStagingPath, name: "legacy upload"},
+	} {
+		if samePath(stagingFile.path, finalPath) {
+			continue
 		}
-	}
-	if !samePath(legacyStagingPath, probePath) {
-		if removeErr := os.Remove(legacyStagingPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			l.Warnf("final output saved but legacy upload staging file could not be removed: %v", removeErr)
+		if removeErr := removeUploadStagingFile(stagingFile.path); removeErr != nil {
+			l.Warnf("final output saved but %s staging cleanup failed: %v", stagingFile.name, removeErr)
 		}
 	}
 
@@ -600,6 +604,15 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string,
 	}
 	attemptName := filepath.Join(filepath.Dir(stagingName), "."+uploadStagingName(video.Id.String())+"-"+uuid.NewString()+".tmp")
 	uploadFile, err := root.OpenFile(attemptName, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if errors.Is(err, os.ErrNotExist) {
+		// Finalization may remove an empty staging directory after MkdirAll.
+		// Recreate it and retry once to close that narrow race.
+		if mkdirErr := os.MkdirAll(filepath.Dir(temporalPath), os.ModePerm); mkdirErr != nil {
+			_ = root.Close()
+			return nil, mkdirErr
+		}
+		uploadFile, err = root.OpenFile(attemptName, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	}
 	if err != nil {
 		_ = root.Close()
 		return nil, err

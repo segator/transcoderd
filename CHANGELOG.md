@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.3](https://github.com/segator/transcoderd/compare/v2.7.2...v2.7.3) (2026-10-25)
+
+
+### 🐛 Bug Fixes
+
+* remove empty upload staging directories ([#181](https://github.com/segator/transcoderd/issues/181)) ([0d7b3b7](https://github.com/segator/transcoderd/commit/0d7b3b759c935329bcf73035082d8a75319dcbf6))
+
 ## [2.7.2](https://github.com/segator/transcoderd/compare/v2.7.1...v2.7.2) (2026-10-25)
 
 

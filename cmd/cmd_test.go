@@ -78,6 +78,7 @@ func TestWorkerScheduleCLIOverridesYAML(t *testing.T) {
 		})
 	}
 }
+
 func TestCommandLineConfigWithValues(t *testing.T) {
 	interval := time.Minute * 15
 	cfg := &CommandLineConfig{

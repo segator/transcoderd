@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -127,5 +128,56 @@ func TestInvalidWorkerConfigurationFailsBeforeServerContact(t *testing.T) {
 	}
 	if err := applicationRun(&sync.WaitGroup{}, context.Background(), nil); err == nil {
 		t.Error("applicationRun() error = nil, want configuration error")
+	}
+}
+
+func TestScheduleCLIFlagSupportsWeekdayAndWeekendWindows(t *testing.T) {
+	flags := pflag.NewFlagSet("schedule-test", pflag.ContinueOnError)
+	flags.StringArray("schedule", nil, "")
+	args := []string{
+		"--schedule=Mon-Fri@00:00-10:00",
+		"--schedule=Mon-Fri@22:00-24:00",
+		"--schedule=Sat-Sun@00:00-24:00",
+	}
+	if err := flags.Parse(args); err != nil {
+		t.Fatal(err)
+	}
+	schedules, err := flags.GetStringArray("schedule")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerConfig := &config.Config{Schedule: &config.ScheduleConfig{TimeZone: "Europe/Madrid"}}
+	applyScheduleFlag(workerConfig, schedules)
+	if got, want := workerConfig.Schedule.Windows, schedules; len(got) != len(want) {
+		t.Fatalf("schedule windows = %v, want %v", got, want)
+	} else {
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("schedule windows = %v, want %v", got, want)
+			}
+		}
+	}
+	tests := []struct {
+		name string
+		at   string
+		want bool
+	}{
+		{"weekday morning", "2026-10-26T09:00:00+01:00", true},
+		{"weekday daytime", "2026-10-26T12:00:00+01:00", false},
+		{"weekday evening", "2026-10-26T22:00:00+01:00", true},
+		{"Saturday all day", "2026-10-31T12:00:00+01:00", true},
+		{"Sunday all day", "2026-11-01T12:00:00+01:00", true},
+		{"weekday before window", "2026-10-26T21:59:00+01:00", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			at, err := time.Parse(time.RFC3339, tt.at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := workerConfig.AdmissionAllowedAt(at); got != tt.want {
+				t.Errorf("AdmissionAllowedAt(%s) = %v, want %v", tt.at, got, tt.want)
+			}
+		})
 	}
 }

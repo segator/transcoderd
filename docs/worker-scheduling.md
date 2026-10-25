@@ -5,7 +5,7 @@ hours. Use the same CLI schedule arguments on both workers when they should
 follow the same hours. Keep their distinct names, encoders, and concurrency
 limits. Restart each worker after changing its arguments.
 
-## Daily 22:00-10:00 on the CLI
+## Daily schedule example
 
 Supply these same arguments on each worker's Docker command, after the image:
 
@@ -25,8 +25,22 @@ to allow multiple periods, for example `--schedule=22:00-10:00
 --schedule=14:00-16:00`. `--schedule=` clears configured windows. The shortcut
 replaces the schedule windows from YAML if both are supplied. Existing
 `worker.schedule.windows` configuration remains supported, but the Docker
-examples use CLI arguments and need no config mount. Advanced weekly selectors
-are available through `--worker.schedule.windows=Mon-Fri@22:00-10:00`.
+examples use CLI arguments and need no config mount. The `Days@` selector
+syntax also works with repeatable `--schedule` arguments.
+
+## Weekday nights and full weekends
+
+For Monday through Friday, allow new work from midnight to 10:00 and from
+22:00 to midnight. Allow new work all day Saturday and Sunday:
+
+```bash
+--schedule=Mon-Fri@00:00-10:00 --schedule=Mon-Fri@22:00-24:00 --schedule=Sat-Sun@00:00-24:00
+```
+
+The morning and evening windows are split because overnight windows belong to
+their starting day. This gives Monday morning its own weekday selector while
+keeping weekday daytime closed. Set `TZ=Europe/Madrid` in Docker so these
+windows follow the Madrid civil clock.
 
 The shortcut uses the worker process's local timezone. In Docker, set `TZ` to
 an IANA timezone such as `Europe/Madrid`; it is not hardcoded in the worker.
@@ -35,7 +49,7 @@ selection. There is no price lookup or public-holiday calendar.
 
 ## Window rules
 
-- Syntax: daily `HH:MM-HH:MM` or `Days@HH:MM-HH:MM`, with 24-hour clock times and minute precision.
+- Syntax: `HH:MM-HH:MM` for daily windows or `Days@HH:MM-HH:MM` for day-selected windows, with 24-hour clock times and minute precision. Both forms work with repeatable `--schedule` arguments.
 - Days: `*`, `Mon`, `Tue`, `Wed`, `Thu`, `Fri`, `Sat`, `Sun`, or an inclusive
   range such as `Mon-Fri`. Names are case insensitive. A range can wrap through
   Sunday, so `Fri-Mon` covers Friday, Saturday, Sunday, and Monday.

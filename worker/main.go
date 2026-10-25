@@ -67,7 +67,7 @@ func init() {
 	pflag.Duration("worker.stopAfter", 0, "Legacy daily admission end as a duration since midnight, e.g. 22h")
 	pflag.String("worker.schedule.timeZone", "Local", "Admission timezone (IANA name, e.g. Europe/Madrid)")
 	pflag.StringSlice("worker.schedule.windows", nil, "Allowed job-request windows, e.g. 22:00-10:00 or Mon-Fri@00:00-10:00")
-	pflag.StringArray("schedule", nil, "Daily job-request window HH:MM-HH:MM; repeat to add windows; follows the process timezone")
+	pflag.StringArray("schedule", nil, "Job-request window HH:MM-HH:MM or Days@HH:MM-HH:MM; repeat to add windows; follows the process timezone")
 
 	if len(os.Args) > 1 && os.Args[1] == "control" {
 		return

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-25
+goal: Let operators adjust encode concurrency without restarting the worker
+  while serializing non-encode pipeline phases

@@ -63,8 +63,8 @@ server:
 | `worker.name` | Hostname | Worker identity used in events and assignment. |
 | `worker.temporalPath` | OS temporary directory | Parent of `worker-<name>` workspaces. |
 | `worker.threads` | Number of CPUs, capped at 16 | Registered flag; the current encoder does not read this field. See `BASELINE.md`. |
-| `worker.maxActiveJobs` | `2` | Maximum accepted jobs, including jobs before and after encoding; `0` disables new job requests while restored or active jobs continue. Adjustable at runtime with `control set-max-jobs`. |
-| `worker.ffmpegConfig.parallelJobs` | `0` | At startup, inherits `worker.maxActiveJobs`; a positive advanced override limits simultaneous encodes separately. Runtime changes to `worker.maxActiveJobs` do not resize the FFmpeg consumer pool. |
+| `worker.maxActiveJobs` | `2` | Maximum accepted jobs and default FFmpeg encode concurrency. `control set-max-jobs N` changes both live; `0` disables new job requests and leaves the last positive encode target in place. |
+| `worker.ffmpegConfig.parallelJobs` | `0` | Initial FFmpeg encode target: inherits `worker.maxActiveJobs`; a positive advanced override sets the startup target. A positive runtime `control set-max-jobs N` replaces this target. |
 | `worker.ffmpegConfig.threads` | `0` | Value passed to FFmpeg's `-threads` option; zero lets FFmpeg decide. |
 | `worker.ffmpegConfig.videoCodec` | `av1_nvenc` | Selects the AV1 GPU profile, `libsvtav1` CPU profile, or explicit `libx265` rollback. |
 | `worker.ffmpegConfig.videoPreset` | Empty | Profile default: NVENC `p7`, SVT `4`, x265 `medium`. A supplied value must be valid for the selected encoder. |
@@ -82,7 +82,7 @@ server:
 | `worker.schedule.windows` | Empty list | OR of `Days@HH:MM-HH:MM` intervals for new requests; start inclusive, end exclusive. |
 | `--schedule` | No windows | Repeatable `HH:MM-HH:MM` or `Days@HH:MM-HH:MM` CLI shortcut using the process timezone; overrides YAML windows when supplied. |
 
-`worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered but does not control FFmpeg. With no nested `threads` value, the command asks FFmpeg for `-threads 0`. SVT-AV1 also manages its own internal parallelism. `worker.maxActiveJobs` bounds entire in-flight jobs and, by default, simultaneous encodes. The optional `worker.ffmpegConfig.parallelJobs` override separates the encode limit; zero inherits the active-job limit. Set only `maxActiveJobs` to `1` for serial operation. The default permits two GPU encode jobs once two accepted jobs reach that phase. This is a concurrency limit, not a promise of twice the throughput.
+`worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered but does not control FFmpeg. With no nested `threads` value, the command asks FFmpeg for `-threads 0`. SVT-AV1 also manages its own internal parallelism. `worker.maxActiveJobs` bounds accepted end-to-end jobs and, by default, simultaneous encodes. Each non-FFmpeg phase (download, MKV extraction, PGS, verification, and upload) has one job consumer. The optional `worker.ffmpegConfig.parallelJobs` value sets only the initial encode target; zero inherits the active-job limit. A positive runtime `control set-max-jobs N` changes admission and FFmpeg concurrency together. Setting it to zero closes admission but preserves the last positive encode target, so accepted jobs can continue through encoding. Lowering a positive target does not interrupt running encodes; queued encodes wait for an available slot. This is a concurrency limit, not a promise of linearly higher throughput.
 
 The worker image bundles FFmpeg 9.0.2 with `libsvtav1`, `libaom-av1`, and `av1_nvenc`. The default now requires an NVIDIA GPU available to the worker container. On Linux, configure the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) and pass `--gpus all`; WSL2 may require the validated `/dev/dxg` driver mounts described in [the RTX 5080 validation](../docs/av1-nvenc-validation.md). For CPU-only workers select `libsvtav1` explicitly. Invalid combinations fail at worker startup, before accepting jobs. The exact approved full-film argument vector is in [the pilot record](../docs/av1-gpu-full-film-command.md).
 
@@ -182,8 +182,11 @@ CPU: --worker.name cpu-9900x3d --worker.maxActiveJobs 2 --worker.ffmpegConfig.vi
 ```
 
 Omitted video settings resolve to the selected encoder's defaults. Omitted
-`parallelJobs` follows `maxActiveJobs`, so no second concurrency setting is
-needed. Preset/quality overrides remain available for benchmarks and advanced
+`parallelJobs` follows `maxActiveJobs`, so no second startup concurrency
+setting is needed. Runtime `control set-max-jobs N` changes both job admission
+and FFmpeg encode concurrency; zero stops new assignments but leaves the last
+positive encode target in place. Each non-FFmpeg phase processes one job at a
+time per worker. Preset/quality overrides remain available for benchmarks and advanced
 use. Shared `TZ=Europe/Madrid --schedule=22:00-10:00` arguments permit new
 requests nightly on every day, including weekends. See
 [the deployment guide](../docs/worker-deployment.md) for complete CLI-only Docker

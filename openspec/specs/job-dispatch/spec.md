@@ -67,30 +67,34 @@ A worker SHALL request a new job only when its active-job count plus in-flight r
 - **THEN** the worker does not request a job
 
 ### Requirement: Runtime worker admission controls
-A running worker SHALL provide a local command to report admission status, active and reserved job counts, and the current maximum, and to set the maximum to any non-negative integer. These controls SHALL be available without restarting the container and SHALL NOT expose a remotely reachable management endpoint. The controls SHALL affect job admission only; they SHALL NOT freeze active encodes or resize the FFmpeg consumer pool.
+A running worker SHALL provide local controls to report admission, job, and encode counts and set the job maximum to any non-negative integer without restart. A positive value SHALL update admission and the FFmpeg encode target. Zero SHALL stop requests and preserve the previous positive encode target. Lowering the target SHALL let active encodes finish before admitting another. Controls SHALL remain local and SHALL NOT expose a remotely reachable management endpoint.
 
 #### Scenario: Read runtime admission status
 - **WHEN** an operator runs the local status command
-- **THEN** the worker reports whether admission is enabled, active and reserved jobs, the maximum, and whether the schedule permits requests
+- **THEN** the worker reports whether admission is enabled, active and reserved jobs, the job maximum, active and target encodes, and whether the schedule permits requests
 
 #### Scenario: Disable new job requests
 - **WHEN** an operator sets the maximum to zero
-- **THEN** the worker stops starting new requests and leaves active jobs running
+- **THEN** the worker stops new requests and leaves accepted and restored jobs running, including their later FFmpeg phase at the previous positive encode target
 
 #### Scenario: A request is already in flight
 - **WHEN** an operator sets the maximum to zero while a reserved request is waiting for the server
 - **THEN** the worker reports that reservation and does not start further requests; the server may still assign the reserved job
 
 #### Scenario: Change the maximum at runtime
-- **WHEN** an operator sets a positive maximum
-- **THEN** the worker applies it to future job requests without restarting
+- **WHEN** an operator sets a positive maximum different from the current value
+- **THEN** the worker applies it to future job requests and FFmpeg encode concurrency without restarting
+
+#### Scenario: Lower the encode maximum without interruption
+- **WHEN** an operator lowers the maximum below the number of FFmpeg jobs already running
+- **THEN** those encodes continue and no new encode starts until active encodes fall below the new target
 
 #### Scenario: Reject invalid maximum
 - **WHEN** an operator supplies a negative or non-integer maximum
 - **THEN** the command reports an error and leaves the current maximum unchanged
 
 ### Requirement: Bounded concurrent encoding
-The worker SHALL bound simultaneous encoding jobs by the resolved encode limit while preserving a separate workspace, progress, and outcome for each job. `worker.ffmpegConfig.parallelJobs` SHALL default to `0`, meaning inherit `worker.maxActiveJobs`; a positive explicit value SHALL override that encode limit.
+The worker SHALL bound FFmpeg jobs by target and preserve per-job workspace, progress, and outcome. Startup target SHALL use positive `worker.ffmpegConfig.parallelJobs`, else `worker.maxActiveJobs` with minimum one for restored work. Positive runtime `set-max-jobs` SHALL replace the target. Each non-FFmpeg phase SHALL have one consumer.
 
 #### Scenario: Two encode jobs queued
 - **WHEN** two accepted jobs reach the encode phase and the limit is `2`
@@ -99,6 +103,10 @@ The worker SHALL bound simultaneous encoding jobs by the resolved encode limit w
 #### Scenario: Encode limit reached
 - **WHEN** the configured number of encoding jobs is already running
 - **THEN** additional encode jobs wait until a slot is available
+
+#### Scenario: Runtime encode target overrides startup value
+- **WHEN** an operator sets a positive max-jobs value different from the startup encode target
+- **THEN** the FFmpeg target changes to that value while each non-FFmpeg phase continues to process one job at a time
 
 #### Scenario: Default encode concurrency follows admission
 - **WHEN** `worker.maxActiveJobs` is `4` and the encode concurrency override is omitted

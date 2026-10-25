@@ -33,6 +33,7 @@ type JobExecutor struct {
 	mu           sync.RWMutex
 	admissionMu  sync.Mutex
 	client       *serverclient.ServerClient
+	encodePool   *encodeConcurrency
 
 	console       *console.RenderService
 	stepExecutors map[model.NotificationType]*step.Executor
@@ -50,6 +51,7 @@ func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerCli
 		console:       renderService,
 		activeJobs:    0,
 		maxActiveJobs: workerConfig.MaxActiveJobs,
+		encodePool:    newEncodeConcurrency(workerConfig.EncodeParallelJobs()),
 	}
 	stepExecutors := setupStepExecutors(jobExecutor)
 	jobExecutor.stepExecutors = stepExecutors
@@ -155,18 +157,12 @@ func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) {
 func (e *JobExecutor) start(ctx context.Context) {
 	e.resumeJobs()
 	for notificationType, stepExecutor := range e.stepExecutors {
-		consumers := e.stepConsumers(notificationType)
-		for i := 0; i < consumers; i++ {
+		if notificationType == model.FFMPEGSNotification {
+			go e.encodeQueueRoutine(ctx, stepExecutor)
+		} else {
 			go e.stepQueueRoutine(ctx, stepExecutor)
 		}
 	}
-}
-
-func (e *JobExecutor) stepConsumers(notificationType model.NotificationType) int {
-	if notificationType == model.FFMPEGSNotification {
-		return e.workerConfig.EncodeParallelJobs()
-	}
-	return 1
 }
 
 func (e *JobExecutor) stop() {
@@ -249,11 +245,17 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
 	withinSchedule := e.workerConfig.AdmissionAllowedAt(time.Now())
+	var activeEncodes, maxEncodes int
+	if e.encodePool != nil {
+		activeEncodes, maxEncodes = e.encodePool.Status()
+	}
 	return AdmissionStatus{
 		Accepting:      e.maxActiveJobs > 0 && withinSchedule,
 		ActiveJobs:     e.ActiveJobs(),
 		ReservedJobs:   e.reservedJobs,
 		MaxActiveJobs:  e.maxActiveJobs,
+		ActiveEncodes:  activeEncodes,
+		MaxEncodes:     maxEncodes,
 		WithinSchedule: withinSchedule,
 	}
 }
@@ -265,6 +267,9 @@ func (e *JobExecutor) SetMaxActiveJobs(max int) error {
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
 	e.maxActiveJobs = max
+	if max > 0 && e.encodePool != nil {
+		e.encodePool.SetTarget(max)
+	}
 	return nil
 }
 
@@ -358,14 +363,24 @@ func (e *JobExecutor) ActiveJobs() uint32 {
 
 func (e *JobExecutor) stepQueueRoutine(ctx context.Context, stepExecutor *step.Executor) {
 	runStepQueue(ctx, stepExecutor, func(jobCtx *job.Context) {
-		stepExecutor.OnJob(jobCtx)
-		err := e.executeStepActions(ctx, stepExecutor, jobCtx)
-		if err != nil {
-			stepExecutor.OnError(jobCtx, stepExecutor.NotificationType(), err)
-			return
-		}
-		stepExecutor.OnComplete(jobCtx)
+		e.processStep(ctx, stepExecutor, jobCtx)
 	})
+}
+
+func (e *JobExecutor) encodeQueueRoutine(ctx context.Context, stepExecutor *step.Executor) {
+	runDynamicStepQueue(ctx, stepExecutor, e.encodePool, func(jobCtx *job.Context) {
+		e.processStep(ctx, stepExecutor, jobCtx)
+	})
+}
+
+func (e *JobExecutor) processStep(ctx context.Context, stepExecutor *step.Executor, jobCtx *job.Context) {
+	stepExecutor.OnJob(jobCtx)
+	err := e.executeStepActions(ctx, stepExecutor, jobCtx)
+	if err != nil {
+		stepExecutor.OnError(jobCtx, stepExecutor.NotificationType(), err)
+		return
+	}
+	stepExecutor.OnComplete(jobCtx)
 }
 
 func runStepQueue(ctx context.Context, stepExecutor *step.Executor, process func(*job.Context)) {

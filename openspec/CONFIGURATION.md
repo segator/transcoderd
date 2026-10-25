@@ -80,7 +80,7 @@ server:
 | `worker.stopAfter` | `0s` | Optional local time elapsed since midnight after which work is not accepted. |
 | `worker.schedule.timeZone` | `Local` | IANA timezone for advanced weekly admission windows; defaults to the worker process timezone. |
 | `worker.schedule.windows` | Empty list | OR of `Days@HH:MM-HH:MM` intervals for new requests; start inclusive, end exclusive. |
-| `--schedule` | No windows | Repeatable daily `HH:MM-HH:MM` CLI shortcut using the process timezone; overrides YAML windows when supplied. |
+| `--schedule` | No windows | Repeatable `HH:MM-HH:MM` or `Days@HH:MM-HH:MM` CLI shortcut using the process timezone; overrides YAML windows when supplied. |
 
 `worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered but does not control FFmpeg. With no nested `threads` value, the command asks FFmpeg for `-threads 0`. SVT-AV1 also manages its own internal parallelism. `worker.maxActiveJobs` bounds entire in-flight jobs and, by default, simultaneous encodes. The optional `worker.ffmpegConfig.parallelJobs` override separates the encode limit; zero inherits the active-job limit. Set only `maxActiveJobs` to `1` for serial operation. The default permits two GPU encode jobs once two accepted jobs reach that phase. This is a concurrency limit, not a promise of twice the throughput.
 
@@ -90,17 +90,18 @@ The FFmpeg command maps the first video stream, scales width to `min(1920, input
 
 ### Weekly job admission
 
-Use `TZ=Europe/Madrid` and repeatable `--schedule=HH:MM-HH:MM` arguments for
-daily admission windows. For example, `--schedule=22:00-10:00` permits new
-requests every day from 22:00 until 10:00 in the process timezone. Repeated
-flags form an OR, so `--schedule=22:00-10:00 --schedule=14:00-16:00` permits
-both periods. This top-level shortcut replaces `worker.schedule.windows` from
-YAML when supplied. Advanced weekday windows can still use
-`worker.schedule.windows` or `--worker.schedule.windows`; selectors accept
-`*`, a three-letter weekday, or an inclusive weekday range. Overnight windows
-belong to their starting day, starts are inclusive, and ends exclusive.
-`24:00` is allowed only as an end. Civil clock time follows timezone/DST
-transitions; timezone data is bundled. Empty windows disable the restriction.
+Use `TZ=Europe/Madrid` and repeatable `--schedule` arguments for daily or
+day-selected admission windows. For example, `--schedule=22:00-10:00` permits
+new requests every day from 22:00 until 10:00 in the process timezone. Select
+days with `Days@`, such as `--schedule=Mon-Fri@22:00-24:00` and
+`--schedule=Sat-Sun@00:00-24:00`. Repeated flags form an OR. This top-level
+shortcut replaces `worker.schedule.windows` from YAML when supplied. Selectors
+accept `*`, a three-letter weekday, or an inclusive weekday range. Overnight
+windows belong to their starting day, starts are inclusive, and ends exclusive.
+Split weekday morning and evening windows at midnight when both should be
+allowed only on weekdays. `24:00` is allowed only as an end. Civil clock time
+follows timezone/DST transitions; timezone data is bundled. Empty windows
+disable the restriction.
 
 The advanced settings have CLI flags; `--schedule=` clears configured windows.
 Invalid entries, invalid zones, or combining weekly windows with active legacy

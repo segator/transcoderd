@@ -111,6 +111,8 @@ Timestamp and mux options retain the existing worker behavior:
 | `-y` | Write the output in the isolated job workspace without an interactive overwrite prompt. |
 
 Normal verification measures the completed MKV and rejects growth over the
-source or excessive duration mismatch. It does not calculate perceptual
-quality. The [legacy HEVC reference](legacy-hevc-encoding.md) preserves x265
+source. When container durations differ beyond the configured tolerance, the
+worker compares the first video stream's packet timeline to distinguish video
+truncation from longer subtitle or audio tracks. It does not calculate
+perceptual quality. The [legacy HEVC reference](legacy-hevc-encoding.md) preserves x265
 medium/CRF21/main10 for rollback and later benchmark comparisons.

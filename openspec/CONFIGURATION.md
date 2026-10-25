@@ -75,7 +75,7 @@ server:
 | `worker.ffmpegConfig.audioCodec` | `libfdk_aac` | Audio encoder passed per selected stream as `-c:a:N`. |
 | `worker.ffmpegConfig.audioVBR` | `5` | Audio quality passed per selected stream as `-vbr`. |
 | `worker.ffmpegConfig.extraArgs` | Empty string | Inserted into the FFmpeg invocation before input files. |
-| `worker.verifyDeltaTime` | `60` | Maximum absolute source/output duration difference in seconds. |
+| `worker.verifyDeltaTime` | `60` | Maximum allowed source/output video duration difference in seconds. Container mismatches are confirmed against video packet timelines. |
 | `worker.startAfter` | `0s` | Optional local time elapsed since midnight before accepting work. |
 | `worker.stopAfter` | `0s` | Optional local time elapsed since midnight after which work is not accepted. |
 | `worker.schedule.timeZone` | `Local` | IANA timezone for advanced weekly admission windows; defaults to the worker process timezone. |

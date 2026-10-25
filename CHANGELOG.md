@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.1](https://github.com/segator/transcoderd/compare/v2.6.0...v2.6.1) (2026-10-25)
+
+
+### 🐛 Bug Fixes
+
+* **worker:** verify video stream duration on mismatch ([#171](https://github.com/segator/transcoderd/issues/171)) ([01ee596](https://github.com/segator/transcoderd/commit/01ee5960c6ded7575041bd0a89a7f90f1fc4f37a))
+
 ## [2.6.0](https://github.com/segator/transcoderd/compare/v2.5.8...v2.6.0) (2026-10-24)
 
 

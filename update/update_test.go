@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -215,6 +216,36 @@ func TestUpdaterFields(t *testing.T) {
 
 	if *updater.checkInterval != time.Minute*10 {
 		t.Errorf("checkInterval = %v, want %v", *updater.checkInterval, time.Minute*10)
+	}
+}
+
+func TestApplyBinaryUpdateKeepsCanonicalTargetAcrossUpdates(t *testing.T) {
+	targetPath := filepath.Join(t.TempDir(), "transcoderd-worker")
+	if err := os.WriteFile(targetPath, []byte("version one"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	for _, contents := range []string{"version two", "version three"} {
+		if err := applyBinaryUpdate(targetPath, strings.NewReader(contents)); err != nil {
+			t.Fatalf("applyBinaryUpdate(%q) error = %v", contents, err)
+		}
+	}
+
+	got, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(got) != "version three" {
+		t.Errorf("updated executable = %q, want %q", got, "version three")
+	}
+
+	for _, path := range []string{
+		filepath.Join(filepath.Dir(targetPath), ".transcoderd-worker.old"),
+		filepath.Join(filepath.Dir(targetPath), "..transcoderd-worker.old.old"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("unexpected leftover update file %q (stat error = %v)", path, err)
+		}
 	}
 }
 

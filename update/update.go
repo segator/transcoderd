@@ -72,10 +72,14 @@ func NewUpdater(currentVersionString string, assetName string, noUpdates bool, t
 	if err != nil {
 		return nil, err
 	}
+	binaryPath, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		return nil, fmt.Errorf("resolve executable path: %w", err)
+	}
 
 	updater := &Updater{
 		currentVersion: currentVersion,
-		binaryPath:     os.Args[0],
+		binaryPath:     binaryPath,
 		assetName:      assetName,
 		tmpPath:        tmpPath,
 		noUpdates:      noUpdates,
@@ -204,7 +208,15 @@ func (u *Updater) update(githubRelease *GitHubRelease) error {
 		return err
 	}
 
-	return selfupdate.Apply(latestReleaseFile, selfupdate.Options{})
+	return applyBinaryUpdate(u.binaryPath, latestReleaseFile)
+}
+
+// applyBinaryUpdate always targets the canonical executable path. On Linux,
+// resolving the currently running executable can return its renamed .old path
+// after an in-place update, causing subsequent updates to target nested .old
+// files instead of the executable started by the user.
+func applyBinaryUpdate(binaryPath string, update io.Reader) error {
+	return selfupdate.Apply(update, selfupdate.Options{TargetPath: binaryPath})
 }
 
 func downloadAsset(assetURL string, wc io.Writer) error {

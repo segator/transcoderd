@@ -23,15 +23,17 @@ import (
 )
 
 type JobExecutor struct {
-	activeJobs    uint32
-	reservedJobs  int
-	maxActiveJobs int
+	activeJobs      uint32
+	reservedJobs    int
+	maxActiveJobs   int
+	settingsPending bool
 
 	workerConfig *config.Config
 	tempPath     string
 	wg           sync.WaitGroup
 	mu           sync.RWMutex
 	admissionMu  sync.Mutex
+	settingsMu   sync.Mutex
 	client       *serverclient.ServerClient
 	encodePool   *encodeConcurrency
 
@@ -250,7 +252,7 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 		activeEncodes, maxEncodes = e.encodePool.Status()
 	}
 	return AdmissionStatus{
-		Accepting:      e.maxActiveJobs > 0 && withinSchedule,
+		Accepting:      !e.settingsPending && e.maxActiveJobs > 0 && withinSchedule,
 		ActiveJobs:     e.ActiveJobs(),
 		ReservedJobs:   e.reservedJobs,
 		MaxActiveJobs:  e.maxActiveJobs,
@@ -273,6 +275,39 @@ func (e *JobExecutor) SetMaxActiveJobs(max int) error {
 	return nil
 }
 
+func (e *JobExecutor) PersistMaxActiveJobs(max int) error {
+	if max < 0 {
+		return fmt.Errorf("maximum active jobs must be non-negative")
+	}
+	if e.client == nil {
+		return errors.New("worker settings cannot be saved without a server client")
+	}
+	e.settingsMu.Lock()
+	defer e.settingsMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := e.client.SetWorkerMaxActiveJobs(ctx, max); err != nil {
+		return fmt.Errorf("persist maximum active jobs: %w", err)
+	}
+	if err := e.SetMaxActiveJobs(max); err != nil {
+		return err
+	}
+	e.MarkWorkerSettingsResolved()
+	return nil
+}
+
+func (e *JobExecutor) RequireWorkerSettings() {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	e.settingsPending = true
+}
+
+func (e *JobExecutor) MarkWorkerSettingsResolved() {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	e.settingsPending = false
+}
+
 func (e *JobExecutor) ReserveJobSlot() bool {
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
@@ -284,7 +319,7 @@ func (e *JobExecutor) ReserveJobSlot() bool {
 }
 
 func (e *JobExecutor) canReserveJobSlotAt(now time.Time) bool {
-	return e.maxActiveJobs > 0 && e.workerConfig.AdmissionAllowedAt(now) && int(e.ActiveJobs())+e.reservedJobs < e.maxActiveJobs
+	return !e.settingsPending && e.maxActiveJobs > 0 && e.workerConfig.AdmissionAllowedAt(now) && int(e.ActiveJobs())+e.reservedJobs < e.maxActiveJobs
 }
 
 func (e *JobExecutor) WithinAdmissionSchedule() bool {

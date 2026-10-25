@@ -66,6 +66,29 @@ func TestServerWorkerIntegration(t *testing.T) {
 		t.Fatalf("Failed to initialize repository: %v", err)
 	}
 
+	t.Run("Persist worker admission limit", func(t *testing.T) {
+		workerName := fmt.Sprintf("settings-worker-%d", time.Now().UnixNano())
+		if got, err := repo.GetWorkerMaxActiveJobs(ctx, workerName); err != nil || got != nil {
+			t.Fatalf("initial worker limit = %v, %v; want no persisted value", got, err)
+		}
+		for _, want := range []int{0, 3} {
+			if err := repo.SetWorkerMaxActiveJobs(ctx, workerName, want); err != nil {
+				t.Fatalf("persist worker limit %d: %v", want, err)
+			}
+			freshRepo, err := repository.NewSQLRepository(dbConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := freshRepo.GetWorkerMaxActiveJobs(ctx, workerName)
+			if err != nil {
+				t.Fatalf("read persisted worker limit: %v", err)
+			}
+			if got == nil || *got != want {
+				t.Fatalf("persisted worker limit = %v, want %d", got, want)
+			}
+		}
+	})
+
 	tmpDir := t.TempDir()
 
 	testVideoPath := filepath.Join(tmpDir, "test-video.mkv")

@@ -23,7 +23,7 @@ func (f *fakeController) AdmissionStatus() AdmissionStatus {
 	return f.status
 }
 
-func (f *fakeController) SetMaxActiveJobs(max int) error {
+func (f *fakeController) PersistMaxActiveJobs(max int) error {
 	if max < 0 {
 		return os.ErrInvalid
 	}

@@ -11,21 +11,23 @@ import (
 
 // InMemoryRepository implementa Repository en memoria para tests
 type InMemoryRepository struct {
-	mu         sync.RWMutex
-	jobs       map[string]*model.Job
-	events     map[string][]*model.TaskEventType
-	progress   map[string]*model.TaskProgressType
-	workers    map[string]*model.Worker
-	jobsByPath map[string]*model.Job
+	mu            sync.RWMutex
+	jobs          map[string]*model.Job
+	events        map[string][]*model.TaskEventType
+	progress      map[string]*model.TaskProgressType
+	workers       map[string]*model.Worker
+	workerMaxJobs map[string]int
+	jobsByPath    map[string]*model.Job
 }
 
 func NewInMemoryRepository() *InMemoryRepository {
 	return &InMemoryRepository{
-		jobs:       make(map[string]*model.Job),
-		events:     make(map[string][]*model.TaskEventType),
-		progress:   make(map[string]*model.TaskProgressType),
-		workers:    make(map[string]*model.Worker),
-		jobsByPath: make(map[string]*model.Job),
+		jobs:          make(map[string]*model.Job),
+		events:        make(map[string][]*model.TaskEventType),
+		progress:      make(map[string]*model.TaskProgressType),
+		workers:       make(map[string]*model.Worker),
+		workerMaxJobs: make(map[string]int),
+		jobsByPath:    make(map[string]*model.Job),
 	}
 }
 
@@ -254,4 +256,28 @@ func (r *InMemoryRepository) GetWorker(ctx context.Context, name string) (*model
 		return nil, ErrElementNotFound
 	}
 	return worker, nil
+}
+
+func (r *InMemoryRepository) GetWorkerMaxActiveJobs(ctx context.Context, name string) (*int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	max, exists := r.workerMaxJobs[name]
+	if !exists {
+		return nil, nil
+	}
+	return &max, nil
+}
+
+func (r *InMemoryRepository) SetWorkerMaxActiveJobs(ctx context.Context, name string, max int) error {
+	if name == "" {
+		return fmt.Errorf("worker name is required")
+	}
+	if max < 0 {
+		return fmt.Errorf("maximum active jobs must be non-negative")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.workerMaxJobs[name] = max
+	return nil
 }

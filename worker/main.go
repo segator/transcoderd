@@ -158,6 +158,7 @@ func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Upd
 	}
 
 	encodeWorker := worker.NewEncodeWorker(opts.Worker, serverClient, renderService)
+	encodeWorker.RequireWorkerSettings()
 	encodeWorker.Run(wg, ctx)
 	controlServer, err := control.Start(control.SocketPath, encodeWorker)
 	if err != nil {

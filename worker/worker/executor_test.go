@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -49,7 +48,7 @@ func TestReserveJobSlotCombinesLimitAndWindow(t *testing.T) {
 	}
 }
 
-func TestEncodeConsumerLimit(t *testing.T) {
+func TestInitialEncodeConcurrencyUsesConfiguredLimit(t *testing.T) {
 	tests := []struct {
 		name                   string
 		active, override, want int
@@ -63,11 +62,9 @@ func TestEncodeConsumerLimit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := &JobExecutor{workerConfig: &config.Config{MaxActiveJobs: tt.active, EncodeConfig: &config.FFMPEGConfig{ParallelJobs: tt.override}}}
-			if got := e.stepConsumers(model.FFMPEGSNotification); got != tt.want {
-				t.Errorf("stepConsumers(FFMPEG) = %d, want %d", got, tt.want)
-			}
-			if got := e.stepConsumers(model.UploadNotification); got != 1 {
-				t.Errorf("stepConsumers(Upload) = %d, want 1", got)
+			pool := newEncodeConcurrency(e.workerConfig.EncodeParallelJobs())
+			if _, got := pool.Status(); got != tt.want {
+				t.Errorf("initial encode limit = %d, want %d", got, tt.want)
 			}
 		})
 	}
@@ -197,39 +194,31 @@ func TestAdmissionCombinesWeeklyScheduleWithLimit(t *testing.T) {
 	}
 }
 
-func TestParallelStepQueuesOverlapAndKeepJobState(t *testing.T) {
+func TestRuntimeEncodeLimitScalesWithoutInterruptingActiveJobs(t *testing.T) {
 	executor := step.NewStepExecutor(model.FFMPEGSNotification, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	started := make(chan *job.Context, 3)
-	release := make(chan struct{})
-	finished := make(chan *job.Context, 3)
-	var running, peak int32
+	pool := newEncodeConcurrency(2)
+	worker := &JobExecutor{workerConfig: &config.Config{}, maxActiveJobs: 2, encodePool: pool}
+	started := make(chan *job.Context, 4)
+	finished := make(chan *job.Context, 4)
+	release := make(map[*job.Context]chan struct{})
+	jobs := []*job.Context{{}, {}, {}, {}}
+	for _, jobContext := range jobs {
+		release[jobContext] = make(chan struct{})
+		executor.AddJob(jobContext)
+	}
 	process := func(j *job.Context) {
-		current := atomic.AddInt32(&running, 1)
-		for {
-			old := atomic.LoadInt32(&peak)
-			if current <= old || atomic.CompareAndSwapInt32(&peak, old, current) {
-				break
-			}
-		}
 		started <- j
-		<-release
-		atomic.AddInt32(&running, -1)
+		<-release[j]
 		finished <- j
 	}
-	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); runStepQueue(ctx, executor, process) }()
-	}
-	jobs := []*job.Context{{}, {}, {}}
-	for _, j := range jobs {
-		executor.AddJob(j)
-	}
+	go runDynamicStepQueue(ctx, executor, pool, process)
+	startedJobs := make([]*job.Context, 0, 3)
 	for i := 0; i < 2; i++ {
 		select {
-		case <-started:
+		case jobContext := <-started:
+			startedJobs = append(startedJobs, jobContext)
 		case <-time.After(2 * time.Second):
 			t.Fatal("two encoding jobs did not overlap")
 		}
@@ -239,24 +228,96 @@ func TestParallelStepQueuesOverlapAndKeepJobState(t *testing.T) {
 		t.Fatal("third job started before an encode slot was released")
 	case <-time.After(30 * time.Millisecond):
 	}
-	if got := atomic.LoadInt32(&peak); got != 2 {
-		t.Errorf("peak simultaneous jobs = %d, want 2", got)
+	if err := worker.SetMaxActiveJobs(3); err != nil {
+		t.Fatal(err)
 	}
-	close(release)
-	seen := make(map[*job.Context]bool)
-	for i := 0; i < 3; i++ {
-		select {
-		case j := <-finished:
-			seen[j] = true
-		case <-time.After(2 * time.Second):
-			t.Fatal("queued job did not finish")
-		}
+	select {
+	case jobContext := <-started:
+		startedJobs = append(startedJobs, jobContext)
+	case <-time.After(2 * time.Second):
+		t.Fatal("raising the runtime limit did not start the third encoder")
 	}
-	for _, j := range jobs {
-		if !seen[j] {
-			t.Error("job result lost between encoding consumers")
+	if status := worker.AdmissionStatus(); status.MaxEncodes != 3 || status.ActiveEncodes != 3 {
+		t.Errorf("status after raising limit = encodes %d/%d, want 3/3", status.ActiveEncodes, status.MaxEncodes)
+	}
+	if err := worker.SetMaxActiveJobs(1); err != nil {
+		t.Fatal(err)
+	}
+	close(release[startedJobs[0]])
+	<-finished
+	assertNoEncodeStarted(t, started)
+	close(release[startedJobs[1]])
+	<-finished
+	assertNoEncodeStarted(t, started)
+	close(release[startedJobs[2]])
+	<-finished
+	select {
+	case jobContext := <-started:
+		if jobContext != jobs[3] {
+			t.Errorf("queued job = %p, want %p", jobContext, jobs[3])
 		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued encoder did not start after active encodes drained below target")
+	}
+	if status := worker.AdmissionStatus(); status.MaxEncodes != 1 || status.ActiveEncodes != 1 {
+		t.Errorf("status after lowering limit = encodes %d/%d, want 1/1", status.ActiveEncodes, status.MaxEncodes)
+	}
+	close(release[jobs[3]])
+	<-finished
+	if len(startedJobs) != 3 {
+		t.Errorf("started %d encoding jobs before lowering, want 3", len(startedJobs))
 	}
 	cancel()
-	wg.Wait()
+}
+
+func assertNoEncodeStarted(t *testing.T, started <-chan *job.Context) {
+	t.Helper()
+	select {
+	case jobContext := <-started:
+		t.Fatalf("job %p started while active encodes were at the lowered limit", jobContext)
+	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestNonEncodeStepQueueProcessesOneJobAtATime(t *testing.T) {
+	executor := step.NewStepExecutor(model.DownloadNotification, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan *job.Context, 2)
+	release := make(chan struct{})
+	done := make(chan struct{})
+	first, second := &job.Context{}, &job.Context{}
+	executor.AddJob(first)
+	executor.AddJob(second)
+	go func() {
+		runStepQueue(ctx, executor, func(current *job.Context) {
+			started <- current
+			<-release
+		})
+		close(done)
+	}()
+	select {
+	case got := <-started:
+		if got != first {
+			t.Fatalf("first processed job = %p, want %p", got, first)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first non-FFmpeg job did not start")
+	}
+	select {
+	case got := <-started:
+		t.Fatalf("second job %p started before the first finished", got)
+	case <-time.After(30 * time.Millisecond):
+	}
+	release <- struct{}{}
+	select {
+	case got := <-started:
+		if got != second {
+			t.Fatalf("second processed job = %p, want %p", got, second)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second non-FFmpeg job did not start after the first finished")
+	}
+	release <- struct{}{}
+	cancel()
+	<-done
 }

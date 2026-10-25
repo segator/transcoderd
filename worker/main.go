@@ -42,8 +42,8 @@ func init() {
 		defaultThreads = 16
 	}
 	pflag.Int("worker.threads", defaultThreads, "Worker Threads")
-	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum accepted jobs; 0 disables new job requests")
-	pflag.Int("worker.pgsConfig.parallelJobs", 1, "Worker PGS Jobs in parallel")
+	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum accepted jobs and default FFmpeg encode concurrency; 0 disables new job requests")
+	pflag.Int("worker.pgsConfig.parallelJobs", 1, "Maximum PGS OCR actions per job")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
 	pflag.String("worker.pgsConfig.DLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")
 	pflag.String("worker.pgsConfig.tessdataPath", "./tessdata", "tesseract data path")
@@ -58,7 +58,7 @@ func init() {
 	pflag.String("worker.ffmpegConfig.videoProfile", "", "x265 profile; defaults to main10")
 	pflag.Int("worker.ffmpegConfig.videoCQ", 0, "AV1 NVENC CQ; defaults to 38")
 	pflag.Int("worker.ffmpegConfig.videoQMax", 0, "AV1 NVENC maximum QP; defaults to 100")
-	pflag.Int("worker.ffmpegConfig.parallelJobs", 0, "Maximum simultaneous FFmpeg encode jobs (0 inherits worker.maxActiveJobs)")
+	pflag.Int("worker.ffmpegConfig.parallelJobs", 0, "Initial maximum simultaneous FFmpeg encode jobs (0 inherits worker.maxActiveJobs; runtime control overrides it)")
 	pflag.Int("worker.ffmpegConfig.threads", 0, "FFmpeg thread count (0 lets FFmpeg decide)")
 	pflag.String("worker.ffmpegConfig.extraArgs", "", "FFMPEG Extra Args")
 	pflag.Int("worker.verifyDeltaTime", 60, "FFMPEG Verify Delta Time in seconds, is the max range of time that the video can be different from the original, if is superior then the video is marked as invalid")

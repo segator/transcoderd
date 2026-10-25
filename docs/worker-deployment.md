@@ -171,7 +171,10 @@ are not completed movie results.
 
 `maxActiveJobs` includes download, subtitles, encode, verification, and upload.
 With no encode override, four accepted GPU jobs can encode together and two
-accepted CPU jobs can encode together. The server assigns available jobs; it
+accepted CPU jobs can encode together. `control set-max-jobs N` adjusts both
+the admission limit and FFmpeg encode target live; setting zero stops new
+assignments while preserving the current encode target. Each non-FFmpeg phase
+processes one job at a time per worker. The server assigns available jobs; it
 does not route particular titles or source codecs to CPU versus GPU. Increasing
 slots does not multiply throughput linearly. Mixed four-GPU-plus-two-CPU load
 and wall-plug energy have not been measured.

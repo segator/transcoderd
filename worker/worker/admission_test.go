@@ -9,9 +9,11 @@ import (
 )
 
 func testAdmissionWorker(max int) *JobExecutor {
+	workerConfig := &config.Config{MaxActiveJobs: max}
 	return &JobExecutor{
-		workerConfig:  &config.Config{},
+		workerConfig:  workerConfig,
 		maxActiveJobs: max,
+		encodePool:    newEncodeConcurrency(workerConfig.EncodeParallelJobs()),
 	}
 }
 
@@ -39,6 +41,29 @@ func TestZeroMaximumStopsAdmissionAndPositiveMaximumRestoresIt(t *testing.T) {
 		t.Fatal("ReserveJobSlot() failed after admission was re-enabled")
 	}
 	worker.ReleaseJobSlot()
+}
+
+func TestZeroMaximumRetainsEncodeTargetForAcceptedJobs(t *testing.T) {
+	worker := testAdmissionWorker(2)
+	if err := worker.SetMaxActiveJobs(0); err != nil {
+		t.Fatal(err)
+	}
+	status := worker.AdmissionStatus()
+	if status.Accepting || status.MaxEncodes != 2 {
+		t.Errorf("status after disabling admission = accepting %t, encodes %d, want false and 2", status.Accepting, status.MaxEncodes)
+	}
+	if err := worker.SetMaxActiveJobs(1); err != nil {
+		t.Fatal(err)
+	}
+	if got := worker.AdmissionStatus().MaxEncodes; got != 1 {
+		t.Errorf("encode target after setting max to one = %d, want 1", got)
+	}
+	if err := worker.SetMaxActiveJobs(0); err != nil {
+		t.Fatal(err)
+	}
+	if got := worker.AdmissionStatus().MaxEncodes; got != 1 {
+		t.Errorf("zero max changed the encode target to %d, want 1", got)
+	}
 }
 
 func TestLoweredMaximumWaitsForActiveJobs(t *testing.T) {

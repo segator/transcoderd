@@ -31,12 +31,15 @@ func (f *fakeController) SetMaxActiveJobs(max int) error {
 	defer f.mu.Unlock()
 	f.status.MaxActiveJobs = max
 	f.status.Accepting = max > 0
+	if max > 0 {
+		f.status.MaxEncodes = max
+	}
 	return nil
 }
 
 func TestControlCommandsUpdateRunningWorker(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "worker.sock")
-	state := &fakeController{status: AdmissionStatus{Accepting: true, ActiveJobs: 4, MaxActiveJobs: 4}}
+	state := &fakeController{status: AdmissionStatus{Accepting: true, ActiveJobs: 4, MaxActiveJobs: 4, ActiveEncodes: 2, MaxEncodes: 2}}
 	server, err := Start(path, state)
 	if err != nil {
 		t.Fatal(err)
@@ -55,9 +58,9 @@ func TestControlCommandsUpdateRunningWorker(t *testing.T) {
 		args []string
 		want string
 	}{
-		{args: []string{"set-max-jobs", "0"}, want: "max active jobs set to 0; accepting=false"},
-		{args: []string{"set-max-jobs", "1"}, want: "max active jobs set to 1; accepting=true"},
-		{args: []string{"status"}, want: "accepting=true active=4 reserved=0 max=1"},
+		{args: []string{"set-max-jobs", "0"}, want: "max active jobs set to 0; accepting=false encodes=2/2"},
+		{args: []string{"set-max-jobs", "1"}, want: "max active jobs set to 1; accepting=true encodes=2/1"},
+		{args: []string{"status"}, want: "accepting=true active=4 reserved=0 max=1 encodes=2/1"},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.args, "-"), func(t *testing.T) {

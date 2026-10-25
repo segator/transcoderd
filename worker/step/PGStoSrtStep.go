@@ -167,6 +167,7 @@ func init() {
 	langMapping = append(langMapping, PGSTesseractLanguage{"ces", []string{"cze"}})
 	langMapping = append(langMapping, PGSTesseractLanguage{"ron", []string{"rum"}})
 	langMapping = append(langMapping, PGSTesseractLanguage{"nld", []string{"dut", "nl"}})
+	langMapping = append(langMapping, PGSTesseractLanguage{"slv", []string{"slo", "slv", "sl"}})
 }
 
 func calculateTesseractLanguage(language string) string {

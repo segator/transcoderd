@@ -65,6 +65,10 @@ The worker SHALL derive the OCR language from the subtitle language metadata, ma
 - **WHEN** a PGS stream language is `es` or `esp`
 - **THEN** OCR uses `spa`
 
+#### Scenario: Slovenian language aliases
+- **WHEN** a PGS stream language is `slo`, `slv`, or `sl`
+- **THEN** OCR uses Tesseract's `slv` language data
+
 ### Requirement: PGS conversion and empty tracks
 The worker SHALL produce an SRT for each selected PGS stream. It SHALL create an empty valid SRT when the `.sup` file is under 1024 bytes or the OCR tool reports zero displayable segments. For OCR output, it SHALL correct cues whose end time precedes their start time.
 

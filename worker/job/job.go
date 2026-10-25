@@ -3,11 +3,12 @@ package job
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/google/uuid"
+
 	"transcoder/model"
 	"transcoder/worker/ffmpeg"
 )
@@ -87,20 +88,14 @@ func (e *Context) PersistJobContext() error {
 	return eventFile.Sync()
 }
 
-func ReadContextFromDiskByPath(filepath string) *Context {
-	eventFile, err := os.Open(filepath)
+func ReadContextFromDiskByPath(path string) (*Context, error) {
+	b, err := os.ReadFile(path)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("read job context %q: %w", path, err)
 	}
-	defer eventFile.Close()
-	b, err := io.ReadAll(eventFile)
-	if err != nil {
-		panic(err)
+	jobContext := new(Context)
+	if err := json.Unmarshal(b, jobContext); err != nil {
+		return nil, fmt.Errorf("decode job context %q: %w", path, err)
 	}
-	jobContext := &Context{}
-	err = json.Unmarshal(b, jobContext)
-	if err != nil {
-		panic(err)
-	}
-	return jobContext
+	return jobContext, nil
 }

@@ -184,11 +184,55 @@ func (e *JobExecutor) resumeJobs() {
 			return nil
 		}
 		if filepath.Ext(path) == ".json" {
-			filepath.Base(path)
-			jobContext := job.ReadContextFromDiskByPath(path)
-			atomic.AddUint32(&e.activeJobs, 1)
+			jobContext, err := job.ReadContextFromDiskByPath(path)
+			if err != nil {
+				log.WithError(err).Warn("Ignoring unreadable persisted job context")
+				return nil
+			}
+			if jobContext.LastEvent == nil {
+				log.WithField("context_path", path).Warn("Ignoring persisted job context without a last event")
+				return nil
+			}
 
-			e.stepExecutors[jobContext.LastEvent.NotificationType].AddJob(jobContext)
+			notificationType := jobContext.LastEvent.NotificationType
+			if notificationType == model.JobNotification {
+				switch jobContext.LastEvent.Status {
+				case model.AssignedNotificationStatus, model.StartedNotificationStatus:
+					// A worker can stop after persisting Job/started but before it
+					// persists the initial Download phase.
+					notificationType = model.DownloadNotification
+				case model.CompletedNotificationStatus, model.FailedNotificationStatus, model.CanceledNotificationStatus:
+					log.WithFields(log.Fields{
+						"context_path": path,
+						"job_id":       jobContext.JobId.String(),
+						"status":       jobContext.LastEvent.Status,
+					}).Info("Discarding terminal persisted job context")
+					if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+						log.WithError(err).WithField("context_path", path).Warn("Failed to remove terminal job context")
+					}
+					return nil
+				default:
+					log.WithFields(log.Fields{
+						"context_path": path,
+						"job_id":       jobContext.JobId.String(),
+						"status":       jobContext.LastEvent.Status,
+					}).Warn("Ignoring persisted job context with unsupported job status")
+					return nil
+				}
+			}
+
+			stepExecutor, ok := e.stepExecutors[notificationType]
+			if !ok || stepExecutor == nil {
+				log.WithFields(log.Fields{
+					"context_path": path,
+					"job_id":       jobContext.JobId.String(),
+					"phase":        notificationType,
+				}).Warn("Ignoring persisted job context with unsupported phase")
+				return nil
+			}
+
+			atomic.AddUint32(&e.activeJobs, 1)
+			stepExecutor.AddJob(jobContext)
 		}
 
 		return nil
@@ -387,8 +431,13 @@ func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step
 }
 
 func (e *JobExecutor) CleanJob(jobContext *job.Context) error {
+	return e.cleanJob(jobContext.Clean)
+}
+
+func (e *JobExecutor) cleanJob(cleanup func() error) error {
+	err := cleanup()
 	atomic.AddUint32(&e.activeJobs, ^uint32(0))
-	return jobContext.Clean()
+	return err
 }
 
 // ConsoleTrackStep Console tracker to print progress to console

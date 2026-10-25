@@ -121,6 +121,29 @@ func TestResumeJobsSkipsUnreadableAndUnsupportedContexts(t *testing.T) {
 	}
 }
 
+func TestCleanJobReleasesActiveSlotAfterCleanup(t *testing.T) {
+	executor := &JobExecutor{}
+	atomic.StoreUint32(&executor.activeJobs, 1)
+
+	cleaned := false
+	err := executor.cleanJob(func() error {
+		if got := executor.ActiveJobs(); got != 1 {
+			t.Errorf("ActiveJobs() during cleanup = %d, want 1", got)
+		}
+		cleaned = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("cleanJob() error = %v", err)
+	}
+	if !cleaned {
+		t.Fatal("cleanup was not called")
+	}
+	if got := executor.ActiveJobs(); got != 0 {
+		t.Errorf("ActiveJobs() after cleanup = %d, want 0", got)
+	}
+}
+
 func newResumeTestExecutor(t *testing.T) (*JobExecutor, *step.Executor, func(*job.Context) string) {
 	t.Helper()
 	tempPath := filepath.Join(t.TempDir(), "worker-test")

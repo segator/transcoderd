@@ -431,8 +431,13 @@ func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step
 }
 
 func (e *JobExecutor) CleanJob(jobContext *job.Context) error {
+	return e.cleanJob(jobContext.Clean)
+}
+
+func (e *JobExecutor) cleanJob(cleanup func() error) error {
+	err := cleanup()
 	atomic.AddUint32(&e.activeJobs, ^uint32(0))
-	return jobContext.Clean()
+	return err
 }
 
 // ConsoleTrackStep Console tracker to print progress to console

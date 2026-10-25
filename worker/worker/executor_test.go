@@ -2,10 +2,14 @@ package worker
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"transcoder/model"
 	"transcoder/worker/config"
@@ -67,6 +71,86 @@ func TestEncodeConsumerLimit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResumeJobsDiscardsTerminalJobContext(t *testing.T) {
+	executor, downloadExecutor, contextPath := newResumeTestExecutor(t)
+	jobContext := persistResumeTestContext(t, executor.tempPath, model.JobNotification, model.CompletedNotificationStatus)
+
+	executor.resumeJobs()
+
+	if got := executor.ActiveJobs(); got != 0 {
+		t.Errorf("ActiveJobs() = %d, want 0", got)
+	}
+	if got := len(downloadExecutor.GetJobChan()); got != 0 {
+		t.Errorf("queued download jobs = %d, want 0", got)
+	}
+	if _, err := os.Stat(contextPath(jobContext)); !os.IsNotExist(err) {
+		t.Errorf("terminal job context still exists, stat error = %v", err)
+	}
+}
+
+func TestResumeJobsRoutesStartedJobContextToDownload(t *testing.T) {
+	executor, downloadExecutor, _ := newResumeTestExecutor(t)
+	persistResumeTestContext(t, executor.tempPath, model.JobNotification, model.StartedNotificationStatus)
+
+	executor.resumeJobs()
+
+	if got := executor.ActiveJobs(); got != 1 {
+		t.Errorf("ActiveJobs() = %d, want 1", got)
+	}
+	if got := len(downloadExecutor.GetJobChan()); got != 1 {
+		t.Errorf("queued download jobs = %d, want 1", got)
+	}
+}
+
+func TestResumeJobsSkipsUnreadableAndUnsupportedContexts(t *testing.T) {
+	executor, downloadExecutor, _ := newResumeTestExecutor(t)
+	if err := os.WriteFile(filepath.Join(executor.tempPath, "broken.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	persistResumeTestContext(t, executor.tempPath, model.NotificationType("Unknown"), model.StartedNotificationStatus)
+
+	executor.resumeJobs()
+
+	if got := executor.ActiveJobs(); got != 0 {
+		t.Errorf("ActiveJobs() = %d, want 0", got)
+	}
+	if got := len(downloadExecutor.GetJobChan()); got != 0 {
+		t.Errorf("queued download jobs = %d, want 0", got)
+	}
+}
+
+func newResumeTestExecutor(t *testing.T) (*JobExecutor, *step.Executor, func(*job.Context) string) {
+	t.Helper()
+	tempPath := filepath.Join(t.TempDir(), "worker-test")
+	if err := os.MkdirAll(tempPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	downloadExecutor := step.NewStepExecutor(model.DownloadNotification, nil)
+	executor := &JobExecutor{
+		tempPath: tempPath,
+		stepExecutors: map[model.NotificationType]*step.Executor{
+			model.DownloadNotification: downloadExecutor,
+		},
+	}
+	return executor, downloadExecutor, func(jobContext *job.Context) string {
+		return filepath.Join(jobContext.WorkingDir, jobContext.JobId.String()+".json")
+	}
+}
+
+func persistResumeTestContext(t *testing.T, tempPath string, notificationType model.NotificationType, status model.NotificationStatus) *job.Context {
+	t.Helper()
+	jobID := uuid.New()
+	jobContext := job.NewContext(jobID, 0, filepath.Join(tempPath, jobID.String()))
+	if err := jobContext.Init(); err != nil {
+		t.Fatal(err)
+	}
+	jobContext.UpdateEvent(notificationType, status, "")
+	if err := jobContext.PersistJobContext(); err != nil {
+		t.Fatal(err)
+	}
+	return jobContext
 }
 
 func TestAdmissionCombinesWeeklyScheduleWithLimit(t *testing.T) {

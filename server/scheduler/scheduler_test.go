@@ -147,6 +147,9 @@ func TestCompletedJobFinalizesBeforeDeleteOnComplete(t *testing.T) {
 			if stored.Status != string(model.CompletedNotificationStatus) {
 				t.Errorf("stored status = %q, want completed", stored.Status)
 			}
+			if _, err := os.Stat(filepath.Dir(staging)); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("empty upload staging directory remains: %v", err)
+			}
 			_, sourceErr := os.Stat(sourcePath)
 			if deleteSource && !os.IsNotExist(sourceErr) {
 				t.Errorf("source should be deleted after completion, stat error = %v", sourceErr)
@@ -226,11 +229,37 @@ func TestCompletedJobMigratesLegacyStagingAcrossFilesystems(t *testing.T) {
 	if _, err := os.Stat(legacyStage); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("legacy staging file was not cleaned up: %v", err)
 	}
+	if _, err := os.Stat(filepath.Dir(legacyStage)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("empty legacy staging directory remains: %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(mediaRoot, "Film av1.mkv")); err != nil {
 		t.Errorf("final output is missing from media filesystem: %v", err)
 	}
 	if err := scheduler.processEvent(context.Background(), envelope); err != nil {
 		t.Errorf("retry after migration should be idempotent: %v", err)
+	}
+}
+
+func TestRemoveUploadStagingFilePreservesNonEmptyDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".transcoderd-upload")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	finalized := filepath.Join(dir, "finished.upload")
+	remaining := filepath.Join(dir, ".another.upload-attempt.tmp")
+	for _, path := range []string{finalized, remaining} {
+		if err := os.WriteFile(path, []byte("upload"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := removeUploadStagingFile(finalized); err != nil {
+		t.Fatalf("removeUploadStagingFile() failed with a sibling upload present: %v", err)
+	}
+	if _, err := os.Stat(remaining); err != nil {
+		t.Errorf("remaining upload attempt was removed: %v", err)
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Errorf("non-empty upload directory should remain, stat = %v, err = %v", info, err)
 	}
 }
 

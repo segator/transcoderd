@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.7.0](https://github.com/segator/transcoderd/compare/v2.6.1...v2.7.0) (2026-10-25)
+
+
+### 🎉 Features
+
+* **worker:** allow weekday selectors in schedule shortcut ([#175](https://github.com/segator/transcoderd/issues/175)) ([5562695](https://github.com/segator/transcoderd/commit/55626955b26c7894ee32b84bf41bb0c5545f8bec))
+
+
+### 🐛 Bug Fixes
+
+* **worker:** resize encode concurrency at runtime ([#176](https://github.com/segator/transcoderd/issues/176)) ([ed5284b](https://github.com/segator/transcoderd/commit/ed5284b373f4ac9d1a0464f26a8be79a9dbb8400))
+* **worker:** skip terminal contexts during resume ([#173](https://github.com/segator/transcoderd/issues/173)) ([dbc889f](https://github.com/segator/transcoderd/commit/dbc889f661392e5348a7c6b4792cf163957a1e62))
+
+
+### 📝 Documentation
+
+* **openspec:** archive PGS bitmap overflow fix ([#167](https://github.com/segator/transcoderd/issues/167)) ([90a4567](https://github.com/segator/transcoderd/commit/90a4567c941840d9b9f7701bed5c11014ab28d17))
+
 ## [2.6.1](https://github.com/segator/transcoderd/compare/v2.6.0...v2.6.1) (2026-10-25)
 
 

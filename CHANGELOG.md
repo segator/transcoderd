@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.2](https://github.com/segator/transcoderd/compare/v2.7.1...v2.7.2) (2026-10-25)
+
+
+### 🐛 Bug Fixes
+
+* **update:** keep workers available when GitHub is rate limited ([#179](https://github.com/segator/transcoderd/issues/179)) ([aaa9990](https://github.com/segator/transcoderd/commit/aaa999048e4b295fbd66807437209c75ecb6098b))
+
 ## [2.7.1](https://github.com/segator/transcoderd/compare/v2.7.0...v2.7.1) (2026-10-25)
 
 

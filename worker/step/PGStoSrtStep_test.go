@@ -54,3 +54,26 @@ func TestMinPGSFileSize(t *testing.T) {
 		})
 	}
 }
+
+func TestCalculateTesseractLanguage(t *testing.T) {
+	tests := []struct {
+		name     string
+		language string
+		want     string
+	}{
+		{name: "empty defaults to English", language: "", want: "eng"},
+		{name: "Slovenian bibliographic code", language: "slo", want: "slv"},
+		{name: "Slovenian terminological code", language: "slv", want: "slv"},
+		{name: "Slovenian two-letter code", language: "sl", want: "slv"},
+		{name: "Spanish two-letter code", language: "es", want: "spa"},
+		{name: "Spanish bibliographic code", language: "esp", want: "spa"},
+		{name: "unknown code is preserved", language: "xyz", want: "xyz"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := calculateTesseractLanguage(tt.language); got != tt.want {
+				t.Errorf("calculateTesseractLanguage(%q) = %q, want %q", tt.language, got, tt.want)
+			}
+		})
+	}
+}

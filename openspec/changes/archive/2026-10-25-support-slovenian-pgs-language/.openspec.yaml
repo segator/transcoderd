@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-25
+goal: Allow OCR conversion of Slovenian PGS subtitles without a missing-language
+  failure.

@@ -1,7 +1,11 @@
 package ffmpeg
 
 import (
+	"context"
 	"encoding/json"
+	"math"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +36,77 @@ func TestSubtitleIsImageTypeSubtitle(t *testing.T) {
 				t.Errorf("IsImageTypeSubtitle() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPacketTimelineDuration(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+		want  time.Duration
+	}{
+		{
+			name:  "presentation timestamps out of order",
+			lines: []string{"2.000000,1.900000,0.100000", "1.900000,2.000000,0.100000"},
+			want:  200 * time.Millisecond,
+		},
+		{
+			name:  "uses decode timestamp when presentation timestamp is unavailable",
+			lines: []string{"N/A,10.000000,0.040000", "N/A,10.040000,0.040000"},
+			want:  80 * time.Millisecond,
+		},
+		{
+			name:  "ignores malformed timestamp rows",
+			lines: []string{"bad,N/A,N/A", "1.000000,1.000000,0.500000"},
+			want:  500 * time.Millisecond,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var timeline packetTimeline
+			for _, line := range tt.lines {
+				timeline.add(line)
+			}
+			if !timeline.hasPackets {
+				t.Fatal("packetTimeline has no packets, want usable timestamps")
+			}
+			got := time.Duration(math.Round((timeline.lastEnd - timeline.firstStart) * float64(time.Second)))
+			if got != tt.want {
+				t.Errorf("packet timeline duration = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPacketTimelineIgnoresRowsWithoutTimestamps(t *testing.T) {
+	var timeline packetTimeline
+	timeline.add("N/A,N/A,N/A")
+	if timeline.hasPackets {
+		t.Fatal("packetTimeline has packets, want no usable timestamps")
+	}
+}
+
+func TestProbeVideoDurationWithFFprobe(t *testing.T) {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is unavailable")
+	}
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe is unavailable")
+	}
+
+	path := filepath.Join(t.TempDir(), "video.mkv")
+	command := exec.Command(ffmpegPath, "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:r=2:d=1", "-c:v", "ffv1", "-f", "matroska", "-y", path)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("generate test video: %v: %s", err, output)
+	}
+
+	got, err := ProbeVideoDuration(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ProbeVideoDuration() error = %v", err)
+	}
+	if got != time.Second {
+		t.Errorf("ProbeVideoDuration() = %s, want %s", got, time.Second)
 	}
 }
 

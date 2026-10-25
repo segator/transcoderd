@@ -1,12 +1,14 @@
 package ffmpeg
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"gopkg.in/vansante/go-ffprobe.v2"
+	"math"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -145,6 +147,92 @@ func ExtractFFProbeData(ctx context.Context, inputFile string) (data *ffprobe.Pr
 		return nil, fmt.Errorf("error parsing ffprobe output: %w", err)
 	}
 	return data, nil
+}
+
+// ProbeVideoDuration measures the first video's presentation timeline from its
+// packets. Container durations can include subtitle or audio tails and are not
+// reliable for checking whether an encoded video was truncated.
+func ProbeVideoDuration(ctx context.Context, inputFile string) (time.Duration, error) {
+	args := []string{
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_packets",
+		"-show_entries", "packet=pts_time,dts_time,duration_time",
+		"-of", "csv=p=0",
+		inputFile,
+	}
+	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return 0, fmt.Errorf("create ffprobe output pipe: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return 0, fmt.Errorf("start ffprobe: %w", err)
+	}
+
+	var timeline packetTimeline
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		timeline.add(scanner.Text())
+	}
+	scanErr := scanner.Err()
+	waitErr := cmd.Wait()
+	if scanErr != nil {
+		return 0, fmt.Errorf("read ffprobe packet output: %w", scanErr)
+	}
+	if waitErr != nil {
+		return 0, fmt.Errorf("ffprobe packet scan failed: %s: %w", strings.TrimSpace(stderr.String()), waitErr)
+	}
+	if !timeline.hasPackets {
+		return 0, errors.New("ffprobe packet scan found no usable video timestamps")
+	}
+	duration := time.Duration(math.Round((timeline.lastEnd - timeline.firstStart) * float64(time.Second)))
+	if duration <= 0 {
+		return 0, fmt.Errorf("ffprobe packet scan produced invalid video duration %s", duration)
+	}
+	return duration, nil
+}
+
+type packetTimeline struct {
+	firstStart float64
+	lastEnd    float64
+	hasPackets bool
+}
+
+func (p *packetTimeline) add(line string) {
+	fields := strings.Split(line, ",")
+	if len(fields) < 3 {
+		return
+	}
+	start, ok := parsePacketTime(fields[0])
+	if !ok {
+		start, ok = parsePacketTime(fields[1])
+	}
+	if !ok {
+		return
+	}
+	duration, ok := parsePacketTime(fields[2])
+	if !ok || duration < 0 {
+		duration = 0
+	}
+	if !p.hasPackets || start < p.firstStart {
+		p.firstStart = start
+	}
+	if !p.hasPackets || start+duration > p.lastEnd {
+		p.lastEnd = start + duration
+	}
+	p.hasPackets = true
+}
+
+func parsePacketTime(value string) (float64, bool) {
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+		return 0, false
+	}
+	return parsed, true
 }
 
 var invertedFieldRegex = regexp.MustCompile(`"inverted"\s*:\s*(\d+)`)

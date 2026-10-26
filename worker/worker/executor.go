@@ -23,21 +23,28 @@ import (
 )
 
 type JobExecutor struct {
-	activeJobs    uint32
-	reservedJobs  int
-	maxActiveJobs int
+	activeJobs      uint32
+	reservedJobs    int
+	maxActiveJobs   int
+	settingsPending bool
 
 	workerConfig *config.Config
 	tempPath     string
 	wg           sync.WaitGroup
 	mu           sync.RWMutex
 	admissionMu  sync.Mutex
+	settingsMu   sync.Mutex
 	client       *serverclient.ServerClient
 	encodePool   *encodeConcurrency
 
 	console       *console.RenderService
 	stepExecutors map[model.NotificationType]*step.Executor
 }
+
+// pipelineBufferJobs keeps one job available for encoding while allowing a
+// recently encoded job to finish verification/upload. The buffer is bounded
+// so slower downstream stages cannot grow the worker's queue without limit.
+const pipelineBufferJobs = 2
 
 func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerClient, renderService *console.RenderService) *JobExecutor {
 	tempPath := filepath.Join(workerConfig.TemporalPath, fmt.Sprintf("worker-%s", workerConfig.Name))
@@ -245,18 +252,24 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
 	withinSchedule := e.workerConfig.AdmissionAllowedAt(time.Now())
-	var activeEncodes, maxEncodes int
+	var activeEncodes int
+	maxEncodes := e.maxActiveJobs
 	if e.encodePool != nil {
 		activeEncodes, maxEncodes = e.encodePool.Status()
 	}
+	maxAccepted := 0
+	if e.maxActiveJobs > 0 {
+		maxAccepted = maxAcceptedJobs(maxEncodes)
+	}
 	return AdmissionStatus{
-		Accepting:      e.maxActiveJobs > 0 && withinSchedule,
-		ActiveJobs:     e.ActiveJobs(),
-		ReservedJobs:   e.reservedJobs,
-		MaxActiveJobs:  e.maxActiveJobs,
-		ActiveEncodes:  activeEncodes,
-		MaxEncodes:     maxEncodes,
-		WithinSchedule: withinSchedule,
+		Accepting:       !e.settingsPending && e.maxActiveJobs > 0 && withinSchedule,
+		ActiveJobs:      e.ActiveJobs(),
+		ReservedJobs:    e.reservedJobs,
+		MaxActiveJobs:   e.maxActiveJobs,
+		MaxAcceptedJobs: maxAccepted,
+		ActiveEncodes:   activeEncodes,
+		MaxEncodes:      maxEncodes,
+		WithinSchedule:  withinSchedule,
 	}
 }
 
@@ -273,6 +286,39 @@ func (e *JobExecutor) SetMaxActiveJobs(max int) error {
 	return nil
 }
 
+func (e *JobExecutor) PersistMaxActiveJobs(max int) error {
+	if max < 0 {
+		return fmt.Errorf("maximum active jobs must be non-negative")
+	}
+	if e.client == nil {
+		return errors.New("worker settings cannot be saved without a server client")
+	}
+	e.settingsMu.Lock()
+	defer e.settingsMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := e.client.SetWorkerMaxActiveJobs(ctx, max); err != nil {
+		return fmt.Errorf("persist maximum active jobs: %w", err)
+	}
+	if err := e.SetMaxActiveJobs(max); err != nil {
+		return err
+	}
+	e.MarkWorkerSettingsResolved()
+	return nil
+}
+
+func (e *JobExecutor) RequireWorkerSettings() {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	e.settingsPending = true
+}
+
+func (e *JobExecutor) MarkWorkerSettingsResolved() {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	e.settingsPending = false
+}
+
 func (e *JobExecutor) ReserveJobSlot() bool {
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
@@ -284,7 +330,25 @@ func (e *JobExecutor) ReserveJobSlot() bool {
 }
 
 func (e *JobExecutor) canReserveJobSlotAt(now time.Time) bool {
-	return e.maxActiveJobs > 0 && e.workerConfig.AdmissionAllowedAt(now) && int(e.ActiveJobs())+e.reservedJobs < e.maxActiveJobs
+	if e.settingsPending || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
+		return false
+	}
+	encodeTarget := e.maxActiveJobs
+	if e.encodePool != nil {
+		_, encodeTarget = e.encodePool.Status()
+	}
+	return uint64(e.ActiveJobs())+uint64(e.reservedJobs) < uint64(maxAcceptedJobs(encodeTarget))
+}
+
+func maxAcceptedJobs(encodeTarget int) int {
+	if encodeTarget <= 0 {
+		return 0
+	}
+	maxInt := int(^uint(0) >> 1)
+	if encodeTarget > maxInt-pipelineBufferJobs {
+		return maxInt
+	}
+	return encodeTarget + pipelineBufferJobs
 }
 
 func (e *JobExecutor) WithinAdmissionSchedule() bool {

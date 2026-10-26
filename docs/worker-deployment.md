@@ -171,15 +171,27 @@ describes the exact current defaults. Whole-film follow-up measurements will
 determine the recommended general CPU preset; the prior short-scene projections
 are not completed movie results.
 
-`maxActiveJobs` includes download, subtitles, encode, verification, and upload.
-With no encode override, four accepted GPU jobs can encode together and two
-accepted CPU jobs can encode together. `control set-max-jobs N` adjusts both
-the admission limit and FFmpeg encode target live; setting zero stops new
-assignments while preserving the current encode target. Each non-FFmpeg phase
-processes one job at a time per worker. The server assigns available jobs; it
-does not route particular titles or source codecs to CPU versus GPU. Increasing
-slots does not multiply throughput linearly. Mixed four-GPU-plus-two-CPU load
-and wall-plug energy have not been measured.
+`maxActiveJobs` sets the default FFmpeg encode target. A positive
+`parallelJobs` override changes the effective target. The worker may accept
+up to two additional pipeline jobs, allowing source preparation and
+verification/upload to overlap encoding without creating an unbounded queue.
+Thus a GPU worker set to four can have up to six accepted jobs, while no more
+than four encode at once. `control status` reports both `max_jobs` and
+`admitted_limit`. `control set-max-jobs N` adjusts the encode target and
+admission ceiling live; setting zero stops new assignments while preserving
+the current encode target. Each non-FFmpeg phase processes one job at a time per worker. The
+server assigns available jobs; it does not route particular titles or source
+codecs to CPU versus GPU. Increasing slots does not multiply throughput
+linearly. Mixed four-GPU-plus-two-CPU load and wall-plug energy have not been
+measured.
+
+The control command also persists the desired limit on the server under the
+worker's `--worker.name`, so it survives container restarts and image updates.
+The configured `--worker.maxActiveJobs` value is used until the first runtime
+change is saved. Use `control set-max-jobs 0` to pause new assignments and a
+positive value to resume at that capacity. The command reports an error without
+changing the running limit if the server cannot save the value. The updater's
+temporary drain-to-zero is process-local and does not change the saved limit.
 
 ## What the build pipeline does
 

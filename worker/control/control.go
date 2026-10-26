@@ -13,18 +13,19 @@ import (
 )
 
 type AdmissionStatus struct {
-	Accepting      bool   `json:"accepting"`
-	ActiveJobs     uint32 `json:"activeJobs"`
-	ReservedJobs   int    `json:"reservedJobs"`
-	MaxActiveJobs  int    `json:"maxActiveJobs"`
-	ActiveEncodes  int    `json:"activeEncodes"`
-	MaxEncodes     int    `json:"maxEncodes"`
-	WithinSchedule bool   `json:"withinSchedule"`
+	Accepting       bool   `json:"accepting"`
+	ActiveJobs      uint32 `json:"activeJobs"`
+	ReservedJobs    int    `json:"reservedJobs"`
+	MaxActiveJobs   int    `json:"maxActiveJobs"`
+	MaxAcceptedJobs int    `json:"maxAcceptedJobs"`
+	ActiveEncodes   int    `json:"activeEncodes"`
+	MaxEncodes      int    `json:"maxEncodes"`
+	WithinSchedule  bool   `json:"withinSchedule"`
 }
 
 type AdmissionController interface {
 	AdmissionStatus() AdmissionStatus
-	SetMaxActiveJobs(int) error
+	PersistMaxActiveJobs(int) error
 }
 
 type request struct {
@@ -85,7 +86,7 @@ func (s *Server) handle(conn net.Conn) {
 	switch req.Command {
 	case "status":
 	case "set-max-jobs":
-		if err := s.state.SetMaxActiveJobs(req.MaxJobs); err != nil {
+		if err := s.state.PersistMaxActiveJobs(req.MaxJobs); err != nil {
 			result.Error = err.Error()
 		}
 	default:
@@ -142,9 +143,9 @@ func runCLI(args []string, output io.Writer, socketPath string) error {
 		return errors.New(result.Error)
 	}
 	if req.Command == "status" {
-		_, err = fmt.Fprintf(output, "accepting=%t active=%d reserved=%d max=%d encodes=%d/%d within_schedule=%t\n", result.Status.Accepting, result.Status.ActiveJobs, result.Status.ReservedJobs, result.Status.MaxActiveJobs, result.Status.ActiveEncodes, result.Status.MaxEncodes, result.Status.WithinSchedule)
+		_, err = fmt.Fprintf(output, "accepting=%t active=%d reserved=%d max_jobs=%d admitted_limit=%d encodes=%d/%d within_schedule=%t\n", result.Status.Accepting, result.Status.ActiveJobs, result.Status.ReservedJobs, result.Status.MaxActiveJobs, result.Status.MaxAcceptedJobs, result.Status.ActiveEncodes, result.Status.MaxEncodes, result.Status.WithinSchedule)
 		return err
 	}
-	_, err = fmt.Fprintf(output, "max active jobs set to %d; accepting=%t encodes=%d/%d\n", result.Status.MaxActiveJobs, result.Status.Accepting, result.Status.ActiveEncodes, result.Status.MaxEncodes)
+	_, err = fmt.Fprintf(output, "max jobs set to %d; admitted_limit=%d; accepting=%t encodes=%d/%d\n", result.Status.MaxActiveJobs, result.Status.MaxAcceptedJobs, result.Status.Accepting, result.Status.ActiveEncodes, result.Status.MaxEncodes)
 	return err
 }

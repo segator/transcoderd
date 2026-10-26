@@ -2,6 +2,7 @@ package serverclient
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,6 +104,58 @@ func (s *ServerClient) RequestJob() (*model.RequestJobResponse, error) {
 	return job, nil
 }
 
+type WorkerSettings struct {
+	MaxActiveJobs *int `json:"maxActiveJobs"`
+}
+
+func (s *ServerClient) GetWorkerSettings(ctx context.Context) (*WorkerSettings, error) {
+	req, err := s.requestWithContext(ctx, http.MethodGet, "/api/v1/worker/settings", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("workerName", s.workerName)
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("error reading worker settings: %s", resp.Status)
+	}
+	var settings WorkerSettings
+	if err := json.NewDecoder(resp.Body).Decode(&settings); err != nil {
+		return nil, fmt.Errorf("decode worker settings: %w", err)
+	}
+	if settings.MaxActiveJobs != nil && *settings.MaxActiveJobs < 0 {
+		return nil, fmt.Errorf("server returned invalid max active jobs %d", *settings.MaxActiveJobs)
+	}
+	return &settings, nil
+}
+
+func (s *ServerClient) SetWorkerMaxActiveJobs(ctx context.Context, max int) error {
+	if max < 0 {
+		return fmt.Errorf("maximum active jobs must be non-negative")
+	}
+	body, err := json.Marshal(WorkerSettings{MaxActiveJobs: &max})
+	if err != nil {
+		return err
+	}
+	req, err := s.requestWithContext(ctx, http.MethodPut, "/api/v1/worker/settings", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("workerName", s.workerName)
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("error saving worker settings: %s", resp.Status)
+	}
+	return nil
+}
+
 func (s *ServerClient) GetURL(uri string) string {
 	return fmt.Sprintf("%s%s", s.webServerConfig.Domain, uri)
 }
@@ -112,7 +165,11 @@ func (s *ServerClient) GetBaseDomain() string {
 }
 
 func (s *ServerClient) request(method string, uri string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, s.GetURL(uri), body)
+	return s.requestWithContext(context.Background(), method, uri, body)
+}
+
+func (s *ServerClient) requestWithContext(ctx context.Context, method string, uri string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, s.GetURL(uri), body)
 	if err != nil {
 		fmt.Printf("Error creating request: %v\n", err)
 		return nil, err

@@ -578,7 +578,7 @@ func (s *supervisor) serve(ctx context.Context, owner string) error {
 	if _, err := windows.StringToSid(owner); err != nil {
 		return err
 	}
-	listener, err := winio.ListenPipe(pipePrefix+owner+s.pipeSuffix, &winio.PipeConfig{SecurityDescriptor: "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;" + owner + ")"})
+	listener, err := winio.ListenPipe(pipePrefix+owner+s.pipeSuffix, &winio.PipeConfig{SecurityDescriptor: "O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;" + owner + ")"})
 	if err != nil {
 		return err
 	}

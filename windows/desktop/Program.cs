@@ -110,17 +110,25 @@ internal sealed class MainForm : Form
             core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
             core.WebMessageReceived += async (_, e) => await HandleMessage(e);
             if (smoke) core.NavigationCompleted += async (_, e) => {
-                bool ok = e.IsSuccess;
-                for (int i = 0; ok && i < 80; i++) {
-                    string state = rejectSmoke ? "error" : "online";
-                    string result = await core.ExecuteScriptAsync($"Boolean(document.getElementById('settings-form') && document.getElementById('job-list') && document.getElementById('connection').classList.contains('{state}'))");
-                    if (result == "true") { Environment.ExitCode = 0; Quit(); return; }
-                    await Task.Delay(250);
-                }
-                Environment.ExitCode = 1; Quit();
+                try {
+                    bool ok = e.IsSuccess;
+                    for (int i = 0; ok && i < 80; i++) {
+                        string state = rejectSmoke ? "error" : "online";
+                        string result = await core.ExecuteScriptAsync($"Boolean(document.getElementById('settings-form') && document.getElementById('job-list') && document.getElementById('connection').classList.contains('{state}'))");
+                        if (result == "true") { Environment.ExitCode = 0; Quit(); return; }
+                        await Task.Delay(250);
+                    }
+                    string details = await core.ExecuteScriptAsync("JSON.stringify({ready:document.readyState,connection:document.getElementById('connection')?.className,text:document.getElementById('connection')?.innerText,serviceError:window.__lastServiceError,settings:!!document.getElementById('settings-form'),jobs:!!document.getElementById('job-list')})");
+                    FailSmoke($"Navigation success: {e.IsSuccess}; web error: {e.WebErrorStatus}; browser: {core.Environment.BrowserVersionString}; document: {details}");
+                } catch (Exception ex) { FailSmoke(ex.ToString()); }
             };
             core.Navigate("https://" + Host + "/index.html");
-        } catch (Exception ex) { if (smoke) { Environment.ExitCode = 1; Quit(); return; } ShowWindow(); MessageBox.Show("Could not start the web interface. Make sure Microsoft Edge WebView2 Runtime is installed.\n\n" + ex.Message, "TranscoderD", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        } catch (Exception ex) { if (smoke) { FailSmoke(ex.ToString()); return; } ShowWindow(); MessageBox.Show("Could not start the web interface. Make sure Microsoft Edge WebView2 Runtime is installed.\n\n" + ex.Message, "TranscoderD", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+    private void FailSmoke(string details)
+    {
+        try { File.WriteAllText(Path.Combine(Path.GetTempPath(), $"TranscoderD-tray-smoke-{Environment.ProcessId}.log"), details); } catch { }
+        Environment.ExitCode = 1; Quit();
     }
     private static bool IsLocal(string value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == "https" && uri.Host == Host && uri.Port == 443;
     private async Task HandleMessage(CoreWebView2WebMessageReceivedEventArgs e)

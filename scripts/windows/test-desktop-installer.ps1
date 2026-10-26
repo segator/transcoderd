@@ -29,9 +29,14 @@ try {
  $service=Get-Service TranscoderDWorker; if ($service.Status -ne 'Running') { $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30)) }
  $status=Invoke-Desktop @{command='status'}; if ($status.configured) { throw 'Expected a clean service.' }
  $ui=Start-Process -FilePath (Join-Path $install 'transcoderd-tray.exe') -ArgumentList '--smoke' -PassThru
+ $diagnostic = Join-Path $env:TEMP ("TranscoderD-tray-smoke-{0}.log" -f $ui.Id)
+ Remove-Item -LiteralPath $diagnostic -Force -ErrorAction SilentlyContinue
  $null=$ui.Handle
  if (-not $ui.WaitForExit(30000)) { Stop-Process -Id $ui.Id -Force; throw 'Tray web UI smoke test timed out.' }
- $ui.Refresh(); if ($ui.ExitCode -ne 0) { throw "Tray web UI smoke test failed: $($ui.ExitCode)" }
+ $ui.Refresh(); if ($ui.ExitCode -ne 0) {
+  if (Test-Path $diagnostic) { Get-Content -LiteralPath $diagnostic }
+  throw "Tray web UI smoke test failed: $($ui.ExitCode)"
+ }
  Stop-Service TranscoderDWorker; (Get-Service TranscoderDWorker).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))
  $fakeDir = Join-Path $env:RUNNER_TEMP ('TranscoderD fake service ' + [guid]::NewGuid().ToString('N'))
  New-Item -ItemType Directory -Path $fakeDir | Out-Null

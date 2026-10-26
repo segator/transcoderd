@@ -66,7 +66,7 @@ function render(status) {
 async function refresh() {
   if (polling) return; polling = true;
   try { render(await request('status')); }
-  catch (_) { $('connection').className = 'connection error'; $('connection').innerHTML = '<i></i> Service disconnected'; $('notice').classList.remove('hidden'); $('notice-text').textContent = 'The Windows service is unavailable.'; $('notice-start').classList.remove('hidden'); $('notice-settings').classList.add('hidden'); $('toggle-pause').disabled = true; }
+  catch (error) { window.__lastServiceError = String(error?.message || error); $('connection').className = 'connection error'; $('connection').innerHTML = '<i></i> Service disconnected'; $('notice').classList.remove('hidden'); $('notice-text').textContent = 'The Windows service is unavailable.'; $('notice-start').classList.remove('hidden'); $('notice-settings').classList.add('hidden'); $('toggle-pause').disabled = true; }
   finally { polling = false; }
 }
 $('refresh').addEventListener('click', refresh);

@@ -273,7 +273,7 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 		if r, err := control.Call("", control.Request{Command: "status"}); err == nil {
 			status.Worker = &r.Status
 		} else {
-			status.Message = "El worker está arrancando o no responde"
+			status.Message = "The worker is starting or not responding"
 		}
 	}
 	return status
@@ -290,7 +290,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 	defer s.mu.Unlock()
 	result := desktop.Response{}
 	if s.maintenance && (req.Command == "configure" || req.Command == "set-max-jobs") {
-		result.Error = "Se está preparando una instalación o actualización"
+		result.Error = "An installation or upgrade is being prepared"
 		result.Status = s.snapshotLocked()
 		return result
 	}
@@ -298,13 +298,13 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 	case "status":
 	case "shutdown-test":
 		if s.testCancel == nil {
-			result.Error = "Comando desconocido"
+			result.Error = "Unknown command"
 		} else {
 			go func() { time.Sleep(200 * time.Millisecond); s.testCancel() }()
 		}
 	case "configure":
 		if req.Settings == nil {
-			result.Error = "Falta la configuración"
+			result.Error = "Settings are missing"
 			break
 		}
 		value := *req.Settings
@@ -334,29 +334,29 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 			next.PendingLimit = true
 		}
 		if err := desktop.Save(s.dir, next); err != nil {
-			result.Error = "No se pudieron guardar los ajustes"
+			result.Error = "Could not save settings"
 			break
 		}
 		s.state = next
 	case "set-max-jobs":
 		if req.MaxJobs < 0 || req.MaxJobs > 64 {
-			result.Error = "El número de encodes debe estar entre 0 y 64"
+			result.Error = "The number of concurrent encodes must be between 0 and 64"
 			break
 		}
 		if s.state.Active == nil {
-			result.Error = "Configura primero el servidor"
+			result.Error = "Configure the server first"
 			break
 		}
 		if s.state.Pending != nil {
-			result.Error = "Hay una configuración pendiente de aplicar"
+			result.Error = "Settings are waiting to be applied"
 			break
 		}
 		if s.child == nil {
-			result.Error = "El worker no está conectado"
+			result.Error = "The worker is not connected"
 			break
 		}
 		if _, err := control.Call("", control.Request{Command: "set-max-jobs", MaxJobs: req.MaxJobs}); err != nil {
-			result.Error = "No se pudo cambiar el límite en el servidor"
+			result.Error = "Could not change the server limit"
 			break
 		}
 		next := s.state
@@ -365,7 +365,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		next.Active = &copy
 		next.PendingLimit = false
 		if err := desktop.Save(s.dir, next); err != nil {
-			result.Error = "El límite cambió, pero no se pudo guardar localmente"
+			result.Error = "The limit changed, but could not be saved locally"
 			break
 		}
 		s.state = next
@@ -374,12 +374,12 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		if s.child != nil {
 			r, err := control.Call("", control.Request{Command: "drain"})
 			if err != nil || r.Status.ActiveJobs != 0 || r.Status.ReservedJobs != 0 {
-				result.Error = "Hay trabajos activos; terminarán antes de poder instalar. Vuelve a intentarlo después."
+				result.Error = "Jobs are still running. Wait for them to finish and try again."
 				s.maintenance = false
 			}
 		}
 	default:
-		result.Error = "Comando desconocido"
+		result.Error = "Unknown command"
 	}
 	result.Status = s.snapshotLocked()
 	return result
@@ -394,7 +394,7 @@ func (s *supervisor) run(ctx context.Context) {
 		if !s.maintenance && s.child == nil && s.state.Active != nil {
 			if s.state.Pending == nil && s.state.PendingLimit {
 				if err := persistInitialLimit(ctx, *s.state.Active); err != nil {
-					s.message = "No se pudo conectar al servidor o guardar el límite; se reintentará"
+					s.message = "Could not connect to the server or save the limit; retrying"
 					s.mu.Unlock()
 					select {
 					case <-ctx.Done():
@@ -406,7 +406,7 @@ func (s *supervisor) run(ctx context.Context) {
 				next := s.state
 				next.PendingLimit = false
 				if err := desktop.Save(s.dir, next); err != nil {
-					s.message = "No se pudo guardar el estado de configuración"
+					s.message = "Could not save configuration state"
 					s.mu.Unlock()
 					select {
 					case <-ctx.Done():
@@ -418,14 +418,14 @@ func (s *supervisor) run(ctx context.Context) {
 				s.state = next
 			}
 			if err := desktop.WorkerConfig(s.dir, *s.state.Active); err != nil {
-				s.message = "No se pudo preparar la configuración del worker"
+				s.message = "Could not prepare the worker configuration"
 			} else {
 				cmd := exec.Command(s.worker, "--noUpdates")
 				cmd.Dir = s.dir
 				cmd.Env = append(os.Environ(), "TRANSCODERD_INTERNAL_CONFIG="+filepath.Join(s.dir, "config.yaml"))
 				logFile, logErr := os.OpenFile(filepath.Join(s.dir, "worker.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 				if logErr != nil {
-					s.message = "No se pudo abrir el registro del worker"
+					s.message = "Could not open the worker log"
 					s.mu.Unlock()
 					select {
 					case <-ctx.Done():
@@ -438,7 +438,7 @@ func (s *supervisor) run(ctx context.Context) {
 				cmd.Stderr = logFile
 				if err = cmd.Start(); err != nil {
 					_ = logFile.Close()
-					s.message = "No se pudo iniciar el worker"
+					s.message = "Could not start the worker"
 				} else {
 					s.child = cmd
 					s.pendingDrain = false
@@ -499,10 +499,10 @@ func (s *supervisor) run(ctx context.Context) {
 				if desktop.Save(s.dir, next) == nil {
 					s.state = next
 				} else {
-					s.message = "No se pudieron aplicar los ajustes pendientes"
+					s.message = "Could not apply pending settings"
 				}
 			} else if err != nil {
-				s.message = "El worker se ha detenido; se reintentará"
+				s.message = "The worker stopped; retrying"
 			}
 			s.readyToApply = false
 			s.mu.Unlock()
@@ -601,7 +601,7 @@ func (s *supervisor) handleConnection(c net.Conn) {
 	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
 	var req desktop.Request
 	if err := json.NewDecoder(bufio.NewReader(io.LimitReader(c, 65536))).Decode(&req); err != nil {
-		_ = json.NewEncoder(c).Encode(desktop.Response{Error: "Solicitud inválida"})
+		_ = json.NewEncoder(c).Encode(desktop.Response{Error: "Invalid request"})
 		return
 	}
 	_ = json.NewEncoder(c).Encode(s.handle(req))

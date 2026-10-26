@@ -16,7 +16,7 @@ The distribution SHALL provide an interactive Windows x64 installer that install
 - **THEN** the installer SHALL not interrupt those jobs and SHALL require them to finish before replacing binaries
 
 ### Requirement: Tray monitoring and settings
-The tray application SHALL present an HTML-based dashboard showing service connection and admission status, current job phases and progress, locally queued and downloaded jobs, and the server's queue when the server supports it. It SHALL let the user configure server URL, token, worker name, encoder, concurrent encodes and admission windows. The token SHALL be masked and SHALL NOT be returned to the tray after it has been saved.
+The tray application, installer, and user-facing service messages SHALL use English. The tray application SHALL present an HTML-based dashboard showing service connection and admission status, current job phases and progress, locally queued and downloaded jobs, and the server's queue when the server supports it. It SHALL let the user configure server URL, token, worker name, encoder, concurrent encodes and admission windows. The token SHALL be masked and SHALL NOT be returned to the tray after it has been saved.
 
 #### Scenario: Running encodes
 - **WHEN** one or more jobs are encoding

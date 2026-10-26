@@ -24,13 +24,12 @@ ShowUninstDetails show
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
-!insertmacro MUI_LANGUAGE "Spanish"
 !insertmacro MUI_LANGUAGE "English"
 
 Function .onInit
   StrCpy $INSTDIR "$PROGRAMFILES64\TranscoderD"
   ${IfNot} ${RunningX64}
-    MessageBox MB_ICONSTOP "TranscoderD necesita Windows de 64 bits."
+    MessageBox MB_ICONSTOP "TranscoderD requires 64-bit Windows."
     Abort
   ${EndIf}
 FunctionEnd
@@ -42,14 +41,14 @@ Section "TranscoderD" Main
   Pop $0
   Pop $1
   ${If} $0 != 0
-    MessageBox MB_ICONEXCLAMATION "No se puede actualizar todavía. $1"
+    MessageBox MB_ICONEXCLAMATION "Cannot upgrade yet. $1"
     Abort
   ${EndIf}
   nsExec::ExecToStack '"$INSTDIR\transcoderd-desktop-service.exe" --uninstall'
   Pop $0
   Pop $1
   ${If} $0 != 0
-    MessageBox MB_ICONSTOP "No se pudo retirar el servicio anterior: $1"
+    MessageBox MB_ICONSTOP "Could not remove the previous service: $1"
     Abort
   ${EndIf}
   IfFileExists "$INSTDIR\transcoderd-tray.exe" 0 fresh
@@ -62,7 +61,7 @@ fresh:
   ${If} $0 != 0
   ${AndIf} $0 != 3010
   ${AndIf} $0 != 1638
-    MessageBox MB_ICONSTOP "No se pudo instalar Microsoft Visual C++ Runtime (código $0)."
+    MessageBox MB_ICONSTOP "Could not install Microsoft Visual C++ Runtime (code $0)."
     Abort
   ${EndIf}
   SetRegView 64
@@ -76,7 +75,7 @@ fresh:
     ExecWait '"$INSTDIR\prerequisites\MicrosoftEdgeWebview2Setup.exe" /silent /install' $0
     ${If} $0 != 0
     ${AndIf} $0 != 3010
-      MessageBox MB_ICONSTOP "No se pudo instalar Microsoft Edge WebView2 Runtime (código $0)."
+      MessageBox MB_ICONSTOP "Could not install Microsoft Edge WebView2 Runtime (code $0)."
       Abort
     ${EndIf}
   ${EndIf}
@@ -84,7 +83,7 @@ fresh:
   Pop $0
   Pop $1
   ${If} $0 != 0
-    MessageBox MB_ICONSTOP "No se pudo instalar el servicio: $1"
+    MessageBox MB_ICONSTOP "Could not install the service: $1"
     Abort
   ${EndIf}
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -103,14 +102,14 @@ Section "Uninstall"
   Pop $0
   Pop $1
   ${If} $0 != 0
-    MessageBox MB_ICONEXCLAMATION "No se puede desinstalar todavía. $1"
+    MessageBox MB_ICONEXCLAMATION "Cannot uninstall yet. $1"
     Abort
   ${EndIf}
   nsExec::ExecToStack '"$INSTDIR\transcoderd-desktop-service.exe" --uninstall'
   Pop $0
   Pop $1
   ${If} $0 != 0
-    MessageBox MB_ICONSTOP "No se pudo retirar el servicio: $1"
+    MessageBox MB_ICONSTOP "Could not remove the service: $1"
     Abort
   ${EndIf}
   IfFileExists "$INSTDIR\transcoderd-tray.exe" 0 +3

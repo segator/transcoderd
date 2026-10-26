@@ -17,7 +17,7 @@ internal static class Program
     private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
-        string sid = WindowsIdentity.GetCurrent().User?.Value ?? throw new InvalidOperationException("No se pudo identificar al usuario.");
+        string sid = WindowsIdentity.GetCurrent().User?.Value ?? throw new InvalidOperationException("Could not identify the current user.");
         using var mutex = new Mutex(true, @"Local\TranscoderD.Tray." + sid, out bool created);
         using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\TranscoderD.Show." + sid);
         using var quitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\TranscoderD.Quit." + sid);
@@ -40,12 +40,12 @@ internal sealed class PipeClient(string sid, bool allowUserOwner)
     private void VerifyOwner(SafePipeHandle handle)
     {
         uint error = GetSecurityInfo(handle, 6, 1, out IntPtr owner, out _, out _, out _, out IntPtr descriptor);
-        if (error != 0) throw new IOException("No se pudo verificar la identidad del servicio.");
+        if (error != 0) throw new IOException("Could not verify the service identity.");
         try {
-            if (!ConvertSidToStringSid(owner, out IntPtr text)) throw new IOException("No se pudo verificar la identidad del servicio.");
+            if (!ConvertSidToStringSid(owner, out IntPtr text)) throw new IOException("Could not verify the service identity.");
             try {
                 string actual = Marshal.PtrToStringUni(text) ?? "";
-                if (!string.Equals(actual, "S-1-5-18", StringComparison.OrdinalIgnoreCase) && !(allowUserOwner && string.Equals(actual, sid, StringComparison.OrdinalIgnoreCase))) throw new IOException("La identidad del servicio no es válida.");
+                if (!string.Equals(actual, "S-1-5-18", StringComparison.OrdinalIgnoreCase) && !(allowUserOwner && string.Equals(actual, sid, StringComparison.OrdinalIgnoreCase))) throw new IOException("The service identity is invalid.");
             } finally { LocalFree(text); }
         } finally { LocalFree(descriptor); }
     }
@@ -58,7 +58,7 @@ internal sealed class PipeClient(string sid, bool allowUserOwner)
         await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen:true) { AutoFlush = true };
         using var reader = new StreamReader(pipe, Encoding.UTF8, false, 1024, true);
         await writer.WriteLineAsync(request.AsMemory(), timeout.Token);
-        return await reader.ReadLineAsync(timeout.Token) ?? throw new IOException("Respuesta vacía del servicio.");
+        return await reader.ReadLineAsync(timeout.Token) ?? throw new IOException("The service returned an empty response.");
     }
 }
 
@@ -82,11 +82,11 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen; BackColor = Color.FromArgb(244, 246, 250); Icon = MakeIcon();
         Controls.Add(browser);
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Abrir TranscoderD", null, (_, _) => ShowWindow());
-        menu.Items.Add("Pausar nuevos trabajos", null, async (_, _) => await SetLimit(0));
-        menu.Items.Add("Reanudar", null, async (_, _) => await SetLimit(lastTarget));
+        menu.Items.Add("Open TranscoderD", null, (_, _) => ShowWindow());
+        menu.Items.Add("Pause new jobs", null, async (_, _) => await SetLimit(0));
+        menu.Items.Add("Resume", null, async (_, _) => await SetLimit(lastTarget));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Salir de la bandeja", null, (_, _) => { quitting = true; Close(); });
+        menu.Items.Add("Exit tray", null, (_, _) => { quitting = true; Close(); });
         tray = new NotifyIcon { Icon = Icon, Text = "TranscoderD", ContextMenuStrip = menu, Visible = true };
         tray.DoubleClick += (_, _) => ShowWindow();
         FormClosing += (_, e) => { if (!quitting && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); } };
@@ -120,7 +120,7 @@ internal sealed class MainForm : Form
                 Environment.ExitCode = 1; Quit();
             };
             core.Navigate("https://" + Host + "/index.html");
-        } catch (Exception ex) { if (smoke) { Environment.ExitCode = 1; Quit(); return; } ShowWindow(); MessageBox.Show("No se pudo iniciar la interfaz web. Comprueba que Microsoft Edge WebView2 Runtime esté instalado.\n\n" + ex.Message, "TranscoderD", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        } catch (Exception ex) { if (smoke) { Environment.ExitCode = 1; Quit(); return; } ShowWindow(); MessageBox.Show("Could not start the web interface. Make sure Microsoft Edge WebView2 Runtime is installed.\n\n" + ex.Message, "TranscoderD", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
     private static bool IsLocal(string value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == "https" && uri.Host == Host && uri.Port == 443;
     private async Task HandleMessage(CoreWebView2WebMessageReceivedEventArgs e)
@@ -133,7 +133,7 @@ internal sealed class MainForm : Form
             string command = root.GetProperty("command").GetString() ?? "";
             if (command == "show-window") { if (!smoke) ShowWindow(); Reply(id, true, "{}"); return; }
             if (command == "start-service") { StartService(); Reply(id, true, "{}"); return; }
-            if (command is not ("status" or "configure" or "set-max-jobs")) throw new InvalidOperationException("Comando no permitido");
+            if (command is not ("status" or "configure" or "set-max-jobs")) throw new InvalidOperationException("Command not allowed");
             string response = await client.SendAsync(root.GetRawText());
             using var result = JsonDocument.Parse(response);
             if (command == "status" && result.RootElement.TryGetProperty("status", out var status) && status.TryGetProperty("worker", out var worker) && worker.ValueKind == JsonValueKind.Object && worker.TryGetProperty("maxActiveJobs", out var target) && target.TryGetInt32(out int n) && n > 0) lastTarget = n;

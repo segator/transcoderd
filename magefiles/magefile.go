@@ -860,9 +860,6 @@ func buildFFmpegBuilderImage(client *dagger.Client) *dagger.Container {
 			"https://github.com/markus-perl/ffmpeg-build-script.git",
 		}).
 		WithWorkdir("/app/ffmpeg-build-script").
-		// v9.0.10's FFmpeg 9.0.2 archive pin is stale. This is the official
-		// tar.gz verified with FFmpeg's FCF986EA...D67658D8 release signing key.
-		WithExec([]string{"sed", "-i", "s/6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9/84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98/g", "src/10-versions.sh"}).
 		WithExec([]string{
 			"bash", "-c",
 			"NUMJOBS=$(nproc); echo \"FFmpeg build parallel jobs: $NUMJOBS\"; export NUMJOBS; export CUDA_COMPUTE_CAPABILITY=75; export SKIPINSTALL=yes; ./build-ffmpeg --build --enable-gpl-and-non-free && " +

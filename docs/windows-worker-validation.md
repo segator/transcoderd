@@ -56,9 +56,9 @@ GPU job: `235f3246-d105-11f1-b2e5-ae3df8a93d0b`. Native evidence directory:
 
 Linux `go test ./...`, race tests for command/control/steps/updater, Mage module
 tests, Linux and Windows golangci-lint, actionlint, and strict OpenSpec validation
-passed. The shared Linux FFmpeg source checksum correction was verified against
-the official signed 9.0.2 archive; a full cold Linux toolchain rebuild was not
-repeated as part of this Windows validation.
+passed. Windows source verification used the official signed 9.0.2 archive. Linux uses
+the upstream GitHub n9.0.2 tag archive with its own verified hash. The two archive
+hashes differ; an incorrect Linux override was removed after CI exposed it.
 
 ## Scope
 

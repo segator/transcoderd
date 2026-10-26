@@ -19,6 +19,7 @@ SetCompressor /FINAL zlib
 ShowInstDetails show
 ShowUninstDetails show
 !define MUI_ABORTWARNING
+!define MUI_FINISHPAGE_TEXT "Setup is complete. Open TranscoderD from the Start menu to connect your worker."
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH

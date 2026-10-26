@@ -3,6 +3,7 @@ package worker
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"transcoder/model"
@@ -54,5 +55,26 @@ func TestPipelineSnapshotDistinguishesPrefetchedJobs(t *testing.T) {
 	e.jobs.remove(id.String())
 	if got = e.jobs.snapshot(); len(got) != 0 {
 		t.Fatalf("finished snapshot = %+v", got)
+	}
+}
+
+func TestProgressUpdatesCanRaceWithCompletion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer server.Close()
+	executor := &JobExecutor{console: console.NewRenderService(), client: serverclient.NewServerClient(&web.Config{Domain: server.URL}, "test")}
+	tracker := executor.ReportTrackStep(&job.Context{JobId: uuid.New()}, "video", model.FFMPEGSNotification)
+	tracker.SetTotal(100)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			tracker.UpdateValue(int64(i))
+		}
+	}()
+	tracker.Done()
+	wg.Wait()
+	if got := executor.progress.snapshot(); len(got) != 0 {
+		t.Fatalf("completed progress was resurrected: %+v", got)
 	}
 }

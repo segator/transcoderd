@@ -23,6 +23,7 @@ type ReportStepProgressTracker struct {
 	lastUpdate         time.Time
 	registry           *progressRegistry
 	snapshotMu         sync.Mutex
+	reportMu           sync.Mutex
 	finished           bool
 }
 
@@ -130,6 +131,16 @@ func (e *ReportStepProgressTracker) Increment(increment int) {
 }
 
 func (e *ReportStepProgressTracker) reportTrackProgress(status model.TaskProgressStatus) {
+	e.reportMu.Lock()
+	defer e.reportMu.Unlock()
+	if status == model.ProgressingTaskProgressTypeStatus {
+		e.snapshotMu.Lock()
+		finished := e.finished
+		e.snapshotMu.Unlock()
+		if finished {
+			return
+		}
+	}
 	if time.Since(e.lastUpdate) > 15*time.Second || status != model.ProgressingTaskProgressTypeStatus {
 		err := e.serverClient.PublishTaskProgressEvent(&model.TaskProgressType{
 			Event: model.Event{

@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.8.0](https://github.com/segator/transcoderd/compare/v2.7.3...v2.8.0) (2026-10-26)
+
+
+### 🎉 Features
+
+* **worker:** add native Windows bundle and CPU E2E CI ([#187](https://github.com/segator/transcoderd/issues/187)) ([12dbf82](https://github.com/segator/transcoderd/commit/12dbf821b6e5755905680ebb354a3479c4b0f8d6))
+* **worker:** persist runtime job limits ([#185](https://github.com/segator/transcoderd/issues/185)) ([9af8c94](https://github.com/segator/transcoderd/commit/9af8c9480b3ed81775c129c5adbe3f0b0fdd96e7))
+* **worker:** prefetch pipeline jobs for encoders ([#186](https://github.com/segator/transcoderd/issues/186)) ([4dd0706](https://github.com/segator/transcoderd/commit/4dd070678054bc941be1858f12aea14299445586))
+
+
+### 📝 Documentation
+
+* sync upload staging cleanup spec ([#183](https://github.com/segator/transcoderd/issues/183)) ([ae6f4ef](https://github.com/segator/transcoderd/commit/ae6f4efdc4b1ba22e414ad19278b7284518f32b6))
+
 ## [2.7.3](https://github.com/segator/transcoderd/compare/v2.7.2...v2.7.3) (2026-10-25)
 
 

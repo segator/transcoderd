@@ -37,8 +37,9 @@ function jobLabel(job) {
 }
 function render(status) {
   current = status;
-  $('connection').className = 'connection online'; $('connection').innerHTML = '<i></i> Service connected';
   const worker = status.worker, jobs = worker?.jobs || [], progress = worker?.progress || [];
+  const admission = !status.configured ? 'Service connected' : !worker ? 'Worker starting' : worker.maxActiveJobs === 0 ? 'Paused' : worker.withinSchedule === false ? 'Outside schedule' : worker.accepting ? (worker.maxAcceptedJobs > 0 && (worker.activeJobs + worker.reservedJobs) >= worker.maxAcceptedJobs ? 'At capacity' : 'Accepting jobs') : 'Waiting for settings';
+  $('connection').className = 'connection online'; $('connection').innerHTML = `<i></i> ${admission}`;
   if (worker?.maxActiveJobs > 0) lastTarget = worker.maxActiveJobs;
   $('stat-encoding').textContent = worker ? worker.activeEncodes : '—';
   $('stat-encoding-caption').textContent = worker ? `of ${worker.maxEncodes} concurrent encodes` : 'Active encodes';
@@ -55,7 +56,7 @@ function render(status) {
   $('stat-queue').textContent = queue ? queue.total : '—'; $('queue-count').textContent = queue ? queue.total : '—';
   $('stat-queue-caption').textContent = queue ? 'Awaiting assignment' : 'Unavailable';
   $('server-queue').innerHTML = queue ? (queue.jobs?.length ? queue.jobs.map((j, i) => `<div class="queue-item"><span class="queue-num">${String(i+1).padStart(2,'0')}</span><div class="queue-info"><div class="queue-name" title="${escapeHTML(j.name)}">${escapeHTML(j.name)}</div><div class="queue-meta">${escapeHTML(fileSize(j.size) ? `Awaiting assignment · ${fileSize(j.size)}` : 'Awaiting assignment')}</div></div><span class="badge ready">Queued</span></div>`).join('') : empty('Queue empty','There are no jobs waiting to be assigned.',true)) : empty('Queue unavailable',status.queueError === 'unsupported' ? 'Update the server to view its queue.' : 'The queue will appear when the server is available.',true);
-  const notice = !status.configured ? 'Configure the connection to start your worker.' : status.pending ? 'Changes are pending and will be applied when current jobs finish.' : status.message || '';
+  const notice = !status.configured ? 'Configure the connection to start your worker.' : status.pending ? 'Changes are pending and will be applied when current jobs finish.' : status.message || (worker?.maxActiveJobs === 0 ? 'New assignments are paused. Current jobs will continue.' : worker?.withinSchedule === false ? 'Outside the work schedule. New assignments will resume during the next window.' : '');
   $('notice').classList.toggle('hidden', !notice); $('notice-text').textContent = notice; $('notice-start').classList.add('hidden'); $('notice-settings').classList.remove('hidden');
   $('toggle-pause').disabled = !worker || status.pending;
   $('toggle-pause').textContent = worker?.maxActiveJobs === 0 ? '▶  Resume' : 'Ⅱ  Pause';

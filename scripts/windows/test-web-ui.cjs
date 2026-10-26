@@ -16,6 +16,8 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync('windows/desktop/wwwroot/app.js','utf8'), context);
 context.render({configured:true, worker:{maxActiveJobs:0,maxEncodes:1,activeEncodes:1,jobs:[{jobId:'1',name:'<img src=x onerror=alert(1)>',phase:'FFMPEG',state:'running',downloaded:true}],progress:[{jobId:'1',phase:'FFMPEG',percent:25}]},queue:{total:1,jobs:[{name:'<script>evil</script>'}]}});
 assert.match(element('toggle-pause').textContent, /Resume/, 'pause follows admission, even if accepted work can still encode');
+assert.match(element('connection').innerHTML, /Paused/);
+assert.match(element('notice-text').textContent, /assignments are paused/);
 assert.equal(element('stat-encoding').textContent, 1);
 assert.ok(!element('job-list').innerHTML.includes('<img'), 'job titles must be escaped');
 assert.ok(!element('server-queue').innerHTML.includes('<script>'), 'server titles must be escaped');
@@ -25,3 +27,12 @@ assert.match(element('toggle-pause').textContent, /Pause/);
 assert.equal(element('stat-ready').textContent, 1);
 assert.match(element('server-queue').innerHTML, /Update the server/);
 console.log('Desktop dashboard: admission state, prefetched work, old server fallback and escaping passed.');
+
+context.render({configured:true,worker:{maxActiveJobs:2,maxEncodes:2,activeEncodes:0,withinSchedule:false,jobs:[],progress:[]}});
+assert.match(element('connection').innerHTML, /Outside schedule/);
+assert.match(element('notice-text').textContent, /Outside the work schedule/);
+context.render({configured:true,worker:{maxActiveJobs:2,maxEncodes:2,activeEncodes:0,withinSchedule:true,accepting:false,jobs:[],progress:[]}});
+assert.match(element('connection').innerHTML, /Waiting for settings/);
+
+context.render({configured:true,worker:{maxActiveJobs:2,maxEncodes:2,activeEncodes:2,activeJobs:3,reservedJobs:1,maxAcceptedJobs:4,withinSchedule:true,accepting:true,jobs:[],progress:[]}});
+assert.match(element('connection').innerHTML, /At capacity/);

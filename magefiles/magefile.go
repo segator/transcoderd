@@ -43,6 +43,12 @@ var (
 	imageVersionAliases []string
 )
 
+// Shared by Linux and Windows OCR distributions.
+const (
+	tessdataVersion = "ced78752cc61322fb554c280d13360b35b8684e4"
+	pgstosrtVersion = "ef11919491b5c98f9dcdaf13d721596e60efb7ed"
+)
+
 const e2eServerConfig = `server:
   database:
     host: postgres
@@ -876,11 +882,6 @@ func pgsBuilderImage(client *dagger.Client) *dagger.Container {
 // buildPgsBuilderImage builds the PGS tools and OCR data as a pure Dagger pipeline.
 // Base: dotnet/sdk:8.0.419 with PgsToSrt + tessdata (~5min).
 func buildPgsBuilderImage(client *dagger.Client) *dagger.Container {
-	const (
-		tessdataVersion = "ced78752cc61322fb554c280d13360b35b8684e4"
-		pgstosrtVersion = "ef11919491b5c98f9dcdaf13d721596e60efb7ed"
-	)
-
 	return client.Container().
 		From("mcr.microsoft.com/dotnet/sdk:8.0.419").
 		WithDirectory("/pgs-patches", client.Host().Directory(filepath.Join(projectRoot(), "pgs-patches"))).

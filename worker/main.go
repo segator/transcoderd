@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"transcoder/cmd"
+	"transcoder/helper"
 	"transcoder/update"
 	"transcoder/version"
 	"transcoder/worker/config"
@@ -44,9 +45,10 @@ func init() {
 	pflag.Int("worker.threads", defaultThreads, "Worker Threads")
 	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum FFmpeg encode concurrency; the worker may accept two additional pipeline jobs; 0 disables new job requests")
 	pflag.Int("worker.pgsConfig.parallelJobs", 1, "Maximum PGS OCR actions per job")
+	pflag.String("worker.pgsConfig.executablePath", helper.BundledPath("pgs/PgsToSrt.exe", ""), "PgsToSrt executable; empty uses dotnet and DLLPath")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
 	pflag.String("worker.pgsConfig.DLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")
-	pflag.String("worker.pgsConfig.tessdataPath", "./tessdata", "tesseract data path")
+	pflag.String("worker.pgsConfig.tessdataPath", helper.BundledPath("tessdata", "./tessdata"), "tesseract data path")
 	pflag.Int("worker.pgsConfig.tessVersion", 5, "tesseract data version")
 	pflag.String("worker.pgsConfig.libleptName", "leptonica", "leptonica library name")
 	pflag.Int("worker.pgsConfig.libleptVersion", 6, "leptonica library version")

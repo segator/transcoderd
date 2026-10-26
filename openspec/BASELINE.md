@@ -31,6 +31,12 @@ These observations are not normative requirements. They need separate fixes or e
 - Job intake joins the submitted `sourcePath` with the media root but does not reject traversal segments or verify that the resolved path remains inside the root.
 - Viper enables a `TR_` environment prefix, but does not configure a nested-key replacer. The `envconfig` struct tags are not read by the Viper setup, so nested environment-variable spellings are not a verified interface.
 
+## Resolved implementation discrepancies
+
+- Native Windows CPU CI exposed a download close failure: syncing the read-only source invokes Windows FlushFileBuffers without write access and prevents checksum publication. Download streams now close without a write flush, then publish their checksum; upload streams retain their sync. A read-only download regression and the complete native E2E cover this fix.
+
+- PR 187 initially replaced the Linux builder's FFmpeg hash with the official release tarball hash, incorrectly treating the upstream pin as stale. CI demonstrated that Linux downloads the GitHub n9.0.2 tag archive, whose verified SHA-256 is `6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9`. The override was removed. Windows retains the separate official tar.gz (`84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98`), verified with FFmpeg release key `FCF986EA15E6E293A5644F10B4322F04D67658D8`. Both recipes retain source version 9.0.2 and their intended archive/hash pair.
+
 ## Verification boundary
 
 `openspec validate --all --strict` checks document structure. Go unit tests cover parts of scheduling, media inspection, context persistence, and steps. PostgreSQL integration tests and Docker end-to-end tests use the `integration` build tag. Structural validation does not prove behavior; each future code change needs tests for the scenarios it affects.

@@ -1,8 +1,11 @@
 package helper
 
 import (
-	log "github.com/sirupsen/logrus"
+	"os"
 	"path/filepath"
+	"runtime"
+
+	log "github.com/sirupsen/logrus"
 )
 
 var (
@@ -27,9 +30,38 @@ func CheckPath(path string) {
 }
 
 func GetFFmpegPath() string {
-	return ffmpegPath
+	return bundledTool("bin/ffmpeg.exe", ffmpegPath)
 }
 
 func GetMKVExtractPath() string {
-	return mkvExtractPath
+	return bundledTool("bin/mkvextract.exe", mkvExtractPath)
+}
+
+func GetFFProbePath() string {
+	return bundledTool("bin/ffprobe.exe", "ffprobe")
+}
+
+// BundledPath returns a Windows bundle asset independently of the process cwd.
+// The fallback preserves existing PATH-based and non-bundle installations.
+func BundledPath(relative, fallback string) string {
+	return bundledTool(relative, fallback)
+}
+
+func bundledTool(relative, fallback string) string {
+	if runtime.GOOS != "windows" {
+		return fallback
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return fallback
+	}
+	return bundlePath(filepath.Dir(executable), relative, fallback)
+}
+
+func bundlePath(root, relative, fallback string) string {
+	path := filepath.Join(root, filepath.FromSlash(relative))
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	return fallback
 }

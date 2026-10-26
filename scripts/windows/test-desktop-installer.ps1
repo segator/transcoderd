@@ -56,7 +56,7 @@ try {
   $ui.Refresh(); if ($ui.ExitCode -ne 0) { throw 'Tray did not reject the fake service pipe.' }
  } finally { if (-not $fake.HasExited) { Stop-Process -Id $fake.Id -Force; $fake.WaitForExit() } }
  Start-Service TranscoderDWorker; (Get-Service TranscoderDWorker).WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
- $status=Invoke-Desktop @{command='configure';settings=@{domain=$ServerURL;token='e2e-test-token';name='desktop-e2e';codec='libsvtav1';maxJobs=0;schedule=@()}}
+ $status=Invoke-Desktop @{command='configure';settings=@{domain=$ServerURL;token='e2e-test-token';name='desktop-e2e';cpuCodec='libsvtav1';cpuJobs=0;gpuCodec='av1_nvenc';gpuJobs=0;schedule=@()}}
  if (-not $status.settings.tokenSet -or (($status | ConvertTo-Json -Depth 10) -match 'e2e-test-token')) { throw 'Token redaction failed.' }
  $settingsPath = Join-Path $env:ProgramData 'TranscoderD\service.json'
  $acl = Get-Acl -LiteralPath $settingsPath
@@ -66,7 +66,7 @@ try {
   if ($account -notin @('S-1-5-18','S-1-5-32-544')) { throw "Settings grant access to an unexpected account: $account" }
  }
  $null=Wait-Worker 0
- $null=Invoke-Desktop @{command='set-max-jobs';maxJobs=1}
+ $null=Invoke-Desktop @{command='set-max-jobs';cpuJobs=1;gpuJobs=0}
  $null=Wait-Worker 1
  $env:E2E_SERVER_URL=$ServerURL; $env:E2E_TOKEN='e2e-test-token'; $env:E2E_SOURCE_PATH='e2e_fixture.mkv'
  $output = Join-Path $env:RUNNER_TEMP 'transcoderd-desktop-e2e.log'
@@ -77,7 +77,7 @@ try {
   $status=Invoke-Desktop @{command='status'}
   if ($status.worker.jobs.Count -gt 0) { $sawJob=$true }
   if (-not $reconfigured -and $status.worker.activeJobs -gt 0) {
-   $status=Invoke-Desktop @{command='configure';settings=@{domain=$ServerURL;token='';name='desktop-e2e';codec='libsvtav1';maxJobs=1;schedule=@('00:00-24:00')}}
+   $status=Invoke-Desktop @{command='configure';settings=@{domain=$ServerURL;token='';name='desktop-e2e';cpuCodec='libsvtav1';cpuJobs=1;gpuCodec='av1_nvenc';gpuJobs=0;schedule=@('00:00-24:00')}}
    if (-not $status.pending) { throw 'Active job did not defer reconfiguration.' }; $reconfigured=$true
   }
   Start-Sleep -Milliseconds 250; $test.Refresh()

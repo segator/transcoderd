@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const pending = new Map();
-let sequence = 0, current = null, dirty = false, shownSetup = false, lastTarget = 2, polling = false;
+let sequence = 0, current = null, dirty = false, shownSetup = false, lastJobs = {cpu:0,gpu:2}, polling = false;
 function request(command, data = {}) {
   return new Promise((resolve, reject) => {
     if (!window.chrome?.webview) return reject(new Error('The desktop application is unavailable.'));
@@ -40,7 +40,8 @@ function render(status) {
   const worker = status.worker, jobs = worker?.jobs || [], progress = worker?.progress || [];
   const admission = !status.configured ? 'Service connected' : !worker ? 'Worker starting' : worker.maxActiveJobs === 0 ? 'Paused' : worker.withinSchedule === false ? 'Outside schedule' : worker.accepting ? (worker.maxAcceptedJobs > 0 && (worker.activeJobs + worker.reservedJobs) >= worker.maxAcceptedJobs ? 'At capacity' : 'Accepting jobs') : 'Waiting for settings';
   $('connection').className = 'connection online'; $('connection').innerHTML = `<i></i> ${admission}`;
-  if (worker?.maxActiveJobs > 0) lastTarget = worker.maxActiveJobs;
+  const isPaused = worker?.maxActiveJobs === 0;
+  if (status.settings) lastJobs = {cpu:status.settings.cpuJobs, gpu:status.settings.gpuJobs};
   $('stat-encoding').textContent = worker ? worker.activeEncodes : '—';
   $('stat-encoding-caption').textContent = worker ? `of ${worker.maxEncodes} concurrent encodes` : 'Active encodes';
   $('stat-ready').textContent = worker ? jobs.filter(j => j.downloaded && j.state === 'queued' && j.phase === 'FFMPEG').length : '—';
@@ -50,7 +51,8 @@ function render(status) {
     const p = progress.find(x => x.jobId === j.jobId && x.phase === j.phase);
     const [label, badge] = jobLabel(j); const name = j.name || p?.name || `Job ${j.jobId.slice(0,8)}`;
     const pct = p ? Math.min(100, Math.max(0, Number(p.percent) || 0)) : 0;
-    return `<article class="job"><div class="job-head"><div class="file-icon">▶</div><div class="job-info"><div class="job-title" title="${escapeHTML(name)}">${escapeHTML(name)}</div><div class="job-meta">${escapeHTML(duration(p?.etaSeconds) || (j.downloaded ? 'File downloaded' : 'Preparing file'))}</div></div><span class="badge ${badge}">${label}</span></div>${p ? `<div class="job-progress"><div class="track"><div class="fill" style="width:${pct}%"></div></div><strong>${pct.toFixed(0)}%</strong></div>` : ''}</article>`;
+    const profile = p?.profile || j.profile;
+    return `<article class="job"><div class="job-head"><div class="file-icon">▶</div><div class="job-info"><div class="job-title" title="${escapeHTML(name)}">${escapeHTML(name)}</div><div class="job-meta">${escapeHTML(duration(p?.etaSeconds) || (j.downloaded ? 'File downloaded' : 'Preparing file'))}${profile ? ` · ${escapeHTML(profile.toUpperCase())}` : ''}</div></div><span class="badge ${badge}">${label}</span></div>${p ? `<div class="job-progress"><div class="track"><div class="fill" style="width:${pct}%"></div></div><strong>${pct.toFixed(0)}%</strong></div>` : ''}</article>`;
   }).join('') : empty(status.configured ? 'All quiet here' : 'Set up your worker', status.configured ? 'New jobs will appear here automatically.' : 'Configure the connection to get started.');
   const queue = status.queue;
   $('stat-queue').textContent = queue ? queue.total : '—'; $('queue-count').textContent = queue ? queue.total : '—';
@@ -59,8 +61,8 @@ function render(status) {
   const notice = !status.configured ? 'Configure the connection to start your worker.' : status.pending ? 'Changes are pending and will be applied when current jobs finish.' : status.message || (worker?.maxActiveJobs === 0 ? 'New assignments are paused. Current jobs will continue.' : worker?.withinSchedule === false ? 'Outside the work schedule. New assignments will resume during the next window.' : '');
   $('notice').classList.toggle('hidden', !notice); $('notice-text').textContent = notice; $('notice-start').classList.add('hidden'); $('notice-settings').classList.remove('hidden');
   $('toggle-pause').disabled = !worker || status.pending;
-  $('toggle-pause').textContent = worker?.maxActiveJobs === 0 ? '▶  Resume' : 'Ⅱ  Pause';
-  if (!dirty && status.settings) { const s = status.settings; $('domain').value = s.domain; $('name').value = s.name; $('codec').value = s.codec; $('jobs').value = s.maxJobs; $('schedule').value = (s.schedule || []).join('\n'); $('token-note').textContent = s.tokenSet ? 'Token saved. Leave blank to keep it.' : 'Your token is stored securely on this machine.'; }
+  $('toggle-pause').textContent = isPaused ? '▶  Resume' : 'Ⅱ  Pause new jobs';
+  if (!dirty && status.settings) { const s = status.settings; $('domain').value = s.domain; $('name').value = s.name; $('cpu-codec').value = s.cpuCodec; $('cpu-jobs').value = s.cpuJobs; $('gpu-codec').value = s.gpuCodec; $('gpu-jobs').value = s.gpuJobs; $('schedule').value = (s.schedule || []).join('\n'); $('token-note').textContent = s.tokenSet ? 'Token saved. Leave blank to keep it.' : 'Your token is stored securely on this machine.'; }
   if (!status.configured && !shownSetup) { shownSetup = true; page('settings'); request('show-window').catch(() => {}); }
 }
 async function refresh() {
@@ -74,11 +76,10 @@ $('notice-start').addEventListener('click', async () => { try { await request('s
 $('settings-form').addEventListener('input', () => { dirty = true; });
 $('settings-form').addEventListener('submit', async e => {
   e.preventDefault(); $('save').disabled = true;
-  const settings = {domain:$('domain').value.trim(), token:$('token').value, name:$('name').value.trim(), codec:$('codec').value, maxJobs:Number($('jobs').value), schedule:$('schedule').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)};
+  const settings = {domain:$('domain').value.trim(), token:$('token').value, name:$('name').value.trim(), cpuCodec:$('cpu-codec').value, cpuJobs:Number($('cpu-jobs').value), gpuCodec:$('gpu-codec').value, gpuJobs:Number($('gpu-jobs').value), schedule:$('schedule').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)};
   try { const status = await request('configure', {settings}); $('token').value = ''; dirty = false; render(status); toast(status.pending ? 'Changes saved; they will apply when current jobs finish.' : 'Settings saved.'); page('overview'); }
   catch (err) { toast(err.message); } finally { $('save').disabled = false; }
 });
-$('toggle-pause').addEventListener('click', async () => { try { const next = current?.worker?.maxActiveJobs === 0 ? lastTarget : 0; render(await request('set-max-jobs', {maxJobs:next})); toast(next ? 'Worker resumed.' : 'New assignments paused.'); } catch (err) { toast(err.message); } });
+$('toggle-pause').addEventListener('click', async () => { try { const paused = current?.worker?.maxActiveJobs === 0; const cpuJobs = paused ? lastJobs.cpu : 0, gpuJobs = paused ? lastJobs.gpu : 0; render(await request('set-max-jobs', {cpuJobs,gpuJobs})); toast(paused ? 'Worker profiles resumed.' : 'New assignments paused for both profiles.'); } catch (err) { toast(err.message); } });
 $('show-token').addEventListener('click', () => { $('token').type = $('token').type === 'password' ? 'text' : 'password'; });
-for (const [id, delta] of [['less',-1],['more',1]]) $(id).addEventListener('click', () => { $('jobs').value = Math.min(64,Math.max(0,(Number($('jobs').value)||0)+delta)); dirty = true; });
 refresh(); setInterval(refresh, 2000);

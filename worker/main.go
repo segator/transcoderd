@@ -172,7 +172,7 @@ func applicationRunWithShutdown(wg *sync.WaitGroup, ctx context.Context, updater
 	encodeWorker := worker.NewEncodeWorker(opts.Worker, serverClient, renderService)
 	encodeWorker.RequireWorkerSettings()
 	encodeWorker.Run(wg, ctx)
-	controlServer, err := control.Start(control.SocketPath, encodeWorker, shutdown)
+	controlServer, err := control.Start(control.ConfiguredPath(), encodeWorker, shutdown)
 	if err != nil {
 		return fmt.Errorf("start worker control interface: %w", err)
 	}

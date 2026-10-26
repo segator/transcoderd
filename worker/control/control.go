@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"time"
 )
@@ -28,6 +29,7 @@ type AdmissionStatus struct {
 type JobState struct {
 	JobID      string `json:"jobId"`
 	Name       string `json:"name,omitempty"`
+	Profile    string `json:"profile,omitempty"`
 	Phase      string `json:"phase"`
 	State      string `json:"state"`
 	Downloaded bool   `json:"downloaded"`
@@ -36,6 +38,7 @@ type JobState struct {
 type TaskProgress struct {
 	JobID      string  `json:"jobId"`
 	Name       string  `json:"name,omitempty"`
+	Profile    string  `json:"profile,omitempty"`
 	StepID     string  `json:"stepId"`
 	Phase      string  `json:"phase"`
 	Percent    float64 `json:"percent"`
@@ -65,7 +68,7 @@ type Server struct {
 
 func Start(path string, state AdmissionController, shutdown ...func()) (*Server, error) {
 	if path == "" {
-		path = SocketPath
+		path = ConfiguredPath()
 	}
 	listener, err := listenControl(path)
 	if err != nil {
@@ -142,7 +145,15 @@ func (s *Server) writeResponse(conn net.Conn, result Response) {
 }
 
 func RunCLI(args []string, output io.Writer) error {
-	return runCLI(args, output, SocketPath)
+	return runCLI(args, output, ConfiguredPath())
+}
+
+// ConfiguredPath lets supervised worker instances use distinct local control endpoints.
+func ConfiguredPath() string {
+	if path := os.Getenv("TRANSCODERD_CONTROL_PIPE"); path != "" {
+		return path
+	}
+	return SocketPath
 }
 
 func runCLI(args []string, output io.Writer, socketPath string) error {
@@ -181,7 +192,7 @@ func runCLI(args []string, output io.Writer, socketPath string) error {
 
 func Call(socketPath string, req Request) (Response, error) {
 	if socketPath == "" {
-		socketPath = SocketPath
+		socketPath = ConfiguredPath()
 	}
 	conn, err := dialControl(socketPath)
 	if err != nil {

@@ -70,3 +70,59 @@ func TestPersistedPendingSettingsSurviveRestart(t *testing.T) {
 		t.Fatal("worker config missing codec")
 	}
 }
+
+func TestMixedProfileSettingsGenerateIndependentWorkerConfigs(t *testing.T) {
+	dir := t.TempDir()
+	settings := Settings{
+		Domain: "https://server.test", Token: "secret", Name: "encode-node",
+		CPUCodec: "libsvtav1", CPUJobs: 1, GPUCodec: "av1_nvenc", GPUJobs: 4,
+	}
+	if err := settings.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range settings.Profiles() {
+		if err := WorkerConfigForProfile(dir, settings, profile, false); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "config-"+profile.Key+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var config map[string]any
+		if err := json.Unmarshal(data, &config); err != nil {
+			t.Fatal(err)
+		}
+		worker, ok := config["worker"].(map[string]any)
+		if !ok || worker["name"] != profile.Name || worker["maxActiveJobs"] != float64(profile.Jobs) {
+			t.Errorf("%s config = %s, missing independent worker settings", profile.Key, data)
+		}
+		ffmpeg, ok := worker["ffmpegConfig"].(map[string]any)
+		if !ok || ffmpeg["videoCodec"] != profile.Codec {
+			t.Errorf("%s config = %s, missing profile codec", profile.Key, data)
+		}
+	}
+}
+
+func TestLegacyProfileSettingsMigrateToMatchingEncoder(t *testing.T) {
+	for _, tt := range []struct {
+		codec   string
+		cpuJobs int
+		gpuJobs int
+	}{
+		{codec: "libsvtav1", cpuJobs: 2},
+		{codec: "av1_nvenc", gpuJobs: 2},
+	} {
+		dir := t.TempDir()
+		data := `{"active":{"domain":"https://server.test","token":"secret","name":"node","codec":"` + tt.codec + `","maxJobs":2}}`
+		if err := os.WriteFile(filepath.Join(dir, "service.json"), []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+		state, err := Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Active.CPUJobs != tt.cpuJobs || state.Active.GPUJobs != tt.gpuJobs || !state.PendingLimit {
+			t.Errorf("Load() migrated profile to CPU=%d GPU=%d pending=%t; want CPU=%d GPU=%d pending=true", state.Active.CPUJobs, state.Active.GPUJobs, state.PendingLimit, tt.cpuJobs, tt.gpuJobs)
+		}
+	}
+}

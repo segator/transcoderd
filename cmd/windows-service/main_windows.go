@@ -75,7 +75,7 @@ func protectDir(dir string) error {
 	if owner := existingOwner.String(); owner != sid && owner != "S-1-5-18" && owner != "S-1-5-32-544" {
 		return errors.New("service data directory is owned by a different user")
 	}
-	for _, name := range []string{"service.json", "config.yaml", "worker.log", "work"} {
+	for _, name := range []string{"service.json", "config.yaml", "config-cpu.yaml", "config-gpu.yaml", "worker.log", "worker-cpu.log", "worker-gpu.log", "work"} {
 		path, err := windows.UTF16PtrFromString(filepath.Join(dir, name))
 		if err != nil {
 			return err
@@ -248,7 +248,8 @@ type supervisor struct {
 	mu           sync.Mutex
 	state        desktop.Persisted
 	dir, worker  string
-	child        *exec.Cmd
+	children     map[string]*exec.Cmd
+	done         map[string]chan error
 	message      string
 	pendingDrain bool
 	readyToApply bool
@@ -261,7 +262,7 @@ type supervisor struct {
 }
 
 func (s *supervisor) snapshotLocked() desktop.Status {
-	status := desktop.Status{Configured: s.state.Active != nil, Running: s.child != nil, Pending: s.state.Pending != nil || s.state.PendingLimit, Message: s.message, Queue: s.queue, QueueError: s.queueError}
+	status := desktop.Status{Configured: s.state.Active != nil, Running: len(s.children) > 0, Pending: s.state.Pending != nil || s.state.PendingLimit, Message: s.message, Queue: s.queue, QueueError: s.queueError, Profiles: make(map[string]control.AdmissionStatus)}
 	value := s.state.Active
 	if s.state.Pending != nil {
 		value = s.state.Pending
@@ -270,20 +271,63 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 		settings := value.Public()
 		status.Settings = &settings
 	}
-	if s.child != nil {
-		if r, err := control.Call("", control.Request{Command: "status"}); err == nil {
-			status.Worker = &r.Status
-		} else {
-			status.Message = "The worker is starting or not responding"
+	combined := control.AdmissionStatus{WithinSchedule: true}
+	enabled := map[string]bool{}
+	if s.state.Active != nil {
+		for _, profile := range s.state.Active.Profiles() {
+			enabled[profile.Key] = profile.Jobs > 0
 		}
+	}
+	for _, profile := range []string{"cpu", "gpu"} {
+		if s.children[profile] == nil {
+			continue
+		}
+		r, err := control.Call(workerPipe(profile), control.Request{Command: "status"})
+		if err != nil {
+			status.Message = "A worker profile is starting or not responding"
+			continue
+		}
+		profileStatus := r.Status
+		for i := range profileStatus.Jobs {
+			profileStatus.Jobs[i].Profile = profile
+		}
+		for i := range profileStatus.Progress {
+			profileStatus.Progress[i].Profile = profile
+		}
+		status.Profiles[profile] = profileStatus
+		combined.Accepting = combined.Accepting || profileStatus.Accepting
+		combined.ActiveJobs += profileStatus.ActiveJobs
+		combined.ReservedJobs += profileStatus.ReservedJobs
+		combined.MaxActiveJobs += profileStatus.MaxActiveJobs
+		combined.MaxAcceptedJobs += profileStatus.MaxAcceptedJobs
+		combined.ActiveEncodes += profileStatus.ActiveEncodes
+		if enabled[profile] {
+			combined.MaxEncodes += profileStatus.MaxEncodes
+		}
+		combined.WithinSchedule = combined.WithinSchedule && profileStatus.WithinSchedule
+		combined.Jobs = append(combined.Jobs, profileStatus.Jobs...)
+		combined.Progress = append(combined.Progress, profileStatus.Progress...)
+	}
+	if len(status.Profiles) > 0 {
+		status.Worker = &combined
 	}
 	return status
 }
 
 func sameExceptLimit(a, b desktop.Settings) bool {
-	a.MaxJobs = 0
-	b.MaxJobs = 0
+	a = a.Normalized()
+	b = b.Normalized()
+	a.CPUJobs, a.GPUJobs = 0, 0
+	b.CPUJobs, b.GPUJobs = 0, 0
+	a.MaxJobs, b.MaxJobs = 0, 0
+	a.Codec, b.Codec = "", ""
 	return reflect.DeepEqual(a, b)
+}
+
+func workerPipe(profile string) string { return `\\.\pipe\transcoderd-worker-` + profile }
+
+func (s *supervisor) allChildrenStoppedLocked() bool {
+	return s.children["cpu"] == nil && s.children["gpu"] == nil
 }
 
 func (s *supervisor) handle(req desktop.Request) desktop.Response {
@@ -308,7 +352,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 			result.Error = "Settings are missing"
 			break
 		}
-		value := *req.Settings
+		value := req.Settings.Normalized()
 		current := s.state.Active
 		if s.state.Pending != nil {
 			current = s.state.Pending
@@ -340,10 +384,6 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		}
 		s.state = next
 	case "set-max-jobs":
-		if req.MaxJobs < 0 || req.MaxJobs > 64 {
-			result.Error = "The number of concurrent encodes must be between 0 and 64"
-			break
-		}
 		if s.state.Active == nil {
 			result.Error = "Configure the server first"
 			break
@@ -352,18 +392,63 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 			result.Error = "Settings are waiting to be applied"
 			break
 		}
-		if s.child == nil {
+		if s.allChildrenStoppedLocked() {
 			result.Error = "The worker is not connected"
 			break
 		}
-		if _, err := control.Call("", control.Request{Command: "set-max-jobs", MaxJobs: req.MaxJobs}); err != nil {
-			result.Error = "Could not change the server limit"
+		cpuJobs, gpuJobs := s.state.Active.CPUJobs, s.state.Active.GPUJobs
+		if req.CPUJobs != nil || req.GPUJobs != nil {
+			if req.CPUJobs != nil {
+				cpuJobs = *req.CPUJobs
+			}
+			if req.GPUJobs != nil {
+				gpuJobs = *req.GPUJobs
+			}
+		} else {
+			if req.MaxJobs < 0 || req.MaxJobs > 64 {
+				result.Error = "The number of concurrent encodes must be between 0 and 64"
+				break
+			}
+			if req.MaxJobs == 0 {
+				cpuJobs, gpuJobs = 0, 0
+			} else if cpuJobs > 0 && gpuJobs == 0 {
+				cpuJobs = req.MaxJobs
+			} else if gpuJobs > 0 && cpuJobs == 0 {
+				gpuJobs = req.MaxJobs
+			} else {
+				result.Error = "Use separate CPU and GPU limits"
+				break
+			}
+		}
+		if cpuJobs < 0 || gpuJobs < 0 || cpuJobs > 64 || gpuJobs > 64 || cpuJobs+gpuJobs > 64 {
+			result.Error = "CPU and GPU concurrent encodes must each be between 0 and 64 and total no more than 64"
+			break
+		}
+		for _, target := range []struct {
+			key  string
+			jobs int
+		}{{"cpu", cpuJobs}, {"gpu", gpuJobs}} {
+			if s.children[target.key] == nil {
+				result.Error = "The " + target.key + " worker is reconnecting; try again shortly"
+				break
+			}
+			if _, err := control.Call(workerPipe(target.key), control.Request{Command: "set-max-jobs", MaxJobs: target.jobs}); err != nil {
+				result.Error = "Could not change the " + target.key + " worker limit"
+				break
+			}
+		}
+		if result.Error != "" {
 			break
 		}
 		next := s.state
-		copy := *next.Active
-		copy.MaxJobs = req.MaxJobs
-		next.Active = &copy
+		if cpuJobs+gpuJobs == 0 {
+			next.Paused = true
+		} else {
+			copy := *next.Active
+			copy.CPUJobs, copy.GPUJobs = cpuJobs, gpuJobs
+			next.Active = &copy
+			next.Paused = false
+		}
 		next.PendingLimit = false
 		if err := desktop.Save(s.dir, next); err != nil {
 			result.Error = "The limit changed, but could not be saved locally"
@@ -372,11 +457,14 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		s.state = next
 	case "prepare-upgrade":
 		s.maintenance = true
-		if s.child != nil {
-			r, err := control.Call("", control.Request{Command: "drain"})
-			if err != nil || r.Status.ActiveJobs != 0 || r.Status.ReservedJobs != 0 {
-				result.Error = "Jobs are still running. Wait for them to finish and try again."
-				s.maintenance = false
+		for _, profile := range []string{"cpu", "gpu"} {
+			if s.children[profile] != nil {
+				r, err := control.Call(workerPipe(profile), control.Request{Command: "drain"})
+				if err != nil || r.Status.ActiveJobs != 0 || r.Status.ReservedJobs != 0 {
+					result.Error = "Jobs are still running. Wait for them to finish and try again."
+					s.maintenance = false
+					break
+				}
 			}
 		}
 	default:
@@ -387,88 +475,141 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 }
 
 func (s *supervisor) run(ctx context.Context) {
-	var done <-chan error
+	if s.children == nil {
+		s.children = map[string]*exec.Cmd{}
+	}
+	if s.done == nil {
+		s.done = map[string]chan error{}
+	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
 		s.mu.Lock()
-		if !s.maintenance && s.child == nil && s.state.Active != nil {
-			if s.state.Pending == nil && s.state.PendingLimit {
-				if err := persistInitialLimit(ctx, *s.state.Active); err != nil {
-					s.message = "Could not connect to the server or save the limit; retrying"
-					s.mu.Unlock()
-					select {
-					case <-ctx.Done():
-						return
-					case <-ticker.C:
-						continue
+		if !s.maintenance && s.state.Active != nil {
+			if s.state.Pending == nil && s.state.PendingLimit && s.allChildrenStoppedLocked() {
+				ok := true
+				for _, profile := range s.state.Active.Profiles() {
+					if s.state.Paused {
+						profile.Jobs = 0
+					}
+					if err := persistInitialLimit(ctx, *s.state.Active, profile); err != nil {
+						ok = false
+						s.message = "Could not connect to the server or save worker limits; retrying"
+						break
 					}
 				}
-				next := s.state
-				next.PendingLimit = false
-				if err := desktop.Save(s.dir, next); err != nil {
-					s.message = "Could not save configuration state"
-					s.mu.Unlock()
-					select {
-					case <-ctx.Done():
-						return
-					case <-ticker.C:
-						continue
+				if ok {
+					next := s.state
+					next.PendingLimit = false
+					if err := desktop.Save(s.dir, next); err != nil {
+						s.message = "Could not save configuration state"
+					} else {
+						s.state = next
 					}
 				}
-				s.state = next
 			}
-			if err := desktop.WorkerConfig(s.dir, *s.state.Active); err != nil {
-				s.message = "Could not prepare the worker configuration"
-			} else {
-				cmd := exec.Command(s.worker, "--noUpdates")
-				cmd.Dir = s.dir
-				cmd.Env = append(os.Environ(), "TRANSCODERD_INTERNAL_CONFIG="+filepath.Join(s.dir, "config.yaml"))
-				logFile, logErr := os.OpenFile(filepath.Join(s.dir, "worker.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-				if logErr != nil {
-					s.message = "Could not open the worker log"
-					s.mu.Unlock()
-					select {
-					case <-ctx.Done():
-						return
-					case <-ticker.C:
-						continue
+			if s.state.Pending != nil {
+				if !s.pendingDrain {
+					allDrained := true
+					for _, profile := range []string{"cpu", "gpu"} {
+						if s.children[profile] != nil {
+							_, err := control.Call(workerPipe(profile), control.Request{Command: "drain"})
+							if err != nil {
+								allDrained = false
+							}
+						}
+					}
+					if allDrained {
+						s.pendingDrain = true
 					}
 				}
-				cmd.Stdout = logFile
-				cmd.Stderr = logFile
-				if err = cmd.Start(); err != nil {
-					_ = logFile.Close()
-					s.message = "Could not start the worker"
-				} else {
-					s.child = cmd
-					s.pendingDrain = false
-					s.message = ""
-					ch := make(chan error, 1)
-					done = ch
-					go func() { err := cmd.Wait(); _ = logFile.Close(); ch <- err }()
-				}
-			}
-		}
-		if !s.maintenance && s.child != nil && s.state.Pending != nil {
-			if !s.pendingDrain {
-				if _, err := control.Call("", control.Request{Command: "drain"}); err == nil {
-					s.pendingDrain = true
-				}
-			}
-			if s.pendingDrain {
-				if r, err := control.Call("", control.Request{Command: "status"}); err == nil && r.Status.ActiveJobs == 0 && r.Status.ReservedJobs == 0 {
-					if _, err := control.Call("", control.Request{Command: "shutdown"}); err == nil {
+				if s.pendingDrain {
+					allIdle := true
+					for _, profile := range []string{"cpu", "gpu"} {
+						if s.children[profile] != nil {
+							r, err := control.Call(workerPipe(profile), control.Request{Command: "status"})
+							if err != nil || r.Status.ActiveJobs != 0 || r.Status.ReservedJobs != 0 {
+								allIdle = false
+							}
+						}
+					}
+					if allIdle {
+						for _, profile := range []string{"cpu", "gpu"} {
+							if s.children[profile] != nil {
+								_, _ = control.Call(workerPipe(profile), control.Request{Command: "shutdown"})
+							}
+						}
 						s.readyToApply = true
 					}
 				}
+				if s.allChildrenStoppedLocked() && s.readyToApply {
+					next := s.state
+					next.Active = next.Pending
+					next.Pending = nil
+					next.PendingLimit = true
+					if desktop.Save(s.dir, next) == nil {
+						s.state = next
+					} else {
+						s.message = "Could not apply pending settings"
+					}
+					s.readyToApply = false
+					s.pendingDrain = false
+				}
+			} else if s.state.PendingLimit && !s.allChildrenStoppedLocked() {
+				ok := true
+				for _, profile := range s.state.Active.Profiles() {
+					if s.state.Paused {
+						profile.Jobs = 0
+					}
+					if s.children[profile.Key] != nil {
+						if _, err := control.Call(workerPipe(profile.Key), control.Request{Command: "set-max-jobs", MaxJobs: profile.Jobs}); err != nil {
+							ok = false
+						}
+					}
+					if s.children[profile.Key] == nil {
+						if err := persistInitialLimit(ctx, *s.state.Active, profile); err != nil {
+							ok = false
+						}
+					}
+				}
+				if ok {
+					next := s.state
+					next.PendingLimit = false
+					if desktop.Save(s.dir, next) == nil {
+						s.state = next
+					}
+				}
 			}
-		} else if !s.maintenance && s.child != nil && s.state.PendingLimit {
-			if _, err := control.Call("", control.Request{Command: "set-max-jobs", MaxJobs: s.state.Active.MaxJobs}); err == nil {
-				next := s.state
-				next.PendingLimit = false
-				if desktop.Save(s.dir, next) == nil {
-					s.state = next
+			if s.state.Pending == nil && !s.state.PendingLimit {
+				for _, profile := range s.state.Active.Profiles() {
+					if s.children[profile.Key] != nil {
+						continue
+					}
+					if err := desktop.WorkerConfigForProfile(s.dir, *s.state.Active, profile, s.state.Paused); err != nil {
+						s.message = "Could not prepare the worker configuration"
+						break
+					}
+					cmd := exec.Command(s.worker, "--noUpdates")
+					cmd.Dir = s.dir
+					cmd.Env = append(os.Environ(), "TRANSCODERD_INTERNAL_CONFIG="+filepath.Join(s.dir, "config-"+profile.Key+".yaml"), "TRANSCODERD_CONTROL_PIPE="+workerPipe(profile.Key))
+					logFile, err := os.OpenFile(filepath.Join(s.dir, "worker-"+profile.Key+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+					if err != nil {
+						s.message = "Could not open a worker log"
+						break
+					}
+					cmd.Stdout, cmd.Stderr = logFile, logFile
+					if err = cmd.Start(); err != nil {
+						_ = logFile.Close()
+						s.message = "Could not start the " + profile.Key + " worker"
+						break
+					}
+					s.children[profile.Key] = cmd
+					ch := make(chan error, 1)
+					s.done[profile.Key] = ch
+					go func(c *exec.Cmd, f *os.File, done chan error) { err := c.Wait(); _ = f.Close(); done <- err }(cmd, logFile, ch)
+				}
+				if len(s.children) == 2 {
+					s.message = ""
 				}
 			}
 		}
@@ -476,48 +617,64 @@ func (s *supervisor) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			s.mu.Lock()
-			child := s.child
+			children := make(map[string]*exec.Cmd, len(s.children))
+			done := make(map[string]chan error, len(s.done))
+			for profile, child := range s.children {
+				children[profile] = child
+				done[profile] = s.done[profile]
+			}
 			s.mu.Unlock()
-			if child != nil {
-				_, _ = control.Call("", control.Request{Command: "shutdown"})
+			for profile, child := range children {
+				_, _ = control.Call(workerPipe(profile), control.Request{Command: "shutdown"})
 				select {
-				case <-done:
+				case <-done[profile]:
 				case <-time.After(8 * time.Second):
 					_ = child.Process.Kill()
-					<-done
+					<-done[profile]
 				}
 			}
 			return
-		case err := <-done:
+		case err := <-s.done["cpu"]:
 			s.mu.Lock()
-			s.child = nil
-			done = nil
-			s.pendingDrain = false
-			if s.state.Pending != nil && s.readyToApply {
-				next := s.state
-				next.Active = next.Pending
-				next.Pending = nil
-				if desktop.Save(s.dir, next) == nil {
-					s.state = next
-				} else {
-					s.message = "Could not apply pending settings"
-				}
-			} else if err != nil {
-				s.message = "The worker stopped; retrying"
-			}
-			s.readyToApply = false
+			delete(s.children, "cpu")
+			delete(s.done, "cpu")
+			s.onChildStoppedLocked(err)
+			s.mu.Unlock()
+		case err := <-s.done["gpu"]:
+			s.mu.Lock()
+			delete(s.children, "gpu")
+			delete(s.done, "gpu")
+			s.onChildStoppedLocked(err)
 			s.mu.Unlock()
 		case <-ticker.C:
 		}
 	}
 }
 
-func persistInitialLimit(ctx context.Context, settings desktop.Settings) error {
+func (s *supervisor) onChildStoppedLocked(err error) {
+	if s.state.Pending != nil && s.readyToApply && s.allChildrenStoppedLocked() {
+		next := s.state
+		next.Active = next.Pending
+		next.Pending = nil
+		next.PendingLimit = true
+		if desktop.Save(s.dir, next) == nil {
+			s.state = next
+		} else {
+			s.message = "Could not apply pending settings"
+		}
+		s.readyToApply = false
+		s.pendingDrain = false
+	} else if err != nil && !s.maintenance {
+		s.message = "A worker profile stopped; retrying"
+	}
+}
+
+func persistInitialLimit(ctx context.Context, settings desktop.Settings, profile desktop.Profile) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	body, err := json.Marshal(struct {
 		Max int `json:"maxActiveJobs"`
-	}{settings.MaxJobs})
+	}{profile.Jobs})
 	if err != nil {
 		return err
 	}
@@ -527,7 +684,7 @@ func persistInitialLimit(ctx context.Context, settings desktop.Settings) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+settings.Token)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("workerName", settings.Name)
+	req.Header.Set("workerName", profile.Name)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -625,7 +782,7 @@ func (h *handler) Execute(_ []string, changes <-chan svc.ChangeRequest, statuses
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s := &supervisor{dir: h.dir, worker: h.worker, state: state, systemOwner: true}
+	s := &supervisor{dir: h.dir, worker: h.worker, state: state, systemOwner: true, children: map[string]*exec.Cmd{}, done: map[string]chan error{}}
 	ready := make(chan error, 1)
 	go func() { ready <- s.serve(ctx, h.owner) }()
 	workerDone := make(chan struct{})
@@ -668,7 +825,7 @@ func runConsole(dir, worker string) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	supervisor := &supervisor{dir: dir, worker: worker, state: state, pipeSuffix: os.Getenv("TRANSCODERD_TEST_PIPE_SUFFIX"), testCancel: cancel}
+	supervisor := &supervisor{dir: dir, worker: worker, state: state, pipeSuffix: os.Getenv("TRANSCODERD_TEST_PIPE_SUFFIX"), testCancel: cancel, children: map[string]*exec.Cmd{}, done: map[string]chan error{}}
 	done := make(chan struct{})
 	go func() { defer close(done); supervisor.run(ctx) }()
 	go supervisor.pollQueue(ctx)

@@ -48,6 +48,13 @@ try {
  Start-Service TranscoderDWorker; (Get-Service TranscoderDWorker).WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
  $status=Invoke-Desktop @{command='configure';settings=@{domain=$ServerURL;token='e2e-test-token';name='desktop-e2e';codec='libsvtav1';maxJobs=0;schedule=@()}}
  if (-not $status.settings.tokenSet -or (($status | ConvertTo-Json -Depth 10) -match 'e2e-test-token')) { throw 'Token redaction failed.' }
+ $settingsPath = Join-Path $env:ProgramData 'TranscoderD\service.json'
+ $acl = Get-Acl -LiteralPath $settingsPath
+ foreach ($entry in $acl.Access) {
+  if ($entry.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+  $account = $entry.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+  if ($account -notin @('S-1-5-18','S-1-5-32-544')) { throw "Settings grant access to an unexpected account: $account" }
+ }
  $null=Wait-Worker 0
  $null=Invoke-Desktop @{command='set-max-jobs';maxJobs=1}
  $null=Wait-Worker 1

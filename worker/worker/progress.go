@@ -113,6 +113,14 @@ func (e *ReportStepProgressTracker) Logger() console.LeveledLogger {
 	return e.logger
 }
 
+// SetDisplayName lets a download reveal its filename as soon as headers arrive.
+func (e *ReportStepProgressTracker) SetDisplayName(name string) {
+	e.snapshotMu.Lock()
+	e.name = name
+	e.snapshotMu.Unlock()
+	e.updateSnapshot()
+}
+
 func (e *ReportStepProgressTracker) SetTotal(total int64) {
 	e.consoleStepTracker.SetTotal(total)
 	e.updateSnapshot()

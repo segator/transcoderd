@@ -25,9 +25,10 @@ func TestLocalProgressSnapshotLifecycle(t *testing.T) {
 	id := uuid.New()
 	tracker := executor.ReportTrackStep(&job.Context{JobId: id, Source: &job.VideoData{OriginalName: "film.mkv"}}, "video", model.FFMPEGSNotification)
 	tracker.SetTotal(100)
+	tracker.SetDisplayName("film renamed.mkv")
 	tracker.UpdateValue(45)
 	got := executor.progress.snapshot()
-	if len(got) != 1 || got[0].JobID != id.String() || got[0].Name != "film.mkv" || got[0].StepID != "video" || got[0].Percent != 45 {
+	if len(got) != 1 || got[0].JobID != id.String() || got[0].Name != "film renamed.mkv" || got[0].StepID != "video" || got[0].Percent != 45 {
 		t.Fatalf("snapshot = %+v, want video at 45%%", got)
 	}
 	tracker.Done()

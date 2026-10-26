@@ -86,6 +86,9 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 			return err
 		}
 		originalName = filepath.Base(params["filename"])
+		if named, ok := tracker.(interface{ SetDisplayName(string) }); ok && params["filename"] != "" {
+			named.SetDisplayName(originalName)
+		}
 
 		sourceFilePath = filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%s%s", jobContext.JobId.String(), filepath.Ext(params["filename"])))
 		downloadFile, err := os.Create(sourceFilePath)

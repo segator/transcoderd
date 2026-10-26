@@ -29,6 +29,10 @@ The tray application SHALL present an HTML-based dashboard showing service conne
 - **WHEN** one or more jobs are encoding
 - **THEN** the tray window shows their identifiers, progress and estimated time remaining when available
 
+#### Scenario: Download in progress
+- **WHEN** a source download has provided its filename
+- **THEN** the dashboard shows that filename and the available download progress
+
 #### Scenario: Prefetched work
 - **WHEN** an accepted source has been downloaded and is waiting for an encode slot
 - **THEN** the dashboard identifies it as ready to encode separately from active encodes and downloads

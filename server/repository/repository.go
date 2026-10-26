@@ -9,6 +9,7 @@ import (
 	"fmt"
 	_ "github.com/lib/pq"
 	log "github.com/sirupsen/logrus"
+	"path/filepath"
 	"time"
 	"transcoder/model"
 )
@@ -36,6 +37,7 @@ type Repository interface {
 	GetWorkerMaxActiveJobs(ctx context.Context, name string) (*int, error)
 	SetWorkerMaxActiveJobs(ctx context.Context, name string, max int) error
 	RetrieveQueuedJob(ctx context.Context) (*model.Job, error)
+	ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error)
 	GetAllProgressJobs(ctx context.Context) ([]model.TaskProgressType, error)
 }
 
@@ -344,6 +346,29 @@ func (s *SQLRepository) RetrieveQueuedJob(ctx context.Context) (video *model.Job
 		return nil, err
 	}
 	return s.queuedJob(ctx, conn)
+}
+
+func (s *SQLRepository) ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error) {
+	result := model.QueueSnapshot{Jobs: []model.QueuedJob{}}
+	conn, err := s.getConnection()
+	if err != nil {
+		return result, err
+	}
+	rows, err := conn.QueryContext(ctx, `SELECT v.id, v.source_path, vs.event_time, count(*) OVER() FROM jobs v JOIN job_status vs ON v.id = vs.job_id WHERE vs.notification_type = 'Job' AND vs.status = 'queued' ORDER BY vs.event_time ASC, v.id ASC LIMIT 100`)
+	if err != nil {
+		return result, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var j model.QueuedJob
+		var path string
+		if err := rows.Scan(&j.ID, &path, &j.QueuedAt, &result.Total); err != nil {
+			return result, err
+		}
+		j.Name = filepath.Base(path)
+		result.Jobs = append(result.Jobs, j)
+	}
+	return result, rows.Err()
 }
 
 func (s *SQLRepository) GetJobsByStatus(ctx context.Context, notificationType model.NotificationType, status model.NotificationStatus) (jobs []*model.Job, returnError error) {

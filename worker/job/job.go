@@ -25,10 +25,11 @@ type Context struct {
 }
 
 type VideoData struct {
-	FilePath    string                    `json:"file_path"`
-	Checksum    string                    `json:"checksum"`
-	FFProbeData *ffmpeg.NormalizedFFProbe `json:"ffprobe_data"`
-	Size        int64
+	FilePath     string                    `json:"file_path"`
+	OriginalName string                    `json:"original_name,omitempty"`
+	Checksum     string                    `json:"checksum"`
+	FFProbeData  *ffmpeg.NormalizedFFProbe `json:"ffprobe_data"`
+	Size         int64
 }
 
 type ContextEvent struct {

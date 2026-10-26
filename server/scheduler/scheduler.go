@@ -38,6 +38,7 @@ type Scheduler interface {
 	HandleWorkerEvent(ctx context.Context, taskEvent *model.EnvelopEvent) error
 	CancelJob(ctx context.Context, id string) error
 	GetJob(ctx context.Context, id string) (*model.Job, error)
+	ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error)
 }
 
 type Config struct {
@@ -55,6 +56,10 @@ type RuntimeScheduler struct {
 	pathChecksumMap map[string]string
 	jobRequestMu    sync.Mutex
 	handleEventMu   sync.Mutex
+}
+
+func (r *RuntimeScheduler) ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error) {
+	return r.repo.ListQueuedJobs(ctx)
 }
 
 func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*model.RequestJobResponse, error) {

@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory=$true)][string]$ServerBinary,
     [Parameter(Mandatory=$true)][string]$Fixture,
     [Parameter(Mandatory=$true)][string]$EvidenceDirectory,
-    [string]$PostgresBin = $env:PGBIN
+    [string]$PostgresBin = $env:PGBIN,
+    [string]$DesktopInstaller
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -75,14 +76,21 @@ try {
             -WorkingDirectory $run -PassThru -NoNewWindow -RedirectStandardOutput $serverLog -RedirectStandardError $serverErr
     }
     finally { $env:PATH = $previousPath }
-    & (Join-Path $PSScriptRoot 'test-worker.ps1') -Bundle $Bundle -TestBinary $TestBinary `
-        -ServerURL "http://127.0.0.1:$httpPort" -Codec libsvtav1 -EvidenceDirectory (Join-Path $EvidenceDirectory 'worker')
+    if ($DesktopInstaller) {
+        & (Join-Path $PSScriptRoot 'test-desktop-installer.ps1') -Installer $DesktopInstaller -ServerURL "http://127.0.0.1:$httpPort" -TestBinary $TestBinary
+    } else {
+        & (Join-Path $PSScriptRoot 'test-worker.ps1') -Bundle $Bundle -TestBinary $TestBinary `
+            -ServerURL "http://127.0.0.1:$httpPort" -Codec libsvtav1 -EvidenceDirectory (Join-Path $EvidenceDirectory 'worker')
+    }
     Write-Output 'Hosted-runner Windows SVT-AV1 CPU E2E passed.'
 }
 finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force; $server.WaitForExit() }
     if ($databaseStarted) {
         Invoke-Program (Join-Path $PostgresBin 'pg_ctl.exe') @('-D',$data,'-m','immediate','-w','stop') 'postgres-stop'
+    }
+    if ($DesktopInstaller -and (Test-Path "$env:ProgramData\TranscoderD\worker.log")) {
+        Copy-Item "$env:ProgramData\TranscoderD\worker.log" (Join-Path $EvidenceDirectory 'desktop-worker.log')
     }
     if (Test-Path $serverLog) { Get-Content -Encoding UTF8 -LiteralPath $serverLog }
     if (Test-Path $serverErr) { Get-Content -Encoding UTF8 -LiteralPath $serverErr }

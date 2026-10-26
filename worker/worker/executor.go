@@ -34,6 +34,8 @@ type JobExecutor struct {
 	mu           sync.RWMutex
 	admissionMu  sync.Mutex
 	settingsMu   sync.Mutex
+	progress     progressRegistry
+	jobs         jobRegistry
 	client       *serverclient.ServerClient
 	encodePool   *encodeConcurrency
 
@@ -61,6 +63,7 @@ func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerCli
 		encodePool:    newEncodeConcurrency(workerConfig.EncodeParallelJobs()),
 	}
 	stepExecutors := setupStepExecutors(jobExecutor)
+	jobExecutor.trackPipeline(stepExecutors)
 	jobExecutor.stepExecutors = stepExecutors
 
 	if err := os.MkdirAll(tempPath, os.ModePerm); err != nil {
@@ -270,6 +273,8 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 		ActiveEncodes:   activeEncodes,
 		MaxEncodes:      maxEncodes,
 		WithinSchedule:  withinSchedule,
+		Progress:        e.progress.snapshot(),
+		Jobs:            e.jobs.snapshot(),
 	}
 }
 
@@ -474,7 +479,7 @@ func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step
 		go func() {
 			defer wg.Done()
 			for action := range actionsChan {
-				tracker := e.ReportTrackStep(jobContext.JobId, action.Id, stepExecutor.NotificationType())
+				tracker := e.ReportTrackStep(jobContext, action.Id, stepExecutor.NotificationType())
 				if err := action.Execute(ctx, tracker); err != nil {
 					tracker.Logger().Errorf("Error on executing step %s: %s", stepExecutor.NotificationType(), err.Error())
 					tracker.Error()
@@ -510,7 +515,9 @@ func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step
 }
 
 func (e *JobExecutor) CleanJob(jobContext *job.Context) error {
-	return e.cleanJob(jobContext.Clean)
+	err := e.cleanJob(jobContext.Clean)
+	e.jobs.remove(jobContext.JobId.String())
+	return err
 }
 
 func (e *JobExecutor) cleanJob(cleanup func() error) error {
@@ -525,7 +532,13 @@ func (e *JobExecutor) ConsoleTrackStep(stepId string, notificationType model.Not
 }
 
 // ReportTrackStep This one is like consoleTrackStep but also reports progress to server
-func (e *JobExecutor) ReportTrackStep(jobId uuid.UUID, stepId string, notificationType model.NotificationType) *ReportStepProgressTracker {
+func (e *JobExecutor) ReportTrackStep(jobContext *job.Context, stepId string, notificationType model.NotificationType) *ReportStepProgressTracker {
 	consoleTracker := e.ConsoleTrackStep(stepId, notificationType)
-	return newReportStepProgressTracker(jobId, stepId, notificationType, e.client, consoleTracker)
+	tracker := newReportStepProgressTracker(jobContext.JobId, stepId, notificationType, e.client, consoleTracker)
+	if jobContext.Source != nil {
+		tracker.name = jobContext.Source.OriginalName
+	}
+	tracker.registry = &e.progress
+	tracker.updateSnapshot()
+	return tracker
 }

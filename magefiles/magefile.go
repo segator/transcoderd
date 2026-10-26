@@ -158,6 +158,7 @@ func projectSource(client *dagger.Client) *dagger.Directory {
 		Exclude: []string{
 			".git", ".github", ".agents", "build", "dist", "magefiles",
 			"docs", "openspec", "scripts", "AGENTS.md", "README*", "CHANGELOG*",
+			"windows/desktop/bin", "windows/desktop/obj", "windows/desktop/publish",
 		},
 	})
 }

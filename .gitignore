@@ -25,3 +25,8 @@ coverage.out
 # mise
 .mise/
 
+
+# Windows desktop build outputs
+/windows/desktop/bin/
+/windows/desktop/obj/
+/windows/desktop/publish/

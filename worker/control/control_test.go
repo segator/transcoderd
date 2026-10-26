@@ -25,8 +25,9 @@ func TestAdmissionStatusJSONIncludesAcceptedJobCeiling(t *testing.T) {
 }
 
 type fakeController struct {
-	mu     sync.Mutex
-	status AdmissionStatus
+	mu        sync.Mutex
+	status    AdmissionStatus
+	persisted int
 }
 
 func (f *fakeController) AdmissionStatus() AdmissionStatus {
@@ -41,6 +42,7 @@ func (f *fakeController) PersistMaxActiveJobs(max int) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.persisted++
 	f.status.MaxActiveJobs = max
 	f.status.MaxAcceptedJobs = max
 	if max > 0 {
@@ -51,6 +53,40 @@ func (f *fakeController) PersistMaxActiveJobs(max int) error {
 		f.status.MaxEncodes = max
 	}
 	return nil
+}
+
+func (f *fakeController) SetMaxActiveJobs(max int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status.MaxActiveJobs = max
+	f.status.Accepting = max > 0
+	return nil
+}
+
+func TestTransientDrainAndShutdown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker.sock")
+	state := &fakeController{status: AdmissionStatus{Accepting: true, MaxActiveJobs: 3, ActiveJobs: 1, MaxEncodes: 3}}
+	shutdown := make(chan struct{}, 1)
+	server, err := Start(path, state, func() { shutdown <- struct{}{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	got, err := Call(path, Request{Command: "drain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Accepting || got.Status.ActiveJobs != 1 || got.Status.MaxEncodes != 3 || state.persisted != 0 {
+		t.Fatalf("drain status = %+v, persisted = %d", got.Status, state.persisted)
+	}
+	if _, err := Call(path, Request{Command: "shutdown"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-shutdown:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown was not requested")
+	}
 }
 
 func TestControlCommandsUpdateRunningWorker(t *testing.T) {

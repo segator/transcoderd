@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"net/url"
+	"os"
 	"reflect"
 	"time"
 )
@@ -13,9 +14,13 @@ import (
 func ViperConfig(opts *CommandLineConfig) {
 
 	viper.SetConfigType("yaml")
-	viper.AddConfigPath("/etc/transcoderd/")
-	viper.AddConfigPath("$HOME/.transcoderd/")
-	viper.AddConfigPath(".")
+	if path := os.Getenv("TRANSCODERD_INTERNAL_CONFIG"); path != "" {
+		viper.SetConfigFile(path)
+	} else {
+		viper.AddConfigPath("/etc/transcoderd/")
+		viper.AddConfigPath("$HOME/.transcoderd/")
+		viper.AddConfigPath(".")
+	}
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix("TR")
 	err := viper.ReadInConfig()

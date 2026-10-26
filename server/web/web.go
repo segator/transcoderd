@@ -31,6 +31,17 @@ type Server struct {
 	updater       *update.Updater
 }
 
+func (s *Server) listQueuedJobs(writer http.ResponseWriter, request *http.Request) {
+	queue, err := s.scheduler.ListQueuedJobs(request.Context())
+	if webError(writer, err, http.StatusInternalServerError) {
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(writer).Encode(queue); err != nil {
+		log.Errorf("Error writing queue response: %v", err)
+	}
+}
+
 func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 	workerName := request.Header.Get("workerName")
 	if workerName == "" {
@@ -397,6 +408,7 @@ func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update
 		},
 	}
 	rtr.Handle("/api/v1/job/", webServer.AuthFunc(webServer.addJobs)).Methods("POST")
+	rtr.Handle("/api/v1/jobs/queued", webServer.AuthFunc(webServer.listQueuedJobs)).Methods("GET")
 	rtr.Handle("/api/v1/job/request", webServer.AuthFunc(webServer.requestJob)).Methods("GET")
 	rtr.Handle("/api/v1/worker/settings", webServer.AuthFunc(webServer.getWorkerSettings)).Methods("GET")
 	rtr.Handle("/api/v1/worker/settings", webServer.AuthFunc(webServer.setWorkerSettings)).Methods("PUT")

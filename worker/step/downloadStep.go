@@ -56,6 +56,7 @@ func (d *DownloadStepExecutor) actions(jobContext *job.Context) []Action {
 func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jobContext *job.Context) (*job.VideoData, error) {
 	var sourceFilePath string
 	var sourceChecksum string
+	var originalName string
 	var fileSize int64
 	logger := tracker.Logger()
 	err := retry.Do(func() error {
@@ -84,6 +85,7 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 		if err != nil {
 			return err
 		}
+		originalName = filepath.Base(params["filename"])
 
 		sourceFilePath = filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%s%s", jobContext.JobId.String(), filepath.Ext(params["filename"])))
 		downloadFile, err := os.Create(sourceFilePath)
@@ -139,10 +141,11 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 	}
 
 	return &job.VideoData{
-		FilePath:    sourceFilePath,
-		Checksum:    sourceChecksum,
-		Size:        fileSize,
-		FFProbeData: normalizedFFProbeData,
+		FilePath:     sourceFilePath,
+		OriginalName: originalName,
+		Checksum:     sourceChecksum,
+		Size:         fileSize,
+		FFProbeData:  normalizedFFProbeData,
 	}, nil
 }
 

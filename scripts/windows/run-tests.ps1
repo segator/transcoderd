@@ -10,7 +10,11 @@ $OutputEncoding = [Console]::OutputEncoding
 $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;" + $env:PATH
 $env:PATHEXT = '.COM;.EXE;.BAT;.CMD'
 $failed = $false
-$tests = @(Get-ChildItem -LiteralPath $TestDirectory -Filter '*.test.exe')
+# Only execute artifacts produced by test:windowsBinaries; older local builds may
+# leave unrelated test executables in this reusable output directory.
+$tests = @(Get-ChildItem -LiteralPath $TestDirectory -Filter '*.test.exe' | Where-Object {
+    $_.Name -eq 'windows-bundle.test.exe' -or $_.Name -match '^transcoder_(cmd|helper|model|update|version|worker)(_|\.test\.exe$)'
+})
 if ($tests.Count -eq 0) { throw 'No Windows test executables found.' }
 if ($Bundle -or $Fixture) {
     if (-not $Bundle -or -not $Fixture) { throw 'Bundle and Fixture must be supplied together.' }

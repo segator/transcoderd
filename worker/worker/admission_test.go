@@ -43,6 +43,54 @@ func TestZeroMaximumStopsAdmissionAndPositiveMaximumRestoresIt(t *testing.T) {
 	worker.ReleaseJobSlot()
 }
 
+func TestAdmissionAllowsExactlyTwoPipelineBufferJobs(t *testing.T) {
+	worker := testAdmissionWorker(2)
+	for i := 0; i < 4; i++ {
+		if !worker.ReserveJobSlot() {
+			t.Fatalf("ReserveJobSlot() failed for accepted job %d of 4", i+1)
+		}
+	}
+	if worker.ReserveJobSlot() {
+		t.Fatal("ReserveJobSlot() accepted a fifth job beyond two encode slots and two pipeline buffer jobs")
+	}
+	status := worker.AdmissionStatus()
+	if status.MaxActiveJobs != 2 || status.MaxAcceptedJobs != 4 {
+		t.Fatalf("status = encode target %d, admission ceiling %d; want 2 and 4", status.MaxActiveJobs, status.MaxAcceptedJobs)
+	}
+	for i := 0; i < 4; i++ {
+		worker.ReleaseJobSlot()
+	}
+}
+
+func TestAdmissionCeilingIsZeroWhenDisabled(t *testing.T) {
+	worker := testAdmissionWorker(0)
+	if got := worker.AdmissionStatus().MaxAcceptedJobs; got != 0 {
+		t.Fatalf("MaxAcceptedJobs with zero target = %d, want 0", got)
+	}
+	if worker.ReserveJobSlot() {
+		t.Fatal("ReserveJobSlot() succeeded with a zero maximum")
+	}
+}
+
+func TestAdmissionCeilingUsesEffectiveEncodeOverride(t *testing.T) {
+	worker := testAdmissionWorker(4)
+	worker.encodePool.SetTarget(2)
+	if got := worker.AdmissionStatus().MaxAcceptedJobs; got != 4 {
+		t.Fatalf("MaxAcceptedJobs with two encodes and a two-job buffer = %d, want 4", got)
+	}
+	for i := 0; i < 4; i++ {
+		if !worker.ReserveJobSlot() {
+			t.Fatalf("reservation %d failed below the effective admission ceiling", i+1)
+		}
+	}
+	if worker.ReserveJobSlot() {
+		t.Fatal("worker admitted more than two jobs beyond the effective encode target")
+	}
+	for i := 0; i < 4; i++ {
+		worker.ReleaseJobSlot()
+	}
+}
+
 func TestZeroMaximumRetainsEncodeTargetForAcceptedJobs(t *testing.T) {
 	worker := testAdmissionWorker(2)
 	if err := worker.SetMaxActiveJobs(0); err != nil {
@@ -84,18 +132,22 @@ func TestLoweredMaximumWaitsForActiveJobs(t *testing.T) {
 
 func TestReservationCountsAgainstConcurrentLimitChange(t *testing.T) {
 	worker := testAdmissionWorker(2)
-	if !worker.ReserveJobSlot() {
-		t.Fatal("first reservation failed")
+	for i := 0; i < 3; i++ {
+		if !worker.ReserveJobSlot() {
+			t.Fatalf("reservation %d failed before lowering the maximum", i+1)
+		}
 	}
 	if err := worker.SetMaxActiveJobs(1); err != nil {
 		t.Fatal(err)
 	}
 	if worker.ReserveJobSlot() {
-		t.Fatal("worker made another reservation after lowering the maximum")
+		t.Fatal("worker made another reservation above the lowered admission ceiling")
 	}
-	worker.ReleaseJobSlot()
+	for i := 0; i < 3; i++ {
+		worker.ReleaseJobSlot()
+	}
 	if !worker.ReserveJobSlot() {
-		t.Fatal("worker did not reserve after the in-flight reservation was released")
+		t.Fatal("worker did not reserve after an in-flight reservation was released")
 	}
 	worker.ReleaseJobSlot()
 }
@@ -115,9 +167,9 @@ func TestScheduleAndMaximumBothGateAdmission(t *testing.T) {
 
 	start = elapsed - time.Minute
 	stop = start + 2*time.Hour
-	atomic.StoreUint32(&worker.activeJobs, 1)
+	atomic.StoreUint32(&worker.activeJobs, 3)
 	if worker.ReserveJobSlot() {
-		t.Fatal("worker accepted a job above its maximum while inside the schedule")
+		t.Fatal("worker accepted a job above its admission ceiling while inside the schedule")
 	}
 }
 

@@ -41,6 +41,11 @@ type JobExecutor struct {
 	stepExecutors map[model.NotificationType]*step.Executor
 }
 
+// pipelineBufferJobs keeps one job available for encoding while allowing a
+// recently encoded job to finish verification/upload. The buffer is bounded
+// so slower downstream stages cannot grow the worker's queue without limit.
+const pipelineBufferJobs = 2
+
 func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerClient, renderService *console.RenderService) *JobExecutor {
 	tempPath := filepath.Join(workerConfig.TemporalPath, fmt.Sprintf("worker-%s", workerConfig.Name))
 
@@ -247,18 +252,24 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
 	withinSchedule := e.workerConfig.AdmissionAllowedAt(time.Now())
-	var activeEncodes, maxEncodes int
+	var activeEncodes int
+	maxEncodes := e.maxActiveJobs
 	if e.encodePool != nil {
 		activeEncodes, maxEncodes = e.encodePool.Status()
 	}
+	maxAccepted := 0
+	if e.maxActiveJobs > 0 {
+		maxAccepted = maxAcceptedJobs(maxEncodes)
+	}
 	return AdmissionStatus{
-		Accepting:      !e.settingsPending && e.maxActiveJobs > 0 && withinSchedule,
-		ActiveJobs:     e.ActiveJobs(),
-		ReservedJobs:   e.reservedJobs,
-		MaxActiveJobs:  e.maxActiveJobs,
-		ActiveEncodes:  activeEncodes,
-		MaxEncodes:     maxEncodes,
-		WithinSchedule: withinSchedule,
+		Accepting:       !e.settingsPending && e.maxActiveJobs > 0 && withinSchedule,
+		ActiveJobs:      e.ActiveJobs(),
+		ReservedJobs:    e.reservedJobs,
+		MaxActiveJobs:   e.maxActiveJobs,
+		MaxAcceptedJobs: maxAccepted,
+		ActiveEncodes:   activeEncodes,
+		MaxEncodes:      maxEncodes,
+		WithinSchedule:  withinSchedule,
 	}
 }
 
@@ -319,7 +330,25 @@ func (e *JobExecutor) ReserveJobSlot() bool {
 }
 
 func (e *JobExecutor) canReserveJobSlotAt(now time.Time) bool {
-	return !e.settingsPending && e.maxActiveJobs > 0 && e.workerConfig.AdmissionAllowedAt(now) && int(e.ActiveJobs())+e.reservedJobs < e.maxActiveJobs
+	if e.settingsPending || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
+		return false
+	}
+	encodeTarget := e.maxActiveJobs
+	if e.encodePool != nil {
+		_, encodeTarget = e.encodePool.Status()
+	}
+	return uint64(e.ActiveJobs())+uint64(e.reservedJobs) < uint64(maxAcceptedJobs(encodeTarget))
+}
+
+func maxAcceptedJobs(encodeTarget int) int {
+	if encodeTarget <= 0 {
+		return 0
+	}
+	maxInt := int(^uint(0) >> 1)
+	if encodeTarget > maxInt-pipelineBufferJobs {
+		return maxInt
+	}
+	return encodeTarget + pipelineBufferJobs
 }
 
 func (e *JobExecutor) WithinAdmissionSchedule() bool {

@@ -3,6 +3,7 @@ package control
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -11,6 +12,17 @@ import (
 	"testing"
 	"time"
 )
+
+func TestAdmissionStatusJSONIncludesAcceptedJobCeiling(t *testing.T) {
+	status := AdmissionStatus{MaxActiveJobs: 2, MaxAcceptedJobs: 4}
+	encoded, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"maxAcceptedJobs":4`) {
+		t.Fatalf("serialized admission status = %s, want maxAcceptedJobs 4", encoded)
+	}
+}
 
 type fakeController struct {
 	mu     sync.Mutex
@@ -30,6 +42,10 @@ func (f *fakeController) PersistMaxActiveJobs(max int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.status.MaxActiveJobs = max
+	f.status.MaxAcceptedJobs = max
+	if max > 0 {
+		f.status.MaxAcceptedJobs += 2
+	}
 	f.status.Accepting = max > 0
 	if max > 0 {
 		f.status.MaxEncodes = max
@@ -39,7 +55,7 @@ func (f *fakeController) PersistMaxActiveJobs(max int) error {
 
 func TestControlCommandsUpdateRunningWorker(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "worker.sock")
-	state := &fakeController{status: AdmissionStatus{Accepting: true, ActiveJobs: 4, MaxActiveJobs: 4, ActiveEncodes: 2, MaxEncodes: 2}}
+	state := &fakeController{status: AdmissionStatus{Accepting: true, ActiveJobs: 4, MaxActiveJobs: 4, MaxAcceptedJobs: 6, ActiveEncodes: 2, MaxEncodes: 2}}
 	server, err := Start(path, state)
 	if err != nil {
 		t.Fatal(err)
@@ -58,9 +74,9 @@ func TestControlCommandsUpdateRunningWorker(t *testing.T) {
 		args []string
 		want string
 	}{
-		{args: []string{"set-max-jobs", "0"}, want: "max active jobs set to 0; accepting=false encodes=2/2"},
-		{args: []string{"set-max-jobs", "1"}, want: "max active jobs set to 1; accepting=true encodes=2/1"},
-		{args: []string{"status"}, want: "accepting=true active=4 reserved=0 max=1 encodes=2/1"},
+		{args: []string{"set-max-jobs", "0"}, want: "max jobs set to 0; admitted_limit=0; accepting=false encodes=2/2"},
+		{args: []string{"set-max-jobs", "1"}, want: "max jobs set to 1; admitted_limit=3; accepting=true encodes=2/1"},
+		{args: []string{"status"}, want: "accepting=true active=4 reserved=0 max_jobs=1 admitted_limit=3 encodes=2/1"},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.args, "-"), func(t *testing.T) {

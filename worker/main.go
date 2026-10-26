@@ -42,7 +42,7 @@ func init() {
 		defaultThreads = 16
 	}
 	pflag.Int("worker.threads", defaultThreads, "Worker Threads")
-	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum accepted jobs and default FFmpeg encode concurrency; 0 disables new job requests")
+	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum FFmpeg encode concurrency; the worker may accept two additional pipeline jobs; 0 disables new job requests")
 	pflag.Int("worker.pgsConfig.parallelJobs", 1, "Maximum PGS OCR actions per job")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
 	pflag.String("worker.pgsConfig.DLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")

@@ -1,4 +1,10 @@
-## ADDED Requirements
+# Windows Desktop Worker Specification
+
+## Purpose
+
+Lets Windows users install, configure, and monitor a native TranscoderD worker through a secure service and a web-based tray dashboard.
+
+## Requirements
 
 ### Requirement: Windows desktop worker installation
 The distribution SHALL provide an interactive Windows x64 installer that installs the worker, bundled media and OCR tools, a Windows service, and a per-user tray application. It SHALL support upgrades and uninstallation without deleting configuration or persisted work by default.

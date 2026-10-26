@@ -1,5 +1,7 @@
 # CPU and NVIDIA worker deployment
 
+For the native Windows x64 portable bundle, see [Windows deployment](worker-windows.md).
+
 The worker image includes the application, FFmpeg 9.0.2, SVT-AV1, AV1 NVENC,
 x265, `libfdk_aac`, ffprobe, mkvextract, .NET, PgsToSrt, Tesseract, and OCR
 language data. Pulling a built image requires no Go compiler, FFmpeg package,

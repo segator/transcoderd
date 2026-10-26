@@ -3,9 +3,9 @@ package control
 import (
 	"bytes"
 	"context"
-	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -46,12 +46,14 @@ func TestControlCommandsUpdateRunningWorker(t *testing.T) {
 	}
 	defer server.Close()
 
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("socket permissions = %o, want 600", got)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("socket permissions = %o, want 600", got)
+		}
 	}
 
 	tests := []struct {
@@ -96,7 +98,7 @@ func TestControlRejectsInvalidMaximumWithoutChangingState(t *testing.T) {
 
 func TestStartRejectsActiveSocketAndRemovesStaleSocket(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "worker.sock")
-	listener, err := net.Listen("unix", path)
+	listener, err := listenControl(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +108,7 @@ func TestStartRejectsActiveSocketAndRemovesStaleSocket(t *testing.T) {
 	}
 	_ = listener.Close()
 	deadline := time.Now().Add(time.Second)
-	for {
+	for runtime.GOOS != "windows" {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			break
 		}

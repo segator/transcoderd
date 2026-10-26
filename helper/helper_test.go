@@ -1,8 +1,27 @@
 package helper
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+func TestBundlePathWithSpacesAndUnicode(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "Transcoder películas")
+	path := filepath.Join(root, "bin", "ffmpeg.exe")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("tool"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := bundlePath(root, "bin/ffmpeg.exe", "ffmpeg"); got != path {
+		t.Fatalf("bundlePath() = %q, want %q", got, path)
+	}
+	if got := bundlePath(root, "missing.exe", "fallback"); got != "fallback" {
+		t.Fatalf("bundlePath() = %q, want fallback", got)
+	}
+}
 
 func TestValidExtension(t *testing.T) {
 	tests := []struct {

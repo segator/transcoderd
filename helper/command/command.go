@@ -94,6 +94,11 @@ func (c *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode i
 	}
 	cmd.Env = c.Env
 	cmd.Dir = c.WorkDir
+	attachProcess, closeProcess, err := prepareProcess(cmd)
+	if err != nil {
+		return -1, err
+	}
+	defer closeProcess()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return
@@ -104,6 +109,14 @@ func (c *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode i
 	}
 	if err = cmd.Start(); err != nil {
 		return -1, err
+	}
+	if err = attachProcess(); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return -1, err
+	}
+	if ctx.Err() != nil {
+		_ = cmd.Cancel()
 	}
 
 	wg.Add(2)

@@ -7,14 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"gopkg.in/vansante/go-ffprobe.v2"
 	"math"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"transcoder/helper"
 	"transcoder/model"
+
+	"gopkg.in/vansante/go-ffprobe.v2"
 )
 
 type Video struct {
@@ -131,7 +134,7 @@ func ExtractFFProbeData(ctx context.Context, inputFile string) (data *ffprobe.Pr
 		inputFile,
 	}
 
-	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	cmd := exec.CommandContext(ctx, helper.GetFFProbePath(), args...)
 	var outputBuf, stdErrBuf bytes.Buffer
 	cmd.Stdout = &outputBuf
 	cmd.Stderr = &stdErrBuf
@@ -161,7 +164,7 @@ func ProbeVideoDuration(ctx context.Context, inputFile string) (time.Duration, e
 		"-of", "csv=p=0",
 		inputFile,
 	}
-	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	cmd := exec.CommandContext(ctx, helper.GetFFProbePath(), args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return 0, fmt.Errorf("create ffprobe output pipe: %w", err)

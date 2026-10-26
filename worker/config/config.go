@@ -8,6 +8,7 @@ import (
 const DefaultMaxActiveJobs = 2
 
 type PGSConfig struct {
+	ExecutablePath    string `mapstructure:"executablePath" envconfig:"WORKER_PGS_EXECUTABLE_PATH"`
 	ParallelJobs      int    `mapstructure:"parallelJobs" envconfig:"WORKER_PGS_PARALLELJOBS"`
 	DLLPath           string `mapstructure:"DLLPath" envconfig:"WORKER_PGS_TO_SRT_DLL_PATH"`
 	TesseractDataPath string `mapstructure:"tessdataPath" envconfig:"WORKER_TESSERACT_DATA_PATH"`

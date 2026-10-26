@@ -240,6 +240,18 @@ func TestE2E(t *testing.T) {
 		if len(events) < 5 {
 			t.Errorf("Expected at least 5 events, got %d", len(events))
 		}
+		for _, phase := range []model.NotificationType{model.DownloadNotification, model.MKVExtractNotification, model.PGSNotification, model.FFMPEGSNotification, model.JobVerify, model.UploadNotification} {
+			completed := false
+			for _, event := range events {
+				if event.NotificationType == phase && event.Status == model.CompletedNotificationStatus {
+					completed = true
+					break
+				}
+			}
+			if !completed {
+				t.Errorf("Missing completed %s phase in E2E event history", phase)
+			}
+		}
 
 		firstEvent := events[0]
 		if firstEvent.Status != model.QueuedNotificationStatus {

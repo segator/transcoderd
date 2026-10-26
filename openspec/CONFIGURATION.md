@@ -219,8 +219,9 @@ explain each FFmpeg parameter, including audio and the CPU preset alternatives.
 | --- | --- | --- |
 | `worker.pgsConfig.parallelJobs` | `1` | Maximum parallel OCR actions for a PGS phase. Increase explicitly only when the worker has sufficient memory. |
 | `worker.pgsConfig.dotnetPath` | `dotnet` | .NET executable for PgsToSrt. |
+| `worker.pgsConfig.executablePath` | Empty, or bundled `pgs/PgsToSrt.exe` on Windows | Direct OCR executable; when set, supersedes the dotnet/assembly invocation. An explicit empty value restores the legacy invocation. |
 | `worker.pgsConfig.DLLPath` | `./PgsToSrt.dll` | OCR assembly. |
-| `worker.pgsConfig.tessdataPath` | `./tessdata` | Tesseract language data. |
+| `worker.pgsConfig.tessdataPath` | `./tessdata`, or bundled `tessdata` on Windows | Tesseract language data; bundled paths are resolved relative to the worker executable. |
 | `worker.pgsConfig.tessVersion` | `5` | Tesseract version passed to PgsToSrt. |
 | `worker.pgsConfig.libleptName` | `leptonica` | Leptonica library name. |
 | `worker.pgsConfig.libleptVersion` | `6` | Leptonica version passed to PgsToSrt. |

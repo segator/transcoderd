@@ -43,6 +43,12 @@ var (
 	imageVersionAliases []string
 )
 
+// Shared by Linux and Windows OCR distributions.
+const (
+	tessdataVersion = "ced78752cc61322fb554c280d13360b35b8684e4"
+	pgstosrtVersion = "ef11919491b5c98f9dcdaf13d721596e60efb7ed"
+)
+
 const e2eServerConfig = `server:
   database:
     host: postgres
@@ -854,6 +860,9 @@ func buildFFmpegBuilderImage(client *dagger.Client) *dagger.Container {
 			"https://github.com/markus-perl/ffmpeg-build-script.git",
 		}).
 		WithWorkdir("/app/ffmpeg-build-script").
+		// v9.0.10's FFmpeg 9.0.2 archive pin is stale. This is the official
+		// tar.gz verified with FFmpeg's FCF986EA...D67658D8 release signing key.
+		WithExec([]string{"sed", "-i", "s/6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9/84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98/g", "src/10-versions.sh"}).
 		WithExec([]string{
 			"bash", "-c",
 			"NUMJOBS=$(nproc); echo \"FFmpeg build parallel jobs: $NUMJOBS\"; export NUMJOBS; export CUDA_COMPUTE_CAPABILITY=75; export SKIPINSTALL=yes; ./build-ffmpeg --build --enable-gpl-and-non-free && " +
@@ -876,11 +885,6 @@ func pgsBuilderImage(client *dagger.Client) *dagger.Container {
 // buildPgsBuilderImage builds the PGS tools and OCR data as a pure Dagger pipeline.
 // Base: dotnet/sdk:8.0.419 with PgsToSrt + tessdata (~5min).
 func buildPgsBuilderImage(client *dagger.Client) *dagger.Container {
-	const (
-		tessdataVersion = "ced78752cc61322fb554c280d13360b35b8684e4"
-		pgstosrtVersion = "ef11919491b5c98f9dcdaf13d721596e60efb7ed"
-	)
-
 	return client.Container().
 		From("mcr.microsoft.com/dotnet/sdk:8.0.419").
 		WithDirectory("/pgs-patches", client.Host().Directory(filepath.Join(projectRoot(), "pgs-patches"))).

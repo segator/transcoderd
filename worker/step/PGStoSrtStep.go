@@ -4,17 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/asticode/go-astisub"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
 	"transcoder/helper/command"
 	"transcoder/model"
 	"transcoder/worker/config"
 	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
+
+	"github.com/asticode/go-astisub"
 )
 
 type PGSToSrtStepExecutor struct {
@@ -46,8 +49,8 @@ const minPGSFileSize = 1024
 
 func (p *PGSToSrtStepExecutor) convertPGSToSrt(ctx context.Context, tracker Tracker, jobContext *job.Context, subtitle *ffmpeg.Subtitle) error {
 	pgsConfig := p.pgsConfig
-	inputFilePath := fmt.Sprintf("%s/%d.sup", jobContext.WorkingDir, subtitle.Id)
-	outputFilePath := fmt.Sprintf("%s/%d.srt", jobContext.WorkingDir, subtitle.Id)
+	inputFilePath := filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%d.sup", subtitle.Id))
+	outputFilePath := filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%d.srt", subtitle.Id))
 
 	fi, err := os.Stat(inputFilePath)
 	if err != nil {
@@ -60,14 +63,15 @@ func (p *PGSToSrtStepExecutor) convertPGSToSrt(ctx context.Context, tracker Trac
 
 	language := calculateTesseractLanguage(subtitle.Language)
 
-	PGSToSrtCommand := command.NewCommand(pgsConfig.DotnetPath, pgsConfig.DLLPath,
+	arguments := []string{
 		"--tesseractversion", strconv.Itoa(pgsConfig.TessVersion),
 		"--libleptname", pgsConfig.LibleptName,
 		"--libleptversion", strconv.Itoa(pgsConfig.LibleptVersion),
 		"--input", inputFilePath,
 		"--output", outputFilePath,
 		"--tesseractlanguage", language,
-		"--tesseractdata", pgsConfig.TesseractDataPath)
+		"--tesseractdata", pgsConfig.TesseractDataPath}
+	PGSToSrtCommand := pgsCommand(pgsConfig, arguments)
 	outLog := ""
 	startRegex := regexp.MustCompile(`Starting OCR for (\d+) items`)
 	progressRegex := regexp.MustCompile(`Processed item (\d+)`)
@@ -145,6 +149,13 @@ func (p *PGSToSrtStepExecutor) convertPGSToSrt(ctx context.Context, tracker Trac
 	}
 
 	return err
+}
+
+func pgsCommand(cfg *config.PGSConfig, arguments []string) *command.Command {
+	if cfg.ExecutablePath != "" {
+		return command.NewCommand(cfg.ExecutablePath, arguments...)
+	}
+	return command.NewCommand(cfg.DotnetPath, append([]string{cfg.DLLPath}, arguments...)...)
 }
 
 var langMapping []PGSTesseractLanguage

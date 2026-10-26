@@ -31,6 +31,10 @@ These observations are not normative requirements. They need separate fixes or e
 - Job intake joins the submitted `sourcePath` with the media root but does not reject traversal segments or verify that the resolved path remains inside the root.
 - Viper enables a `TR_` environment prefix, but does not configure a nested-key replacer. The `envconfig` struct tags are not read by the Viper setup, so nested environment-variable spellings are not a verified interface.
 
+## Resolved implementation discrepancies
+
+- The FFmpeg build script pinned at `v9.0.10` embeds a stale SHA-256 for the FFmpeg 9.0.2 tar.gz, so a cold build can reject the intended release before compilation. During `windows-worker`, the official tar.gz was verified against FFmpeg's published RSA release key (`FCF986EA15E6E293A5644F10B4322F04D67658D8`). Linux and Windows builds now use its verified SHA-256, `84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98`, retaining FFmpeg 9.0.2 and the existing encoder profiles.
+
 ## Verification boundary
 
 `openspec validate --all --strict` checks document structure. Go unit tests cover parts of scheduling, media inspection, context persistence, and steps. PostgreSQL integration tests and Docker end-to-end tests use the `integration` build tag. Structural validation does not prove behavior; each future code change needs tests for the scenarios it affects.

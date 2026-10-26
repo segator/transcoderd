@@ -78,8 +78,9 @@ internal sealed class MainForm : Form
         this.smoke = smoke;
         this.rejectSmoke = rejectSmoke;
         client = new PipeClient(sid, smoke && !rejectSmoke);
+        Icon appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? MakeIcon();
         Text = "TranscoderD"; Size = new Size(1180, 780); MinimumSize = new Size(800, 600);
-        StartPosition = FormStartPosition.CenterScreen; BackColor = Color.FromArgb(244, 246, 250); Icon = MakeIcon();
+        StartPosition = FormStartPosition.CenterScreen; BackColor = Color.FromArgb(244, 246, 250); Icon = appIcon;
         Controls.Add(browser);
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open TranscoderD", null, (_, _) => ShowWindow());
@@ -87,7 +88,7 @@ internal sealed class MainForm : Form
         menu.Items.Add("Resume", null, async (_, _) => await SetLimit(lastTarget));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit tray", null, (_, _) => { quitting = true; Close(); });
-        tray = new NotifyIcon { Icon = Icon, Text = "TranscoderD", ContextMenuStrip = menu, Visible = true };
+        tray = new NotifyIcon { Icon = appIcon, Text = "TranscoderD worker dashboard", ContextMenuStrip = menu, Visible = true };
         tray.DoubleClick += (_, _) => ShowWindow();
         FormClosing += (_, e) => { if (!quitting && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); } };
         FormClosed += (_, _) => { tray.Visible = false; tray.Dispose(); browser.Dispose(); };

@@ -28,7 +28,12 @@ try {
  if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
  $service=Get-Service TranscoderDWorker; if ($service.Status -ne 'Running') { $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30)) }
  $status=Invoke-Desktop @{command='status'}; if ($status.configured) { throw 'Expected a clean service.' }
- $ui=Start-Process -FilePath (Join-Path $install 'transcoderd-tray.exe') -ArgumentList '--smoke' -PassThru
+ Add-Type -AssemblyName System.Drawing
+ $trayExe = Join-Path $install 'transcoderd-tray.exe'
+ $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($trayExe)
+ if ($null -eq $icon -or $icon.Width -lt 16 -or $icon.Height -lt 16) { throw 'Tray executable does not contain a usable application icon.' }
+ $icon.Dispose()
+ $ui=Start-Process -FilePath $trayExe -ArgumentList '--smoke' -PassThru
  $diagnostic = Join-Path $env:TEMP ("TranscoderD-tray-smoke-{0}.log" -f $ui.Id)
  Remove-Item -LiteralPath $diagnostic -Force -ErrorAction SilentlyContinue
  $null=$ui.Handle

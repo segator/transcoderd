@@ -50,7 +50,7 @@ docker run -d \
        -p 8080:8080 \
        -v /mnt/media:/mnt/media 
       -v ./transcoderd.yml:/etc/transcoderd/config.yml \
-      ghcr.io/segator/transcoderd:server-v2.7.3 # x-release-please-version
+      ghcr.io/segator/transcoderd:server-v2.8.0 # x-release-please-version
 ```
 
 ### Grafana Statistics

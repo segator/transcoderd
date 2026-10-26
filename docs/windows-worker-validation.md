@@ -67,3 +67,22 @@ and four nonempty PGS tracks. These checks establish fixture-level correctness;
 they are not a completed-film performance benchmark or a long-running soak test.
 Local raw logs and build outputs are retained under `dist/validation/`; native
 per-package logs are also retained in the Windows test directory.
+
+## Hosted-runner CPU harness
+
+The new `scripts/windows/test-ci.ps1` harness passed locally on native Windows
+with PostgreSQL 17.11 binaries, a private loopback cluster, the test-only native
+server, and the worker after merging current main. It explicitly uses SVT-AV1;
+no NVENC encode is attempted in hosted CI. The test checks the same full fixture
+workflow, including published download checksum and server-side output validation.
+It retains database/server/worker logs and stops its own processes afterward.
+
+Native job: `38ba8dde-d114-11f1-823b-1a4b24c6dc3c`. Raw local evidence is retained
+in `dist/validation/windows-ci-e2e.log` and the Windows validation directory
+`%TEMP%\transcoderd-windows-validation\ci-e2e-pass`.
+
+The fixture exposed a Windows read-only download flush failure. Its regression
+passed natively and on Linux after separating download close from upload sync.
+The hosted `windows-native` workflow now runs this CPU E2E after native units and
+bundled-tool checks. Its Windows release upload remains after all three gates.
+A release was not created or published during local validation.

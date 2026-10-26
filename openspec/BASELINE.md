@@ -33,6 +33,8 @@ These observations are not normative requirements. They need separate fixes or e
 
 ## Resolved implementation discrepancies
 
+- Native Windows CPU CI exposed a download close failure: syncing the read-only source invokes Windows FlushFileBuffers without write access and prevents checksum publication. Download streams now close without a write flush, then publish their checksum; upload streams retain their sync. A read-only download regression and the complete native E2E cover this fix.
+
 - The FFmpeg build script pinned at `v9.0.10` embeds a stale SHA-256 for the FFmpeg 9.0.2 tar.gz, so a cold build can reject the intended release before compilation. During `windows-worker`, the official tar.gz was verified against FFmpeg's published RSA release key (`FCF986EA15E6E293A5644F10B4322F04D67658D8`). Linux and Windows builds now use its verified SHA-256, `84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98`, retaining FFmpeg 9.0.2 and the existing encoder profiles.
 
 ## Verification boundary

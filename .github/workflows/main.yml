@@ -94,7 +94,7 @@ jobs:
 
   windows-native:
     needs: [ci, windows-build]
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -115,6 +115,14 @@ jobs:
         run: |
           ./scripts/windows/run-tests.ps1 -TestDirectory "$PWD/dist/windows-tests" `
             -Bundle $env:WINDOWS_BUNDLE -Fixture "$PWD/integration/testdata/e2e_fixture.mkv"
+      - name: Native Windows worker E2E with SVT-AV1 CPU
+        shell: pwsh
+        run: |
+          ./scripts/windows/test-ci.ps1 -Bundle $env:WINDOWS_BUNDLE `
+            -TestBinary "$PWD/dist/windows-tests/windows-bundle.test.exe" `
+            -ServerBinary "$PWD/dist/windows-tests/windows-e2e-server.exe" `
+            -Fixture "$PWD/integration/testdata/e2e_fixture.mkv" `
+            -EvidenceDirectory "$PWD/dist/windows-e2e"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -122,6 +130,8 @@ jobs:
           path: |
             dist/windows-tests/*.log
             dist/windows-tests/*.err
+            dist/windows-e2e/**/*.log
+            dist/windows-e2e/**/*.err
       - name: Upload validated Windows release assets
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci.outputs.release_created == 'true'
         shell: pwsh

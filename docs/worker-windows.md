@@ -78,3 +78,25 @@ Windows temporary directory. The NVENC run uses the default production profile.
 
 Measured native test results and their scope are recorded in
 [Windows validation](windows-worker-validation.md).
+
+## Hosted CI and releases
+
+The workflow runs Linux CI first, then the Dagger Windows cross-build, then native
+validation on `windows-2025`. Dagger also builds a test-only Windows server under
+`dist/windows-tests/`; it is not a distributed server product or release asset.
+
+The native job runs all unit and bundled-tool tests and then
+`scripts/windows/test-ci.ps1`. That harness creates its own PostgreSQL cluster
+using the runner's `PGBIN` tools, starts a native test server, and runs the full
+worker pipeline with `libsvtav1` and FDK AAC. It needs no GPU or Docker. Its source
+and database are isolated; it stops its own server and database in cleanup.
+Worker installation/workspace paths still contain spaces and Unicode. Logs are
+uploaded even on failure. The optional WSL/NVENC test above is local hardware
+validation and is not part of the hosted runner job.
+
+When Release Please creates a release, its full version is passed to the Windows
+build. Only after the native tests, tool checks and CPU E2E pass does the Windows
+job upload `transcoderd-worker-<version>-windows-amd64.zip` and
+`transcoderd-worker-windows-amd64.exe` to the same release tag. The raw executable
+is the asset selected by Windows self-update. PR runs upload CI artifacts without
+publishing release assets.

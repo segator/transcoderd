@@ -57,6 +57,7 @@ func (Test) WindowsBinaries(ctx context.Context) error {
 		WithEnvVariable("GOOS", "windows").WithEnvVariable("GOARCH", "amd64").
 		WithExec([]string{"bash", "-c", `set -eu; mkdir -p /output; for pkg in $(go list ./cmd/... ./helper/... ./model/... ./update/... ./version/... ./worker/...); do name=$(echo "$pkg" | tr / _); go test -c -o "/output/$name.test.exe" "$pkg"; done`}).
 		WithExec([]string{"go", "test", "-c", "-tags=integration", "-o", "/output/windows-bundle.test.exe", "./integration"}).
+		WithExec([]string{"go", "build", "-ldflags", ldflags("transcoderd-server"), "-o", "/output/windows-e2e-server.exe", "./server"}).
 		Directory("/output").Export(ctx, filepath.Join(projectRoot(), "dist", "windows-tests"))
 	return err
 }

@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory=$true)][string]$Bundle,
     [Parameter(Mandatory=$true)][string]$TestBinary,
     [Parameter(Mandatory=$true)][string]$ServerURL,
-    [ValidateSet('libsvtav1','av1_nvenc')][string]$Codec = 'libsvtav1'
+    [ValidateSet('libsvtav1','av1_nvenc')][string]$Codec = 'libsvtav1',
+    [string]$EvidenceDirectory
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -64,5 +65,10 @@ finally {
     if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
     if (Test-Path $workerLog) { Get-Content -Encoding UTF8 -LiteralPath $workerLog }
     if (Test-Path $workerErr) { Get-Content -Encoding UTF8 -LiteralPath $workerErr }
+    if ($EvidenceDirectory) {
+        New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
+        Get-ChildItem -LiteralPath $run -File | Where-Object { $_.Extension -in @('.log','.err') } |
+            Copy-Item -Destination $EvidenceDirectory
+    }
     Write-Output "Evidence retained at $run"
 }

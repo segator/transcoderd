@@ -29,9 +29,10 @@ func TestReserveJobSlotCombinesLimitAndWindow(t *testing.T) {
 	}{
 		{"available", 1, 2, nil, nil, true},
 		{"zero maximum", 0, 0, nil, nil, false},
-		{"at limit", 2, 2, nil, nil, false},
+		{"buffer allows preparation past encode target", 2, 2, nil, nil, true},
+		{"admission ceiling reached", 4, 2, nil, nil, false},
 		{"custom limit", 3, 4, nil, nil, true},
-		{"inside window at limit", 2, 2, &start, &stop, false},
+		{"inside window at admission ceiling", 4, 2, &start, &stop, false},
 		{"inside window available", 1, 2, &start, &stop, true},
 		{"outside window", 0, 2, &outsideStart, &outsideStop, false},
 	}
@@ -188,9 +189,9 @@ func TestAdmissionCombinesWeeklyScheduleWithLimit(t *testing.T) {
 	if e.ActiveJobs() != 3 {
 		t.Error("closing admission changed accepted job count")
 	}
-	atomic.StoreUint32(&e.activeJobs, 4)
+	atomic.StoreUint32(&e.activeJobs, 6)
 	if e.canReserveJobSlotAt(before) {
-		t.Error("admission bypassed the active-job limit inside a weekly window")
+		t.Error("admission bypassed the accepted-job ceiling inside a weekly window")
 	}
 }
 

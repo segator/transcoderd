@@ -354,7 +354,7 @@ func (s *SQLRepository) ListQueuedJobs(ctx context.Context) (model.QueueSnapshot
 	if err != nil {
 		return result, err
 	}
-	rows, err := conn.QueryContext(ctx, `SELECT v.id, v.source_path, vs.event_time, count(*) OVER() FROM jobs v JOIN job_status vs ON v.id = vs.job_id WHERE vs.notification_type = 'Job' AND vs.status = 'queued' ORDER BY vs.event_time ASC, v.id ASC LIMIT 100`)
+	rows, err := conn.QueryContext(ctx, `SELECT v.id, v.source_path, v.source_size, vs.event_time, count(*) OVER() FROM jobs v JOIN job_status vs ON v.id = vs.job_id WHERE vs.notification_type = 'Job' AND vs.status = 'queued' ORDER BY vs.event_time ASC, v.id ASC LIMIT 100`)
 	if err != nil {
 		return result, err
 	}
@@ -362,7 +362,7 @@ func (s *SQLRepository) ListQueuedJobs(ctx context.Context) (model.QueueSnapshot
 	for rows.Next() {
 		var j model.QueuedJob
 		var path string
-		if err := rows.Scan(&j.ID, &path, &j.QueuedAt, &result.Total); err != nil {
+		if err := rows.Scan(&j.ID, &path, &j.Size, &j.QueuedAt, &result.Total); err != nil {
 			return result, err
 		}
 		j.Name = filepath.Base(path)

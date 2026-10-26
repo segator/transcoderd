@@ -10,5 +10,6 @@ type QueueSnapshot struct {
 type QueuedJob struct {
 	ID       string    `json:"id"`
 	Name     string    `json:"name"`
+	Size     int64     `json:"size"`
 	QueuedAt time.Time `json:"queuedAt"`
 }

@@ -154,7 +154,7 @@ func (r *InMemoryRepository) ListQueuedJobs(ctx context.Context) (model.QueueSna
 		}
 		event := events[len(events)-1]
 		if event.NotificationType == model.JobNotification && event.Status == model.QueuedNotificationStatus {
-			result.Jobs = append(result.Jobs, model.QueuedJob{ID: id, Name: filepath.Base(job.SourcePath), QueuedAt: event.EventTime})
+			result.Jobs = append(result.Jobs, model.QueuedJob{ID: id, Name: filepath.Base(job.SourcePath), Size: job.SourceSize, QueuedAt: event.EventTime})
 		}
 	}
 	sort.Slice(result.Jobs, func(i, j int) bool {

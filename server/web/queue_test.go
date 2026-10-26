@@ -19,7 +19,7 @@ func TestQueuedJobsAreAuthenticatedBoundedAndOrdered(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 105; i++ {
 		id := uuid.New()
-		j := &model.Job{Id: id, SourcePath: fmt.Sprintf("/private/movie-%03d.mkv", i)}
+		j := &model.Job{Id: id, SourcePath: fmt.Sprintf("/private/movie-%03d.mkv", i), SourceSize: int64(i + 1)}
 		if err := repo.AddJob(ctx, j); err != nil {
 			t.Fatal(err)
 		}
@@ -49,7 +49,7 @@ func TestQueuedJobsAreAuthenticatedBoundedAndOrdered(t *testing.T) {
 	if err := json.Unmarshal(out.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Total != 105 || len(got.Jobs) != 100 || got.Jobs[0].Name != "movie-000.mkv" || got.Jobs[99].Name != "movie-099.mkv" {
+	if got.Total != 105 || len(got.Jobs) != 100 || got.Jobs[0].Name != "movie-000.mkv" || got.Jobs[0].Size != 1 || got.Jobs[99].Name != "movie-099.mkv" {
 		t.Fatalf("queue = %+v", got)
 	}
 }

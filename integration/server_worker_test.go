@@ -144,7 +144,7 @@ func TestServerWorkerIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Total != 1 || len(got.Jobs) != 1 || got.Jobs[0].ID != jobID || got.Jobs[0].Name != "test-video.mkv" {
+		if got.Total != 1 || len(got.Jobs) != 1 || got.Jobs[0].ID != jobID || got.Jobs[0].Name != "test-video.mkv" || got.Jobs[0].Size != 1024*1024 {
 			t.Fatalf("queued jobs = %+v, want one source filename", got)
 		}
 	})

@@ -49,6 +49,10 @@ The service SHALL restrict its control channel to the installing Windows user, S
 - **WHEN** an unrelated user attempts to access the local service pipe
 - **THEN** Windows denies access
 
+#### Scenario: A different process impersonates the service pipe
+- **WHEN** the tray connects to a pipe that is not owned by SYSTEM
+- **THEN** it refuses to exchange settings or credentials with that process
+
 #### Scenario: Service starts without an interactive session
 - **WHEN** Windows starts the service before any user logs in
 - **THEN** the configured worker can run without the tray application

@@ -139,6 +139,16 @@ func TestServerWorkerIntegration(t *testing.T) {
 		t.Logf("Job scheduled: %s", jobID)
 	})
 
+	t.Run("List queued job", func(t *testing.T) {
+		got, err := repo.ListQueuedJobs(testCtx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Total != 1 || len(got.Jobs) != 1 || got.Jobs[0].ID != jobID || got.Jobs[0].Name != "test-video.mkv" {
+			t.Fatalf("queued jobs = %+v, want one source filename", got)
+		}
+	})
+
 	t.Run("Request Job", func(t *testing.T) {
 		jobResponse, err := sched.RequestJob(testCtx, workerName)
 		if err != nil {

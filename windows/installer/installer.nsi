@@ -20,7 +20,6 @@ ShowInstDetails show
 ShowUninstDetails show
 !define MUI_ABORTWARNING
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -29,6 +28,7 @@ ShowUninstDetails show
 !insertmacro MUI_LANGUAGE "English"
 
 Function .onInit
+  StrCpy $INSTDIR "$PROGRAMFILES64\TranscoderD"
   ${IfNot} ${RunningX64}
     MessageBox MB_ICONSTOP "TranscoderD necesita Windows de 64 bits."
     Abort

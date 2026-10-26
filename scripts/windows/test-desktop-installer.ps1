@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { throw 'This destructive installer integration test is restricted to an isolated GitHub runner.' }
-$install = Join-Path $env:RUNNER_TEMP 'TranscoderD setup test'
+$install = Join-Path $env:ProgramFiles 'TranscoderD'
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $pipeName = 'transcoderd-desktop-' + $sid
 function Invoke-Desktop([object]$request) {
@@ -24,7 +24,7 @@ function Wait-Worker([int]$limit) {
  throw 'Worker did not reach the desired limit.'
 }
 try {
- $p=Start-Process -FilePath $Installer -ArgumentList @('/S',('/D=' + $install)) -PassThru -Wait
+ $p=Start-Process -FilePath $Installer -ArgumentList '/S' -PassThru -Wait
  if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
  $service=Get-Service TranscoderDWorker; if ($service.Status -ne 'Running') { $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30)) }
  $status=Invoke-Desktop @{command='status'}; if ($status.configured) { throw 'Expected a clean service.' }
@@ -32,6 +32,20 @@ try {
  $null=$ui.Handle
  if (-not $ui.WaitForExit(30000)) { Stop-Process -Id $ui.Id -Force; throw 'Tray web UI smoke test timed out.' }
  $ui.Refresh(); if ($ui.ExitCode -ne 0) { throw "Tray web UI smoke test failed: $($ui.ExitCode)" }
+ Stop-Service TranscoderDWorker; (Get-Service TranscoderDWorker).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))
+ $fakeDir = Join-Path $env:RUNNER_TEMP ('TranscoderD fake service ' + [guid]::NewGuid().ToString('N'))
+ New-Item -ItemType Directory -Path $fakeDir | Out-Null
+ $fake = Start-Process -FilePath (Join-Path $install 'transcoderd-desktop-service.exe') -ArgumentList @('--console',('"'+$fakeDir+'"'),('"'+$fakeDir+'\missing-worker.exe"')) -PassThru
+ try {
+  $ready=$false
+  for ($i=0; $i -lt 30; $i++) { try { $null=Invoke-Desktop @{command='status'}; $ready=$true; break } catch { Start-Sleep -Milliseconds 250 } }
+  if (-not $ready) { throw 'Fake test service did not start.' }
+  $ui=Start-Process -FilePath (Join-Path $install 'transcoderd-tray.exe') -ArgumentList '--smoke-reject' -PassThru
+  $null=$ui.Handle
+  if (-not $ui.WaitForExit(30000)) { Stop-Process -Id $ui.Id -Force; throw 'Pipe impersonation test timed out.' }
+  $ui.Refresh(); if ($ui.ExitCode -ne 0) { throw 'Tray did not reject the fake service pipe.' }
+ } finally { if (-not $fake.HasExited) { Stop-Process -Id $fake.Id -Force; $fake.WaitForExit() } }
+ Start-Service TranscoderDWorker; (Get-Service TranscoderDWorker).WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
  $status=Invoke-Desktop @{command='configure';settings=@{domain=$ServerURL;token='e2e-test-token';name='desktop-e2e';codec='libsvtav1';maxJobs=0;schedule=@()}}
  if (-not $status.settings.tokenSet -or (($status | ConvertTo-Json -Depth 10) -match 'e2e-test-token')) { throw 'Token redaction failed.' }
  $null=Wait-Worker 0

@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.IO.Pipes;
+using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
@@ -22,20 +23,38 @@ internal static class Program
         using var quitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\TranscoderD.Quit." + sid);
         if (!created) { if (args.Contains("--quit")) quitEvent.Set(); else showEvent.Set(); return; }
         if (args.Contains("--quit")) return;
-        using var form = new MainForm(sid, args.Contains("--background") || args.Contains("--smoke"), args.Contains("--smoke"));
+        bool rejectSmoke = args.Contains("--smoke-reject");
+        bool smoke = args.Contains("--smoke") || rejectSmoke;
+        using var form = new MainForm(sid, args.Contains("--background") || smoke, smoke, rejectSmoke);
         _ = Task.Run(() => { while (showEvent.WaitOne()) { if (form.IsDisposed) break; try { form.BeginInvoke((Action)form.ShowWindow); } catch (InvalidOperationException) { break; } } });
         _ = Task.Run(() => { quitEvent.WaitOne(); if (!form.IsDisposed) { try { form.BeginInvoke((Action)form.Quit); } catch (InvalidOperationException) { } } });
         Application.Run(form);
     }
 }
 
-internal sealed class PipeClient(string sid)
+internal sealed class PipeClient(string sid, bool allowUserOwner)
 {
+    [DllImport("advapi32.dll", SetLastError = true)] private static extern uint GetSecurityInfo(SafePipeHandle handle, int type, uint information, out IntPtr owner, out IntPtr group, out IntPtr dacl, out IntPtr sacl, out IntPtr descriptor);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr text);
+    [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr value);
+    private void VerifyOwner(SafePipeHandle handle)
+    {
+        uint error = GetSecurityInfo(handle, 6, 1, out IntPtr owner, out _, out _, out _, out IntPtr descriptor);
+        if (error != 0) throw new IOException("No se pudo verificar la identidad del servicio.");
+        try {
+            if (!ConvertSidToStringSid(owner, out IntPtr text)) throw new IOException("No se pudo verificar la identidad del servicio.");
+            try {
+                string actual = Marshal.PtrToStringUni(text) ?? "";
+                if (!string.Equals(actual, "S-1-5-18", StringComparison.OrdinalIgnoreCase) && !(allowUserOwner && string.Equals(actual, sid, StringComparison.OrdinalIgnoreCase))) throw new IOException("La identidad del servicio no es válida.");
+            } finally { LocalFree(text); }
+        } finally { LocalFree(descriptor); }
+    }
     public async Task<string> SendAsync(string request)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
         using var pipe = new NamedPipeClientStream(".", "transcoderd-desktop-" + sid, PipeDirection.InOut, PipeOptions.Asynchronous);
         await pipe.ConnectAsync(timeout.Token);
+        VerifyOwner(pipe.SafePipeHandle);
         await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen:true) { AutoFlush = true };
         using var reader = new StreamReader(pipe, Encoding.UTF8, false, 1024, true);
         await writer.WriteLineAsync(request.AsMemory(), timeout.Token);
@@ -50,13 +69,15 @@ internal sealed class MainForm : Form
     private readonly NotifyIcon tray;
     private readonly WebView2 browser = new() { Dock = DockStyle.Fill };
     private readonly bool smoke;
+    private readonly bool rejectSmoke;
     private bool quitting;
     private int lastTarget = 2;
 
-    public MainForm(string sid, bool background, bool smoke)
+    public MainForm(string sid, bool background, bool smoke, bool rejectSmoke)
     {
         this.smoke = smoke;
-        client = new PipeClient(sid);
+        this.rejectSmoke = rejectSmoke;
+        client = new PipeClient(sid, smoke && !rejectSmoke);
         Text = "TranscoderD"; Size = new Size(1180, 780); MinimumSize = new Size(800, 600);
         StartPosition = FormStartPosition.CenterScreen; BackColor = Color.FromArgb(244, 246, 250); Icon = MakeIcon();
         Controls.Add(browser);
@@ -91,7 +112,8 @@ internal sealed class MainForm : Form
             if (smoke) core.NavigationCompleted += async (_, e) => {
                 bool ok = e.IsSuccess;
                 for (int i = 0; ok && i < 80; i++) {
-                    string result = await core.ExecuteScriptAsync("Boolean(document.getElementById('settings-form') && document.getElementById('job-list') && document.getElementById('connection').classList.contains('online'))");
+                    string state = rejectSmoke ? "error" : "online";
+                    string result = await core.ExecuteScriptAsync($"Boolean(document.getElementById('settings-form') && document.getElementById('job-list') && document.getElementById('connection').classList.contains('{state}'))");
                     if (result == "true") { Environment.ExitCode = 0; Quit(); return; }
                     await Task.Delay(250);
                 }

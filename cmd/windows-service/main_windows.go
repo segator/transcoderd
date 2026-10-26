@@ -256,6 +256,7 @@ type supervisor struct {
 	queue        *model.QueueSnapshot
 	queueError   string
 	pipeSuffix   string
+	systemOwner  bool
 	testCancel   context.CancelFunc
 }
 
@@ -578,7 +579,11 @@ func (s *supervisor) serve(ctx context.Context, owner string) error {
 	if _, err := windows.StringToSid(owner); err != nil {
 		return err
 	}
-	listener, err := winio.ListenPipe(pipePrefix+owner+s.pipeSuffix, &winio.PipeConfig{SecurityDescriptor: "O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;" + owner + ")"})
+	securityDescriptor := "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;" + owner + ")"
+	if s.systemOwner {
+		securityDescriptor = "O:SY" + securityDescriptor
+	}
+	listener, err := winio.ListenPipe(pipePrefix+owner+s.pipeSuffix, &winio.PipeConfig{SecurityDescriptor: securityDescriptor})
 	if err != nil {
 		return err
 	}
@@ -620,7 +625,7 @@ func (h *handler) Execute(_ []string, changes <-chan svc.ChangeRequest, statuses
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s := &supervisor{dir: h.dir, worker: h.worker, state: state}
+	s := &supervisor{dir: h.dir, worker: h.worker, state: state, systemOwner: true}
 	ready := make(chan error, 1)
 	go func() { ready <- s.serve(ctx, h.owner) }()
 	workerDone := make(chan struct{})

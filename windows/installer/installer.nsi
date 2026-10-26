@@ -61,6 +61,7 @@ fresh:
   ExecWait '"$INSTDIR\prerequisites\vc_redist.x64.exe" /install /quiet /norestart' $0
   ${If} $0 != 0
   ${AndIf} $0 != 3010
+  ${AndIf} $0 != 1638
     MessageBox MB_ICONSTOP "No se pudo instalar Microsoft Visual C++ Runtime (código $0)."
     Abort
   ${EndIf}

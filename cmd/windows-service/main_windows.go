@@ -60,6 +60,37 @@ func protectDir(dir string) error {
 	if attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return errors.New("service data directory cannot be a reparse point")
 	}
+	existing, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	existingOwner, _, err := existing.Owner()
+	if err != nil {
+		return err
+	}
+	sid, err := currentSID()
+	if err != nil {
+		return err
+	}
+	if owner := existingOwner.String(); owner != sid && owner != "S-1-5-18" && owner != "S-1-5-32-544" {
+		return errors.New("service data directory is owned by a different user")
+	}
+	for _, name := range []string{"service.json", "config.yaml", "worker.log", "work"} {
+		path, err := windows.UTF16PtrFromString(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+		a, err := windows.GetFileAttributes(path)
+		if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if a&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+			return errors.New("service data cannot contain reparse points")
+		}
+	}
 	sd, err := windows.SecurityDescriptorFromString("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
 	if err != nil {
 		return err

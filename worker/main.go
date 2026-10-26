@@ -186,10 +186,3 @@ func applicationRunWithShutdown(wg *sync.WaitGroup, ctx context.Context, updater
 	coordinator.Run(wg, ctx)
 	return nil
 }
-
-func shutdownHandler(sigs chan os.Signal, cancel context.CancelFunc) {
-	<-sigs
-	cancel()
-	log.Info("Termination Signal Detected...")
-	signal.Stop(sigs)
-}

@@ -123,6 +123,9 @@ jobs:
             -ServerBinary "$PWD/dist/windows-tests/windows-e2e-server.exe" `
             -Fixture "$PWD/integration/testdata/e2e_fixture.mkv" `
             -EvidenceDirectory "$PWD/dist/windows-e2e"
+      - name: Desktop dashboard behavior
+        shell: pwsh
+        run: node ./scripts/windows/test-web-ui.cjs
       - name: Native Windows desktop pipe tests
         shell: pwsh
         run: |

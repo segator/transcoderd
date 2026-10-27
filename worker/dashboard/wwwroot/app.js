@@ -42,7 +42,13 @@ document.querySelectorAll('[data-goto]').forEach(el => el.addEventListener('clic
 function toast(message) { const el = $('toast'); el.textContent = message; el.classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.remove('show'), 4500); }
 function escapeHTML(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function empty(title, detail, small = false) { return `<div class="empty ${small ? 'small' : ''}"><div class="empty-icon">◌</div><strong>${escapeHTML(title)}</strong><span>${escapeHTML(detail)}</span></div>`; }
-function fileSize(bytes) { if (!Number.isFinite(bytes) || bytes <= 0) return ''; const units = ['B','KB','MB','GB','TB']; const power = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024))); return `${(bytes / 1024 ** power).toFixed(power ? 1 : 0)} ${units[power]}`; }
+function fileSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  const units = ['MB','GB','TB'];
+  const power = Math.min(units.length - 1, Math.max(0, Math.floor(Math.log(bytes) / Math.log(1024)) - 2));
+  const decimals = power === 0 && bytes < 1024 ** 2 ? 2 : 1;
+  return `${(bytes / 1024 ** (power + 2)).toFixed(decimals)} ${units[power]}`;
+}
 function formatDuration(seconds) {
   if (!Number.isFinite(Number(seconds)) || seconds < 0) return '';
   const total = Math.floor(Number(seconds));
@@ -54,9 +60,9 @@ function formatDuration(seconds) {
 function formatFrames(value) { return Number(value || 0).toLocaleString('en-US'); }
 function jobProgressText(progress) {
   const details = [];
-  if (progress.phase === 'Download' && progress.total > 0) {
+  if ((progress.phase === 'Download' || progress.phase === 'Upload') && progress.total > 0) {
     details.push(`${fileSize(progress.value)} of ${fileSize(progress.total)}`);
-    if (progress.bytesPerSecond > 0) details.push(`${fileSize(progress.bytesPerSecond)}/s`);
+    if (progress.phase === 'Download' && progress.bytesPerSecond > 0) details.push(`${fileSize(progress.bytesPerSecond)}/s`);
   } else if (progress.phase === 'FFMPEG') {
     if (progress.frames > 0) details.push(`${formatFrames(progress.frames)} frames`);
     if (progress.framesPerSecond > 0) details.push(`${progress.framesPerSecond.toFixed(1)} fps`);

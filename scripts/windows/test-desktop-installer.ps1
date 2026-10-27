@@ -8,6 +8,7 @@ if ($env:GITHUB_ACTIONS -ne 'true') { throw 'This destructive installer integrat
 $install = Join-Path $env:ProgramFiles 'TranscoderD'
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $pipeName = 'transcoderd-desktop-' + $sid
+$firewallName = 'TranscoderD-Installer-E2E-' + [guid]::NewGuid().ToString('N')
 function Invoke-Desktop([object]$request) {
  $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', $pipeName, [IO.Pipes.PipeDirection]::InOut)
  try {
@@ -24,6 +25,12 @@ function Wait-Worker([int]$limit) {
  throw 'Worker did not reach the desired limit.'
 }
 try {
+ # The production installer must retain its real trust/endpoint policy. Isolate
+ # this ordinary service test from public releases using runner networking;
+ # mandatory upgrade behavior is exercised separately with signed fixtures.
+ New-NetFirewallRule -Name $firewallName -DisplayName $firewallName -Direction Outbound `
+  -Program (Join-Path $install 'transcoderd-desktop-service.exe') -Action Block -Profile Any `
+  -RemoteAddress @('0.0.0.0-126.255.255.255','128.0.0.0-255.255.255.255','::/0') | Out-Null
  $p=Start-Process -FilePath $Installer -ArgumentList '/S' -PassThru -Wait
  if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
  $service=Get-Service TranscoderDWorker; if ($service.Status -ne 'Running') { $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30)) }
@@ -90,6 +97,7 @@ try {
  if (-not $applied) { throw 'Deferred settings did not apply after the encode.' }
  Write-Output 'Installed Windows service completed the SVT-AV1 CPU E2E and deferred reconfiguration.'
 } finally {
+ Remove-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue
  if (Test-Path (Join-Path $install 'uninstall.exe')) {
   $p=Start-Process -FilePath (Join-Path $install 'uninstall.exe') -ArgumentList '/S' -PassThru -Wait
   if ($p.ExitCode -ne 0) { Write-Warning "Uninstaller exited with $($p.ExitCode)." }

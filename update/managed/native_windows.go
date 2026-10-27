@@ -423,7 +423,7 @@ func CloseInstalledTrays() error {
 }
 
 // RunHelper is invoked by the protected task/installer helper, never by IPC.
-func RunHelper(ctx context.Context) error {
+func RunHelper(ctx context.Context) (runErr error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if !windows.GetCurrentProcessToken().IsElevated() {
@@ -446,6 +446,19 @@ func RunHelper(ctx context.Context) error {
 	if t == nil || !t.Active() {
 		return nil
 	}
+	defer func() {
+		// A prepared transaction has not changed installation files. Report a
+		// pre-install failure through the normal bounded retry lifecycle.
+		if runErr != nil && t.Phase == "prepared" {
+			if state, e := Load(dir); e == nil {
+				state.Pending = true
+				state.Fail(runErr, time.Now())
+				_ = Save(dir, state)
+			}
+			t.Phase, t.PID, t.Error = "retrying", 0, runErr.Error()
+			_ = SaveJSON(TransactionPath(dir), t)
+		}
+	}()
 	i, err := ReadInstallation(dir)
 	if err != nil {
 		return err
@@ -618,6 +631,13 @@ func recoverInstallation(ctx context.Context, dir string, t *Transaction, backup
 		}
 		t.Error = err.Error()
 		_ = SaveJSON(TransactionPath(dir), t)
+		if state, e := Load(dir); e == nil {
+			state.Pending = true
+			state.Fail(err, time.Now())
+			state.Phase = "recovering"
+			state.NextRetry = time.Now().Add(RetryDelay(attempt))
+			_ = Save(dir, state)
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

@@ -93,6 +93,9 @@ func (m *Manager) Step(ctx context.Context, now time.Time, force bool) error {
 	if t.Active() {
 		s.Pending = true
 		s.Phase = t.Phase
+		if t.Error != "" {
+			s.Message = t.Error
+		}
 		m.mu.Lock()
 		m.state = s
 		m.mu.Unlock()

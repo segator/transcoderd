@@ -3,7 +3,7 @@ module transcoder
 go 1.26.10
 
 require (
-	github.com/Microsoft/go-winio v0.6.2
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/asticode/go-astisub v0.45.0
 	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/blang/semver/v4 v4.0.0

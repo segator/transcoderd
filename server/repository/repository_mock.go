@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -139,6 +141,33 @@ func (r *InMemoryRepository) RetrieveQueuedJob(ctx context.Context) (*model.Job,
 	}
 
 	return nil, ErrElementNotFound
+}
+
+func (r *InMemoryRepository) ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := model.QueueSnapshot{Jobs: []model.QueuedJob{}}
+	for id, job := range r.jobs {
+		events := r.events[id]
+		if len(events) == 0 {
+			continue
+		}
+		event := events[len(events)-1]
+		if event.NotificationType == model.JobNotification && event.Status == model.QueuedNotificationStatus {
+			result.Jobs = append(result.Jobs, model.QueuedJob{ID: id, Name: filepath.Base(job.SourcePath), Size: job.SourceSize, QueuedAt: event.EventTime})
+		}
+	}
+	sort.Slice(result.Jobs, func(i, j int) bool {
+		if result.Jobs[i].QueuedAt.Equal(result.Jobs[j].QueuedAt) {
+			return result.Jobs[i].ID < result.Jobs[j].ID
+		}
+		return result.Jobs[i].QueuedAt.Before(result.Jobs[j].QueuedAt)
+	})
+	result.Total = int64(len(result.Jobs))
+	if len(result.Jobs) > 100 {
+		result.Jobs = result.Jobs[:100]
+	}
+	return result, nil
 }
 
 func (r *InMemoryRepository) GetJobsByStatus(ctx context.Context, notificationType model.NotificationType, status model.NotificationStatus) ([]*model.Job, error) {

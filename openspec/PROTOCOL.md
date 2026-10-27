@@ -37,10 +37,10 @@ The extension predicate is case-sensitive. It currently accepts `mp4`, `mpg`, `m
 
 ## Assignment and event sequence
 
-A worker asks for work with `workerName` and receives a response like:
+A worker asks for work with `workerName` and receives the assigned source filename without its server path:
 
 ```json
-{"id":"00000000-0000-0000-0000-000000000001","eventID":1}
+{"id":"00000000-0000-0000-0000-000000000001","eventID":1,"name":"Example Movie.mkv"}
 ```
 
 The server has already stored that assignment event. The worker uses the returned `eventID` as its starting point, so its first `Job/started` notification has the next number. Every subsequent notification for the job must increment the number by one, across all phases.
@@ -68,6 +68,10 @@ A progress event carries `jobId`, `progressID`, `percent`, `eta`, `notificationT
 
 ## File transfer
 
-The server streams an assigned source with `Content-Length` and `Content-Disposition`. The worker checks received length, computes SHA-256, and compares it with the checksum route before probing the file. The checksum becomes available after the server closes the download stream.
+The server streams an assigned source with `Content-Length` and an RFC 5987 UTF-8 `Content-Disposition` filename. The worker checks received length, computes SHA-256, and compares it with the checksum route before probing the file. The checksum becomes available after the server closes the download stream.
 
 For upload, the worker sends the encoded bytes with `Content-Length`, `checksum` (hexadecimal SHA-256), and `workerName`. The server checks the current job assignment and compares actual length and checksum before answering `201`. A completion notification follows only after that response. See `BASELINE.md` for the current handling of rejected uploads.
+
+## Desktop queue view
+
+`GET /api/v1/jobs/queued` requires the existing bearer token and returns `{ "total": number, "jobs": [{ "id": string, "name": string, "size": number, "queuedAt": timestamp }] }`. Jobs are ordered by queue time, with at most 100 entries; the count includes all queued jobs. Only the filename is returned, not the server path. This read-only endpoint does not assign work. Older servers do not provide it, and desktop clients display the global queue as unavailable.

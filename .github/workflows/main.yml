@@ -85,17 +85,19 @@ jobs:
           version: 0.20.6
       - uses: ./.github/actions/setup-mage
       - name: Build portable worker and native test executables
-        run: mage build:windows test:windowsBinaries
+        run: mage build:windows test:windowsBinaries build:windowsInstaller
       - uses: actions/upload-artifact@v4
         with:
           name: windows-worker
           path: dist/
+          # The installer and portable bundle are already compressed.
+          compression-level: 0
           retention-days: 7
 
   windows-native:
     needs: [ci, windows-build]
     runs-on: windows-2025
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -123,6 +125,23 @@ jobs:
             -ServerBinary "$PWD/dist/windows-tests/windows-e2e-server.exe" `
             -Fixture "$PWD/integration/testdata/e2e_fixture.mkv" `
             -EvidenceDirectory "$PWD/dist/windows-e2e"
+      - name: Desktop dashboard behavior
+        shell: pwsh
+        run: node ./scripts/windows/test-web-ui.cjs
+      - name: Native Windows desktop pipe tests
+        shell: pwsh
+        run: |
+          ./scripts/windows/test-desktop-pipe.ps1 -ServiceBinary "$PWD/dist/transcoderd-desktop-service.exe"
+      - name: Installed Windows service E2E with SVT-AV1 CPU
+        shell: pwsh
+        run: |
+          $installer = @(Get-ChildItem dist -Filter '*-windows-amd64-setup.exe')
+          if ($installer.Count -ne 1) { throw 'Expected one Windows installer.' }
+          ./scripts/windows/test-ci.ps1 -Bundle $env:WINDOWS_BUNDLE `
+            -TestBinary "$PWD/dist/windows-tests/windows-bundle.test.exe" `
+            -ServerBinary "$PWD/dist/windows-tests/windows-e2e-server.exe" `
+            -Fixture "$PWD/integration/testdata/e2e_fixture.mkv" `
+            -EvidenceDirectory "$PWD/dist/windows-desktop-e2e" -DesktopInstaller $installer[0].FullName
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -141,5 +160,6 @@ jobs:
         run: |
           $assets = @((Get-ChildItem dist -Filter '*-windows-amd64.zip').FullName)
           $assets += "$PWD/dist/transcoderd-worker-windows-amd64.exe"
+          $assets += (Get-ChildItem dist -Filter '*-windows-amd64-setup.exe').FullName
           gh release upload $env:RELEASE_TAG @assets --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Windows release asset upload failed.' }

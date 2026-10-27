@@ -8,9 +8,11 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 	"transcoder/model"
 	"transcoder/worker/console"
@@ -56,6 +58,7 @@ func (d *DownloadStepExecutor) actions(jobContext *job.Context) []Action {
 func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jobContext *job.Context) (*job.VideoData, error) {
 	var sourceFilePath string
 	var sourceChecksum string
+	var originalName string
 	var fileSize int64
 	logger := tracker.Logger()
 	err := retry.Do(func() error {
@@ -80,9 +83,25 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 		if err != nil {
 			return err
 		}
-		_, params, err := mime.ParseMediaType(resp.Header.Get("Content-Disposition"))
+		contentDisposition := resp.Header.Get("Content-Disposition")
+		_, params, err := mime.ParseMediaType(contentDisposition)
 		if err != nil {
 			return err
+		}
+		originalName = params["filename"]
+		if originalName != "" {
+			// Older servers encoded the entire filename with QueryEscape instead
+			// of using the RFC-compliant filename* parameter.
+			if !strings.Contains(strings.ToLower(contentDisposition), "filename*=") {
+				originalName, err = url.QueryUnescape(originalName)
+				if err != nil {
+					return fmt.Errorf("decode downloaded filename: %w", err)
+				}
+			}
+			originalName = filepath.Base(originalName)
+		}
+		if named, ok := tracker.(interface{ SetDisplayName(string) }); ok && originalName != "" {
+			named.SetDisplayName(originalName)
 		}
 
 		sourceFilePath = filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%s%s", jobContext.JobId.String(), filepath.Ext(params["filename"])))
@@ -139,10 +158,11 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 	}
 
 	return &job.VideoData{
-		FilePath:    sourceFilePath,
-		Checksum:    sourceChecksum,
-		Size:        fileSize,
-		FFProbeData: normalizedFFProbeData,
+		FilePath:     sourceFilePath,
+		OriginalName: originalName,
+		Checksum:     sourceChecksum,
+		Size:         fileSize,
+		FFProbeData:  normalizedFFProbeData,
 	}, nil
 }
 

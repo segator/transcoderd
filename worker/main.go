@@ -113,7 +113,13 @@ func main() {
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	wg.Add(1)
 	go func() {
-		shutdownHandler(sigs, cancel)
+		select {
+		case <-sigs:
+			cancel()
+			log.Info("Termination Signal Detected...")
+		case <-ctx.Done():
+		}
+		signal.Stop(sigs)
 		wg.Done()
 	}()
 
@@ -128,7 +134,7 @@ func main() {
 
 	if opts.NoUpdateMode || opts.NoUpdates {
 		version.AppLogger().Info("Starting Worker")
-		err = applicationRun(wg, ctx, updater)
+		err = applicationRunWithShutdown(wg, ctx, updater, cancel)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -141,6 +147,10 @@ func main() {
 }
 
 func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) error {
+	return applicationRunWithShutdown(wg, ctx, updater, nil)
+}
+
+func applicationRunWithShutdown(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater, shutdown func()) error {
 	if err := opts.Worker.Validate(); err != nil {
 		return err
 	}
@@ -162,7 +172,7 @@ func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Upd
 	encodeWorker := worker.NewEncodeWorker(opts.Worker, serverClient, renderService)
 	encodeWorker.RequireWorkerSettings()
 	encodeWorker.Run(wg, ctx)
-	controlServer, err := control.Start(control.SocketPath, encodeWorker)
+	controlServer, err := control.Start(control.ConfiguredPath(), encodeWorker, shutdown)
 	if err != nil {
 		return fmt.Errorf("start worker control interface: %w", err)
 	}
@@ -175,11 +185,4 @@ func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Upd
 	coordinator := worker.NewServerCoordinator(serverClient, encodeWorker, updater, renderService.Logger())
 	coordinator.Run(wg, ctx)
 	return nil
-}
-
-func shutdownHandler(sigs chan os.Signal, cancel context.CancelFunc) {
-	<-sigs
-	cancel()
-	log.Info("Termination Signal Detected...")
-	signal.Stop(sigs)
 }

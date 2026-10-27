@@ -388,3 +388,23 @@ func TestWorkspaceRejectsAliasedInstallationAncestors(t *testing.T) {
 		t.Fatal("workspace under a linked installation ancestor was accepted")
 	}
 }
+
+func TestInstallerWaitsForReservedRequests(t *testing.T) {
+	c := fixtureClient(t, nil)
+	reserved, installed := 1, false
+	manager := NewManager(t.TempDir(), "v2.8.1", c, Hooks{Drain: func() (int, int, error) { return 0, reserved, nil }, Install: func(*Candidate, *Manifest, string) error { installed = true; return nil }})
+	now := time.Now()
+	if err := manager.Step(context.Background(), now, true); err != nil {
+		t.Fatal(err)
+	}
+	if installed {
+		t.Fatal("installer ignored an in-flight request")
+	}
+	reserved = 0
+	if err := manager.Step(context.Background(), now, false); err != nil {
+		t.Fatal(err)
+	}
+	if !installed {
+		t.Fatal("installer did not run after the reserved request finished")
+	}
+}

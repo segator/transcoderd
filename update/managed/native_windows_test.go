@@ -1,7 +1,12 @@
 package managed
 
 import (
+	"context"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -83,5 +88,58 @@ func TestWorkspaceRemainsOutsideInstallation(t *testing.T) {
 				t.Fatalf("ValidateWorkspace() = %v, allowed %v", err, tt.allowed)
 			}
 		})
+	}
+}
+
+func TestPreparedFailurePreservesInstallationAndSchedulesRetry(t *testing.T) {
+	if os.Getenv("GITHUB_ACTIONS") != "true" || !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("privileged helper tests require an isolated runner")
+	}
+	t.Setenv("ProgramData", t.TempDir())
+	manifest, pub, key, _ := fixtureManifest(t)
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := Candidate{Data: data, Signature: ed25519.Sign(key, data)}
+	originalMode, originalKey := FixtureMode, FixtureKey
+	FixtureMode, FixtureKey = "true", base64.StdEncoding.EncodeToString(pub)
+	t.Cleanup(func() { FixtureMode, FixtureKey = originalMode, originalKey })
+	install := t.TempDir()
+	sentinel := filepath.Join(install, "original.txt")
+	if err = os.WriteFile(sentinel, []byte("preserve me"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := user.User.Sid.String()
+	dir := DataDir()
+	if err = SaveInstallation(dir, Installation{Dir: install, Owner: owner}); err != nil {
+		t.Fatal(err)
+	}
+	if err = Save(dir, State{Status: Status{Pending: true, Phase: "pending"}, Candidate: &candidate}); err != nil {
+		t.Fatal(err)
+	}
+	if err = SaveJSON(TransactionPath(dir), &Transaction{Phase: "prepared", Candidate: candidate, InstallDir: install, Owner: owner}); err != nil {
+		t.Fatal(err)
+	}
+	if err = RunHelper(context.Background()); err == nil {
+		t.Fatal("helper accepted a missing installer")
+	}
+	state, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transaction, err := LoadTransaction(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Pending || state.Phase != "retrying" || state.NextRetry.IsZero() || transaction.Phase != "retrying" {
+		t.Fatalf("prepared failure did not retain a bounded retry: %+v, %+v", state, transaction)
+	}
+	if contents, err := os.ReadFile(sentinel); err != nil || string(contents) != "preserve me" {
+		t.Fatalf("prepared failure changed original files: %s, %v", contents, err)
 	}
 }

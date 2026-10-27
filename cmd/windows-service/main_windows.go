@@ -113,7 +113,7 @@ func startService() error {
 	if err != nil {
 		return err
 	}
-	defer m.Disconnect()
+	defer func() { _ = m.Disconnect() }()
 	s, err := m.OpenService(serviceName)
 	if err != nil {
 		return err
@@ -148,7 +148,7 @@ func install(owner string) error {
 	if err != nil {
 		return err
 	}
-	defer m.Disconnect()
+	defer func() { _ = m.Disconnect() }()
 	if old, err := m.OpenService(serviceName); err == nil {
 		old.Close()
 		return errors.New("service already exists; stop and remove it before reinstalling")
@@ -170,7 +170,7 @@ func uninstall() error {
 	if err != nil {
 		return err
 	}
-	defer m.Disconnect()
+	defer func() { _ = m.Disconnect() }()
 	s, err := m.OpenService(serviceName)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil
@@ -194,7 +194,7 @@ func prepareUpgrade() error {
 	if err != nil {
 		return err
 	}
-	defer m.Disconnect()
+	defer func() { _ = m.Disconnect() }()
 	s, err := m.OpenService(serviceName)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil
@@ -441,16 +441,19 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 				result.Error = "The number of concurrent encodes must be between 0 and 64"
 				break
 			}
-			if req.MaxJobs == 0 {
+			switch {
+			case req.MaxJobs == 0:
 				cpuJobs, gpuJobs = 0, 0
-			} else if cpuJobs > 0 && gpuJobs == 0 {
+			case cpuJobs > 0 && gpuJobs == 0:
 				cpuJobs = req.MaxJobs
-			} else if gpuJobs > 0 && cpuJobs == 0 {
+			case gpuJobs > 0 && cpuJobs == 0:
 				gpuJobs = req.MaxJobs
-			} else {
+			default:
 				result.Error = "Use separate CPU and GPU limits"
-				break
 			}
+		}
+		if result.Error != "" {
+			break
 		}
 		if cpuJobs < 0 || gpuJobs < 0 || cpuJobs > 64 || gpuJobs > 64 || cpuJobs+gpuJobs > 64 {
 			result.Error = "CPU and GPU concurrent encodes must each be between 0 and 64 and total no more than 64"
@@ -488,6 +491,10 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		}
 		s.state = next
 	case "prepare-upgrade":
+		if s.updatePending() {
+			result.Error = managed.LockedMessage
+			break
+		}
 		s.maintenance = true
 		for _, profile := range []string{"cpu", "gpu"} {
 			if s.children[profile] != nil {

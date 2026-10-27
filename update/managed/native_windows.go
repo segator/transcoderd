@@ -61,7 +61,7 @@ func ServiceOwner() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer m.Disconnect()
+	defer func() { _ = m.Disconnect() }()
 	s, err := m.OpenService(ServiceName)
 	if err != nil {
 		return "", err
@@ -87,7 +87,7 @@ func serviceStop() error {
 	if err != nil {
 		return err
 	}
-	defer m.Disconnect()
+	defer func() { _ = m.Disconnect() }()
 	s, err := m.OpenService(ServiceName)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil
@@ -107,7 +107,7 @@ func serviceStop() error {
 	if st.ProcessId != 0 {
 		process, _ = windows.OpenProcess(windows.SYNCHRONIZE, false, st.ProcessId)
 		if process != 0 {
-			defer windows.CloseHandle(process)
+			defer func() { _ = windows.CloseHandle(process) }()
 		}
 	}
 	if st.State != svc.StopPending {
@@ -143,7 +143,7 @@ func serviceStart() error {
 	if err != nil {
 		return err
 	}
-	defer m.Disconnect()
+	defer func() { _ = m.Disconnect() }()
 	s, err := m.OpenService(ServiceName)
 	if err != nil {
 		return err
@@ -265,7 +265,7 @@ func RecoverRunning(t *Transaction) error {
 	if t.PID != 0 {
 		h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, t.PID)
 		if err == nil {
-			defer windows.CloseHandle(h)
+			defer func() { _ = windows.CloseHandle(h) }()
 			var code uint32
 			if windows.GetExitCodeProcess(h, &code) == nil && code == 259 {
 				return nil
@@ -291,11 +291,11 @@ func mutex() (windows.Handle, error) {
 	}
 	result, err := windows.WaitForSingleObject(h, 0)
 	if err != nil {
-		windows.CloseHandle(h)
+		_ = windows.CloseHandle(h)
 		return 0, err
 	}
 	if result != windows.WAIT_OBJECT_0 && result != windows.WAIT_ABANDONED {
-		windows.CloseHandle(h)
+		_ = windows.CloseHandle(h)
 		return 0, errors.New("windows installation update is already running")
 	}
 	return h, nil
@@ -337,8 +337,8 @@ func relaunchOwner(install, owner, args string) error {
 		if err != nil {
 			return err
 		}
-		windows.CloseHandle(pi.Process)
-		windows.CloseHandle(pi.Thread)
+		_ = windows.CloseHandle(pi.Process)
+		_ = windows.CloseHandle(pi.Thread)
 	}
 	return nil
 }
@@ -350,7 +350,7 @@ func stopTrays(install, owner string) error {
 	if err != nil {
 		return err
 	}
-	defer windows.CloseHandle(snapshot)
+	defer func() { _ = windows.CloseHandle(snapshot) }()
 	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
 	for err = windows.Process32First(snapshot, &entry); err == nil; err = windows.Process32Next(snapshot, &entry) {
 		if !strings.EqualFold(windows.UTF16ToString(entry.ExeFile[:]), "transcoderd-tray.exe") {
@@ -378,7 +378,7 @@ func stopTrays(install, owner string) error {
 		} else {
 			e = nil
 		}
-		windows.CloseHandle(h)
+		_ = windows.CloseHandle(h)
 		if e != nil {
 			return e
 		}
@@ -415,8 +415,8 @@ func RunHelper(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer windows.CloseHandle(h)
-	defer windows.ReleaseMutex(h)
+	defer func() { _ = windows.CloseHandle(h) }()
+	defer func() { _ = windows.ReleaseMutex(h) }()
 	t, err := LoadTransaction(dir)
 	if err != nil {
 		return err
@@ -484,6 +484,12 @@ func RunHelper(ctx context.Context) error {
 		return err
 	}
 	if err = stopTrays(t.InstallDir, t.Owner); err != nil {
+		return err
+	}
+	if err = CheckPath(backup); err != nil {
+		return err
+	}
+	if err = os.RemoveAll(backup); err != nil {
 		return err
 	}
 	if err = CopyTree(t.InstallDir, backup); err != nil {
@@ -619,11 +625,11 @@ func rollback(t *Transaction, backup string) error {
 		err = old.Delete()
 		old.Close()
 		if err != nil {
-			m.Disconnect()
+			_ = m.Disconnect()
 			return err
 		}
 	}
-	m.Disconnect()
+	_ = m.Disconnect()
 	cmd := exec.Command(filepath.Join(t.InstallDir, "transcoderd-desktop-service.exe"), "--install-owner", t.Owner)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("restore Windows service: %w: %s", err, out)

@@ -34,6 +34,9 @@ func (s *supervisor) initializeUpdates(ctx context.Context, owner string) error 
 func (s *supervisor) drainForUpdate() (int, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.maintenance {
+		return 0, 0, errors.New("manual Setup is running; automatic update is waiting")
+	}
 	active, reserved := 0, 0
 	for _, profile := range []string{"cpu", "gpu"} {
 		if s.children[profile] == nil {

@@ -35,3 +35,31 @@ func TestInstallationMutexExcludesAnotherThread(t *testing.T) {
 		t.Fatal("another thread acquired the installation mutex")
 	}
 }
+
+func TestProtectedUpdateFilesHavePrivilegedOwner(t *testing.T) {
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("protected update files require an elevated isolated runner")
+	}
+	dir := t.TempDir()
+	identity, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = SaveInstallation(dir, Installation{Dir: dir, Owner: identity.User.Sid.String()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ReadInstallation(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err = Save(dir, State{Status: Status{Pending: true, Phase: "pending"}}); err != nil {
+		t.Fatal(err)
+	}
+	sd, err := windows.GetNamedSecurityInfo(StatePath(dir), windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, _, err := sd.Owner()
+	if err != nil || owner.String() != "S-1-5-32-544" {
+		t.Fatalf("journal owner is not the administrators group: %v", err)
+	}
+}

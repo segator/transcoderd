@@ -33,7 +33,19 @@ func DataDir() string                    { return filepath.Join(os.Getenv("Progr
 func InstallationPath(dir string) string { return filepath.Join(dir, "installation.json") }
 func ReadInstallation(dir string) (Installation, error) {
 	var i Installation
-	b, err := os.ReadFile(InstallationPath(dir))
+	path := InstallationPath(dir)
+	if err := CheckPath(path); err != nil {
+		return i, err
+	}
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return i, err
+	}
+	owner, _, err := sd.Owner()
+	if err != nil || (owner.String() != "S-1-5-18" && owner.String() != "S-1-5-32-544") {
+		return i, errors.New("installation metadata is not owned by SYSTEM or administrators")
+	}
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return i, err
 	}

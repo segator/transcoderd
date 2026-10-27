@@ -244,6 +244,9 @@ func (c *Client) Stage(ctx context.Context, dir string, candidate *Candidate, re
 	if n != m.Installer.Size || !strings.EqualFold(hex.EncodeToString(h.Sum(nil)), m.Installer.SHA256) {
 		return "", errors.New("downloaded Windows installer failed integrity verification")
 	}
+	if err = protectFile(tmp); err != nil {
+		return "", err
+	}
 	if err = ReplaceFile(tmp, path); err != nil {
 		return "", err
 	}

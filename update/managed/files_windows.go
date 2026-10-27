@@ -36,6 +36,12 @@ func ProtectDir(dir string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
+	return protectFile(dir)
+}
+
+// The owner must also be privileged: a non-elevated token of the installing
+// user must not regain WRITE_DAC through ownership of an installer-created file.
+func protectFile(path string) error {
 	sd, err := windows.SecurityDescriptorFromString("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
 	if err != nil {
 		return err
@@ -48,7 +54,7 @@ func ProtectDir(dir string) error {
 	if err != nil {
 		return err
 	}
-	return windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, owner, nil, dacl, nil)
+	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, owner, nil, dacl, nil)
 }
 
 func ReplaceFile(old, new string) error {

@@ -82,6 +82,9 @@ func SaveJSON(path string, value any) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
+	if err = protectFile(tmp); err != nil {
+		return err
+	}
 	return ReplaceFile(tmp, path)
 }
 

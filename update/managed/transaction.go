@@ -104,6 +104,9 @@ func CopyFile(source, target string) error {
 	if closeErr != nil {
 		return closeErr
 	}
+	if err = protectFile(tmp); err != nil {
+		return err
+	}
 	return ReplaceFile(tmp, target)
 }
 

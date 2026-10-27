@@ -33,6 +33,7 @@ func CheckPath(path string) error {
 	return nil
 }
 func ReplaceFile(old, new string) error { return os.Rename(old, new) }
+func protectFile(path string) error     { return os.Chmod(path, 0600) }
 func AvailableSpace(path string, required int64) error {
 	var stat unix.Statfs_t
 	if err := unix.Statfs(path, &stat); err != nil {

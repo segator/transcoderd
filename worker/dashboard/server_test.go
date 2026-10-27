@@ -29,8 +29,16 @@ func TestDashboardHTTPAuthStatusAndControl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer server.Shutdown()
-	go server.Serve()
+	defer func() {
+		if err := server.Shutdown(); err != nil {
+			t.Errorf("Shutdown() error = %v", err)
+		}
+	}()
+	go func() {
+		if err := server.Serve(); err != nil {
+			t.Errorf("Serve() error = %v", err)
+		}
+	}()
 	baseURL := "http://" + server.listener.Addr().String()
 
 	unauthorized, err := http.Get(baseURL + "/api/status")

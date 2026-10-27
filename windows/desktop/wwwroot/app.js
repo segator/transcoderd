@@ -30,10 +30,37 @@ function toast(message) { const el = $('toast'); el.textContent = message; el.cl
 function escapeHTML(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function empty(title, detail, small = false) { return `<div class="empty ${small ? 'small' : ''}"><div class="empty-icon">◌</div><strong>${escapeHTML(title)}</strong><span>${escapeHTML(detail)}</span></div>`; }
 function fileSize(bytes) { if (!Number.isFinite(bytes) || bytes <= 0) return ''; const units = ['B','KB','MB','GB','TB']; const power = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024))); return `${(bytes / 1024 ** power).toFixed(power ? 1 : 0)} ${units[power]}`; }
-function duration(seconds) { if (!seconds || seconds < 0) return ''; const m = Math.ceil(seconds / 60); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min remaining` : `${m} min remaining`; }
+function formatDuration(seconds) {
+  if (!Number.isFinite(Number(seconds)) || seconds < 0) return '';
+  const total = Math.floor(Number(seconds));
+  const hours = Math.floor(total / 3600), minutes = Math.floor(total % 3600 / 60), remainder = total % 60;
+  if (hours) return `${hours}h ${minutes}m`;
+  if (minutes) return `${minutes}m ${remainder}s`;
+  return `${remainder}s`;
+}
+function formatFrames(value) { return Number(value || 0).toLocaleString('en-US'); }
+function jobProgressText(progress) {
+  const details = [];
+  if (progress.phase === 'Download' && progress.total > 0) {
+    details.push(`${fileSize(progress.value)} of ${fileSize(progress.total)}`);
+    if (progress.bytesPerSecond > 0) details.push(`${fileSize(progress.bytesPerSecond)}/s`);
+  } else if (progress.phase === 'FFMPEG') {
+    if (progress.frames > 0) details.push(`${formatFrames(progress.frames)} frames`);
+    if (progress.framesPerSecond > 0) details.push(`${progress.framesPerSecond.toFixed(1)} fps`);
+    if (progress.encoderSpeed) details.push(progress.encoderSpeed);
+  } else if (progress.total > 0) {
+    details.push(`${formatFrames(progress.value)} of ${formatFrames(progress.total)}`);
+  }
+  if (progress.elapsedSeconds > 0) details.push(`Elapsed ${formatDuration(progress.elapsedSeconds)}`);
+  if (progress.etaSeconds > 0) details.push(`ETA ${formatDuration(progress.etaSeconds)}`);
+  return details.join(' · ');
+}
+function phaseDescription(phase) {
+  return ({Download:'Downloading source', MKVExtract:'Extracting subtitles', PGS:'Reading subtitles (OCR)', FFMPEG:'Encoding video', Upload:'Uploading result', JobVerify:'Verifying result'})[phase] || 'Working';
+}
 function jobLabel(job) {
-  if (job.state === 'queued') return job.downloaded ? (job.phase === 'FFMPEG' ? ['Ready to encode','ready'] : ['Downloaded · queued','ready']) : ['Queued',''];
-  return ({FFMPEG:['Encoding',''], Download:['Downloading','download'], PGS:['Subtitles',''], MKVExtract:['Preparing',''], Upload:['Uploading','download']})[job.phase] || ['Processing',''];
+  if (job.state === 'queued') return job.downloaded && job.phase === 'FFMPEG' ? ['Ready to encode','ready'] : ['Queued',job.downloaded ? 'ready' : ''];
+  return ({FFMPEG:['Encoding',''], Download:['Downloading','download'], PGS:['Subtitle OCR',''], MKVExtract:['Extracting subtitles',''], Upload:['Uploading','download'], JobVerify:['Verifying','']})[job.phase] || ['Working',''];
 }
 function render(status) {
   current = status;
@@ -52,7 +79,10 @@ function render(status) {
     const [label, badge] = jobLabel(j); const name = j.name || p?.name || `Job ${j.jobId.slice(0,8)}`;
     const pct = p ? Math.min(100, Math.max(0, Number(p.percent) || 0)) : 0;
     const profile = p?.profile || j.profile;
-    return `<article class="job"><div class="job-head"><div class="file-icon">▶</div><div class="job-info"><div class="job-title" title="${escapeHTML(name)}">${escapeHTML(name)}</div><div class="job-meta">${escapeHTML(duration(p?.etaSeconds) || (j.downloaded ? 'File downloaded' : 'Preparing file'))}${profile ? ` · ${escapeHTML(profile.toUpperCase())}` : ''}</div></div><span class="badge ${badge}">${label}</span></div>${p ? `<div class="job-progress"><div class="track"><div class="fill" style="width:${pct}%"></div></div><strong>${pct.toFixed(0)}%</strong></div>` : ''}</article>`;
+    let details = p ? jobProgressText(p) : '';
+    if (!details && j.state === 'queued') details = j.downloaded && j.phase === 'FFMPEG' ? 'Downloaded and ready to encode' : !j.downloaded && j.phase === 'Download' ? 'Waiting to download' : phaseDescription(j.phase);
+    if (!details) details = phaseDescription(j.phase);
+    return `<article class="job"><div class="job-head"><div class="file-icon">▶</div><div class="job-info"><div class="job-title" title="${escapeHTML(name)}">${escapeHTML(name)}</div><div class="job-meta">${escapeHTML(details)}${profile ? ` · ${escapeHTML(profile.toUpperCase())}` : ''}</div></div><span class="badge ${badge}">${label}</span></div>${p ? `<div class="job-progress"><div class="track"><div class="fill" style="width:${pct}%"></div></div><strong>${pct.toFixed(0)}%</strong></div>` : ''}</article>`;
   }).join('') : empty(status.configured ? 'All quiet here' : 'Set up your worker', status.configured ? 'New jobs will appear here automatically.' : 'Configure the connection to get started.');
   const queue = status.queue;
   $('stat-queue').textContent = queue ? queue.total : '—'; $('queue-count').textContent = queue ? queue.total : '—';
@@ -62,7 +92,7 @@ function render(status) {
   $('notice').classList.toggle('hidden', !notice); $('notice-text').textContent = notice; $('notice-start').classList.add('hidden'); $('notice-settings').classList.remove('hidden');
   $('toggle-pause').disabled = !worker || status.pending;
   $('toggle-pause').textContent = isPaused ? '▶  Resume' : 'Ⅱ  Pause new jobs';
-  if (!dirty && status.settings) { const s = status.settings; $('domain').value = s.domain; $('name').value = s.name; $('cpu-codec').value = s.cpuCodec; $('cpu-jobs').value = s.cpuJobs; $('gpu-codec').value = s.gpuCodec; $('gpu-jobs').value = s.gpuJobs; $('schedule').value = (s.schedule || []).join('\n'); $('token-note').textContent = s.tokenSet ? 'Token saved. Leave blank to keep it.' : 'Your token is stored securely on this machine.'; }
+  if (!dirty && status.settings) { const s = status.settings; $('domain').value = s.domain; $('name').value = s.name; $('working-directory').value = s.workingDirectory || ''; $('cpu-codec').value = s.cpuCodec; $('cpu-jobs').value = s.cpuJobs; $('gpu-codec').value = s.gpuCodec; $('gpu-jobs').value = s.gpuJobs; $('schedule').value = (s.schedule || []).join('\n'); $('token-note').textContent = s.tokenSet ? 'Token saved. Leave blank to keep it.' : 'Your token is stored securely on this machine.'; }
   if (!status.configured && !shownSetup) { shownSetup = true; page('settings'); request('show-window').catch(() => {}); }
 }
 async function refresh() {
@@ -76,7 +106,7 @@ $('notice-start').addEventListener('click', async () => { try { await request('s
 $('settings-form').addEventListener('input', () => { dirty = true; });
 $('settings-form').addEventListener('submit', async e => {
   e.preventDefault(); $('save').disabled = true;
-  const settings = {domain:$('domain').value.trim(), token:$('token').value, name:$('name').value.trim(), cpuCodec:$('cpu-codec').value, cpuJobs:Number($('cpu-jobs').value), gpuCodec:$('gpu-codec').value, gpuJobs:Number($('gpu-jobs').value), schedule:$('schedule').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)};
+  const settings = {domain:$('domain').value.trim(), token:$('token').value, name:$('name').value.trim(), workingDirectory:$('working-directory').value.trim(), cpuCodec:$('cpu-codec').value, cpuJobs:Number($('cpu-jobs').value), gpuCodec:$('gpu-codec').value, gpuJobs:Number($('gpu-jobs').value), schedule:$('schedule').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)};
   try { const status = await request('configure', {settings}); $('token').value = ''; dirty = false; render(status); toast(status.pending ? 'Changes saved; they will apply when current jobs finish.' : 'Settings saved.'); page('overview'); }
   catch (err) { toast(err.message); } finally { $('save').disabled = false; }
 });

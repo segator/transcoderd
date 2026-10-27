@@ -84,6 +84,7 @@ func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 	task := &model.RequestJobResponse{
 		Id:      video.Id,
 		EventID: video.Events.GetLatest().EventID,
+		Name:    filepath.Base(video.SourcePath),
 	}
 	log.WithFields(log.Fields{
 		"job_id":      video.Id.String(),

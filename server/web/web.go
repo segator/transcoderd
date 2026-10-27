@@ -331,7 +331,7 @@ func (s *Server) download(writer http.ResponseWriter, request *http.Request) {
 	defer downloadStream.Close(true)
 
 	writer.Header().Set("Content-Length", strconv.FormatInt(downloadStream.Size(), 10))
-	writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", url.QueryEscape(downloadStream.Name())))
+	writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", url.PathEscape(downloadStream.Name())))
 	writer.WriteHeader(200)
 	b := make([]byte, 131072)
 loop:

@@ -7,7 +7,7 @@ Define how the assigned worker obtains the source, verifies its integrity, and r
 ## Requirements
 
 ### Requirement: Assignment-checked download
-`GET /api/v1/download?uuid=<id>` SHALL serve the source only while the job is `started` and the `workerName` header matches the assigned worker.
+`GET /api/v1/download?uuid=<id>` SHALL serve the source only while the job is `started` and the `workerName` header matches the assigned worker. Its `Content-Disposition` filename SHALL use RFC 5987 UTF-8 encoding so workers can recover the original filename.
 
 #### Scenario: Assigned worker
 - **WHEN** the assigned worker requests a started job

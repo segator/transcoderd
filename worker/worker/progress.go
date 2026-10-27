@@ -21,6 +21,12 @@ type ReportStepProgressTracker struct {
 	name               string
 	stepId             string
 	lastUpdate         time.Time
+	startedAt          time.Time
+	total              int64
+	value              int64
+	frames             int64
+	framesPerSecond    float64
+	encoderSpeed       string
 	registry           *progressRegistry
 	snapshotMu         sync.Mutex
 	reportMu           sync.Mutex
@@ -87,7 +93,20 @@ func (e *ReportStepProgressTracker) updateSnapshot() {
 	if eta < 0 {
 		eta = 0
 	}
-	e.registry.set(e.snapshotKey(), control.TaskProgress{JobID: e.jobId.String(), Name: e.name, StepID: e.stepId, Phase: string(e.notificationType), Percent: percent, ETASeconds: eta})
+	elapsed := time.Since(e.startedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	bytesPerSecond := int64(0)
+	if e.notificationType == model.DownloadNotification && elapsed > 0 {
+		bytesPerSecond = int64(float64(e.value) / elapsed.Seconds())
+	}
+	e.registry.set(e.snapshotKey(), control.TaskProgress{
+		JobID: e.jobId.String(), Name: e.name, StepID: e.stepId, Phase: string(e.notificationType),
+		Percent: percent, ETASeconds: eta, ElapsedSeconds: int64(elapsed.Seconds()),
+		Value: e.value, Total: e.total, BytesPerSecond: bytesPerSecond,
+		Frames: e.frames, FramesPerSecond: e.framesPerSecond, EncoderSpeed: e.encoderSpeed,
+	})
 }
 
 func (e *ReportStepProgressTracker) finishSnapshot() {
@@ -103,6 +122,7 @@ func newReportStepProgressTracker(jobId uuid.UUID, stepId string, notificationTy
 	return &ReportStepProgressTracker{
 		jobId:              jobId,
 		stepId:             stepId,
+		startedAt:          time.Now(),
 		serverClient:       serverClient,
 		notificationType:   notificationType,
 		consoleStepTracker: consoleStepTracker,
@@ -123,19 +143,37 @@ func (e *ReportStepProgressTracker) SetDisplayName(name string) {
 
 func (e *ReportStepProgressTracker) SetTotal(total int64) {
 	e.consoleStepTracker.SetTotal(total)
+	e.snapshotMu.Lock()
+	e.total = total
+	e.snapshotMu.Unlock()
 	e.updateSnapshot()
 }
 
 func (e *ReportStepProgressTracker) UpdateValue(value int64) {
 	e.consoleStepTracker.UpdateValue(value)
+	e.snapshotMu.Lock()
+	e.value = value
+	e.snapshotMu.Unlock()
 	e.updateSnapshot()
 	e.reportTrackProgress(model.ProgressingTaskProgressTypeStatus)
 }
 
 func (e *ReportStepProgressTracker) Increment(increment int) {
 	e.consoleStepTracker.Increment(increment)
+	e.snapshotMu.Lock()
+	e.value += int64(increment)
+	e.snapshotMu.Unlock()
 	e.updateSnapshot()
 	e.reportTrackProgress(model.ProgressingTaskProgressTypeStatus)
+}
+
+func (e *ReportStepProgressTracker) SetFFmpegProgress(frames int64, fps float64, speed string) {
+	e.snapshotMu.Lock()
+	e.frames = frames
+	e.framesPerSecond = fps
+	e.encoderSpeed = speed
+	e.snapshotMu.Unlock()
+	e.updateSnapshot()
 }
 
 func (e *ReportStepProgressTracker) reportTrackProgress(status model.TaskProgressStatus) {

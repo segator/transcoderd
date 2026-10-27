@@ -374,11 +374,12 @@ func (e *JobExecutor) ExecuteJob(jobId uuid.UUID, lastEvent int) error {
 	if !e.ReserveJobSlot() {
 		return errors.New("worker is not accepting another job")
 	}
-	return e.ExecuteReservedJob(jobId, lastEvent)
+	return e.ExecuteReservedJob(jobId, lastEvent, "")
 }
 
-func (e *JobExecutor) ExecuteReservedJob(jobId uuid.UUID, lastEvent int) error {
+func (e *JobExecutor) ExecuteReservedJob(jobId uuid.UUID, lastEvent int, originalName string) error {
 	jobContext := job.NewContext(jobId, lastEvent, filepath.Join(e.tempPath, jobId.String()))
+	jobContext.Source.OriginalName = originalName
 
 	if err := jobContext.Init(); err != nil {
 		e.ReleaseJobSlot()

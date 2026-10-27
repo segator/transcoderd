@@ -269,6 +269,9 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 	}
 	if value != nil {
 		settings := value.Public()
+		if settings.WorkingDirectory == "" {
+			settings.WorkingDirectory = filepath.Join(s.dir, "work")
+		}
 		status.Settings = &settings
 	}
 	combined := control.AdmissionStatus{WithinSchedule: true}
@@ -353,6 +356,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 			break
 		}
 		value := req.Settings.Normalized()
+		value.WorkingDirectory = strings.TrimSpace(value.WorkingDirectory)
 		current := s.state.Active
 		if s.state.Pending != nil {
 			current = s.state.Pending

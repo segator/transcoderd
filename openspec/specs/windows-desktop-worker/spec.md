@@ -37,7 +37,19 @@ The tray application SHALL present an HTML-based dashboard showing service conne
 
 #### Scenario: Download in progress
 - **WHEN** a source download has provided its filename
-- **THEN** the dashboard shows that filename and the available download progress
+- **THEN** the dashboard shows its original filename, downloaded bytes and total size, transfer speed, elapsed time and ETA when available
+
+#### Scenario: Assigned job waiting to download
+- **WHEN** an assigned job has not started downloading its source
+- **THEN** the dashboard shows the source filename and identifies that it is waiting for download
+
+#### Scenario: FFmpeg encoding progress
+- **WHEN** FFmpeg reports encoding progress
+- **THEN** the dashboard shows encoded frames, frame rate, encoder speed, elapsed time and ETA when available
+
+#### Scenario: Subtitle preparation
+- **WHEN** a job is extracting subtitle tracks or converting PGS subtitles with OCR
+- **THEN** the dashboard identifies the active phase as subtitle extraction or subtitle OCR instead of generic preparation
 
 #### Scenario: Prefetched work
 - **WHEN** an accepted source has been downloaded and is waiting for an encode slot
@@ -58,6 +70,13 @@ The tray application SHALL present an HTML-based dashboard showing service conne
 #### Scenario: Closing the window
 - **WHEN** the user closes the tray window
 - **THEN** the application remains in the notification area and the worker service continues
+
+### Requirement: Configurable Windows worker working directory
+The desktop settings SHALL let a user select an absolute path on a local Windows drive for downloads and job workspaces. If no path is selected, the service SHALL use `%ProgramData%\TranscoderD\work`. Both worker profiles SHALL use the selected directory as the parent of their own workspaces.
+
+#### Scenario: Change working directory
+- **WHEN** a user saves a different valid working directory
+- **THEN** the service applies it after accepted work drains, and both worker profiles store downloads and job workspaces beneath that directory
 
 ### Requirement: Independent CPU and GPU worker profiles
 The Windows dashboard SHALL let users configure separate encoder and concurrent-job limits for CPU and GPU profiles under one service.

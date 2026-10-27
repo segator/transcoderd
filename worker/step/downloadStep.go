@@ -8,9 +8,11 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 	"transcoder/model"
 	"transcoder/worker/console"
@@ -81,12 +83,24 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 		if err != nil {
 			return err
 		}
-		_, params, err := mime.ParseMediaType(resp.Header.Get("Content-Disposition"))
+		contentDisposition := resp.Header.Get("Content-Disposition")
+		_, params, err := mime.ParseMediaType(contentDisposition)
 		if err != nil {
 			return err
 		}
-		originalName = filepath.Base(params["filename"])
-		if named, ok := tracker.(interface{ SetDisplayName(string) }); ok && params["filename"] != "" {
+		originalName = params["filename"]
+		if originalName != "" {
+			// Older servers encoded the entire filename with QueryEscape instead
+			// of using the RFC-compliant filename* parameter.
+			if !strings.Contains(strings.ToLower(contentDisposition), "filename*=") {
+				originalName, err = url.QueryUnescape(originalName)
+				if err != nil {
+					return fmt.Errorf("decode downloaded filename: %w", err)
+				}
+			}
+			originalName = filepath.Base(originalName)
+		}
+		if named, ok := tracker.(interface{ SetDisplayName(string) }); ok && originalName != "" {
 			named.SetDisplayName(originalName)
 		}
 

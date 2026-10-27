@@ -109,7 +109,7 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 					continue
 				}
 
-				if err := q.worker.ExecuteReservedJob(requestJobResponse.Id, requestJobResponse.EventID); err != nil {
+				if err := q.worker.ExecuteReservedJob(requestJobResponse.Id, requestJobResponse.EventID, requestJobResponse.Name); err != nil {
 					q.logger.Errorf("Error Preparing Job Execution: %v", err)
 				}
 			}

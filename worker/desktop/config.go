@@ -13,16 +13,20 @@ import (
 	workerconfig "transcoder/worker/config"
 )
 
-var validName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+var (
+	validName             = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+	validWorkingDirectory = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+)
 
 type Settings struct {
-	Domain   string `json:"domain"`
-	Token    string `json:"token,omitempty"`
-	Name     string `json:"name"`
-	CPUCodec string `json:"cpuCodec,omitempty"`
-	CPUJobs  int    `json:"cpuJobs"`
-	GPUCodec string `json:"gpuCodec,omitempty"`
-	GPUJobs  int    `json:"gpuJobs"`
+	Domain           string `json:"domain"`
+	Token            string `json:"token,omitempty"`
+	Name             string `json:"name"`
+	WorkingDirectory string `json:"workingDirectory,omitempty"`
+	CPUCodec         string `json:"cpuCodec,omitempty"`
+	CPUJobs          int    `json:"cpuJobs"`
+	GPUCodec         string `json:"gpuCodec,omitempty"`
+	GPUJobs          int    `json:"gpuJobs"`
 	// Codec and MaxJobs keep older service.json files and local control clients readable.
 	Codec    string   `json:"codec,omitempty"`
 	MaxJobs  int      `json:"maxJobs,omitempty"`
@@ -30,19 +34,20 @@ type Settings struct {
 }
 
 type PublicSettings struct {
-	Domain   string   `json:"domain"`
-	TokenSet bool     `json:"tokenSet"`
-	Name     string   `json:"name"`
-	CPUCodec string   `json:"cpuCodec"`
-	CPUJobs  int      `json:"cpuJobs"`
-	GPUCodec string   `json:"gpuCodec"`
-	GPUJobs  int      `json:"gpuJobs"`
-	Schedule []string `json:"schedule"`
+	Domain           string   `json:"domain"`
+	TokenSet         bool     `json:"tokenSet"`
+	Name             string   `json:"name"`
+	WorkingDirectory string   `json:"workingDirectory"`
+	CPUCodec         string   `json:"cpuCodec"`
+	CPUJobs          int      `json:"cpuJobs"`
+	GPUCodec         string   `json:"gpuCodec"`
+	GPUJobs          int      `json:"gpuJobs"`
+	Schedule         []string `json:"schedule"`
 }
 
 func (s Settings) Public() PublicSettings {
 	s = s.Normalized()
-	return PublicSettings{Domain: s.Domain, TokenSet: s.Token != "", Name: s.Name, CPUCodec: s.CPUCodec, CPUJobs: s.CPUJobs, GPUCodec: s.GPUCodec, GPUJobs: s.GPUJobs, Schedule: s.Schedule}
+	return PublicSettings{Domain: s.Domain, TokenSet: s.Token != "", Name: s.Name, WorkingDirectory: s.WorkingDirectory, CPUCodec: s.CPUCodec, CPUJobs: s.CPUJobs, GPUCodec: s.GPUCodec, GPUJobs: s.GPUJobs, Schedule: s.Schedule}
 }
 
 func (s Settings) Normalized() Settings {
@@ -89,6 +94,9 @@ func (s Settings) Validate() error {
 	}
 	if !validName.MatchString(s.Name) {
 		return errors.New("worker name must contain only letters, numbers, dot, dash or underscore")
+	}
+	if s.WorkingDirectory != "" && (!validWorkingDirectory.MatchString(s.WorkingDirectory) || strings.ContainsAny(s.WorkingDirectory, "\x00\r\n")) {
+		return errors.New("working directory must be an absolute path on a local Windows drive")
 	}
 	if s.CPUJobs < 0 || s.GPUJobs < 0 || s.CPUJobs > 64 || s.GPUJobs > 64 || s.CPUJobs+s.GPUJobs > 64 {
 		return errors.New("CPU and GPU concurrent encodes must each be between 0 and 64 and total no more than 64")
@@ -194,7 +202,11 @@ func WorkerConfigForProfile(dir string, s Settings, profile Profile, paused bool
 	if paused {
 		maxJobs = 0
 	}
-	value := map[string]any{"web": map[string]any{"domain": s.Domain, "token": s.Token}, "worker": map[string]any{"name": profile.Name, "maxActiveJobs": maxJobs, "temporalPath": filepath.Join(dir, "work"), "ffmpegConfig": map[string]any{"videoCodec": profile.Codec, "parallelJobs": max(1, profile.Jobs)}, "schedule": map[string]any{"timeZone": "Local", "windows": s.Schedule}}}
+	workingDirectory := s.WorkingDirectory
+	if workingDirectory == "" {
+		workingDirectory = filepath.Join(dir, "work")
+	}
+	value := map[string]any{"web": map[string]any{"domain": s.Domain, "token": s.Token}, "worker": map[string]any{"name": profile.Name, "maxActiveJobs": maxJobs, "temporalPath": workingDirectory, "ffmpegConfig": map[string]any{"videoCodec": profile.Codec, "parallelJobs": max(1, profile.Jobs)}, "schedule": map[string]any{"timeZone": "Local", "windows": s.Schedule}}}
 	return writeWorkerConfig(filepath.Join(dir, "config-"+profile.Key+".yaml"), value)
 }
 

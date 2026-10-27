@@ -88,6 +88,7 @@ type JobType string
 type RequestJobResponse struct {
 	Id      uuid.UUID `json:"id"`
 	EventID int       `json:"eventID"`
+	Name    string    `json:"name,omitempty"`
 }
 
 type TaskPGS struct {

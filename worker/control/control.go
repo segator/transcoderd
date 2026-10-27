@@ -36,13 +36,20 @@ type JobState struct {
 }
 
 type TaskProgress struct {
-	JobID      string  `json:"jobId"`
-	Name       string  `json:"name,omitempty"`
-	Profile    string  `json:"profile,omitempty"`
-	StepID     string  `json:"stepId"`
-	Phase      string  `json:"phase"`
-	Percent    float64 `json:"percent"`
-	ETASeconds int64   `json:"etaSeconds"`
+	JobID           string  `json:"jobId"`
+	Name            string  `json:"name,omitempty"`
+	Profile         string  `json:"profile,omitempty"`
+	StepID          string  `json:"stepId"`
+	Phase           string  `json:"phase"`
+	Percent         float64 `json:"percent"`
+	ETASeconds      int64   `json:"etaSeconds"`
+	ElapsedSeconds  int64   `json:"elapsedSeconds"`
+	Value           int64   `json:"value"`
+	Total           int64   `json:"total"`
+	BytesPerSecond  int64   `json:"bytesPerSecond,omitempty"`
+	Frames          int64   `json:"frames,omitempty"`
+	FramesPerSecond float64 `json:"framesPerSecond,omitempty"`
+	EncoderSpeed    string  `json:"encoderSpeed,omitempty"`
 }
 
 type AdmissionController interface {

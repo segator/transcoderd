@@ -348,3 +348,22 @@ func TestCommittedTransactionFinishesClearingBarrierAfterRestart(t *testing.T) {
 		t.Fatalf("recovered commit = %+v, %v", state, err)
 	}
 }
+
+func TestPersistedTargetCannotDowngradeNewerInstallation(t *testing.T) {
+	c := fixtureClient(t, nil)
+	candidate, manifest, err := c.Check(context.Background(), "v2.8.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err = Save(dir, State{Status: Status{Pending: true, Phase: "retrying", TargetVersion: manifest.Version}, Candidate: candidate}); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(dir, "v100.0.0", c, Hooks{Install: func(*Candidate, *Manifest, string) error { t.Fatal("downgrade was installed"); return nil }})
+	if err = m.Step(context.Background(), time.Now(), true); err == nil {
+		t.Fatal("old persisted target was accepted")
+	}
+	if !m.Snapshot().Pending {
+		t.Fatal("unverified installation released the barrier")
+	}
+}

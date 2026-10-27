@@ -168,6 +168,14 @@ func (m *Manager) Step(ctx context.Context, now time.Time, force bool) error {
 	if err != nil {
 		return m.failure(s, err, now)
 	}
+	installed, err := Version(m.version)
+	if err != nil {
+		return m.failure(s, err, now)
+	}
+	target, _ := Version(manifest.Version)
+	if !target.GT(installed) {
+		return m.failure(s, errors.New("installed version changed; waiting for a verified newer complete update"), now)
+	}
 	if m.hooks.Drain == nil {
 		return m.failure(s, errors.New("worker update controls are unavailable"), now)
 	}

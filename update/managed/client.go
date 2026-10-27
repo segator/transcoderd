@@ -88,6 +88,9 @@ func (c *Client) get(ctx context.Context, value string) (*http.Response, error) 
 	}
 	req.Header.Set("User-Agent", "TranscoderD-Windows-Updater")
 	req.Header.Set("Accept", "application/octet-stream")
+	if strings.HasPrefix(value, "https://api.github.com/") {
+		req.Header.Set("Accept", "application/vnd.github+json")
+	}
 	r, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err

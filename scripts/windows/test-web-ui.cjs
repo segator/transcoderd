@@ -81,6 +81,14 @@ assert.ok(saved.has('transcoderd.pending-update'),'update lock must survive a pa
   assert.equal(element('save').disabled,true,'keyboard submission must not unlock the form');
   context.renderUpdate();context.lockConfiguration(true);
   assert.equal(element('update-alert').hidden,false,'disconnect must retain pending update alert');
+  elements.clear();
+  const reloaded = {...context};
+  vm.createContext(reloaded);
+  vm.runInContext(fs.readFileSync(`${assetRoot}/activity.js`, 'utf8'), reloaded);
+  vm.runInContext(fs.readFileSync(`${assetRoot}/app.js`, 'utf8'), reloaded);
+  assert.equal(element('update-alert').hidden,false,'reload must display the cached pending alert before service status arrives');
+  assert.equal(element('settings-controls').disabled,true,'reload must start with configuration locked');
+  await assert.rejects(reloaded.request('configure',{settings:{}}),/locked/);
   context.render({configured:true,version:'99.1.0',update:{pending:false,phase:'updated'},worker:{jobs:[],progress:[]}});
   assert.equal(element('settings-controls').disabled,false,'verified service status releases the lock');
   assert.equal(saved.has('transcoderd.pending-update'),false);

@@ -28,11 +28,12 @@ function Invoke-Desktop([object]$request) {
 }
 function Wait-Status([scriptblock]$Match,[int]$Seconds=180) {
  $deadline=[DateTime]::UtcNow.AddSeconds($Seconds)
+ $last=$null
  while ([DateTime]::UtcNow -lt $deadline) {
-  try { $current=Invoke-Desktop @{command='status'};if (& $Match $current) { return $current } } catch {}
+  try { $current=Invoke-Desktop @{command='status'};$last=$current | ConvertTo-Json -Compress -Depth 30;[IO.File]::AppendAllText((Join-Path $EvidenceDirectory 'update-states.log'),([DateTime]::UtcNow.ToString('o')+' '+$last+[Environment]::NewLine));if (& $Match $current) { return $current } } catch { $last=$_.ToString() }
   Start-Sleep -Milliseconds 250
  }
- throw 'Windows update state did not arrive before the deadline.'
+ throw "Windows update state did not arrive before the deadline. Last state: $last"
 }
 function Set-Feed([bool]$Enabled,[bool]$BadSignature=$false,[bool]$BadDownload=$false) {
  $path=Join-Path $FixtureDirectory 'feed.json'
@@ -110,9 +111,26 @@ try {
  Stop-Service TranscoderDWorker;(Get-Service TranscoderDWorker).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))
  $journal=Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
  $journal.phase='verifying';$journal.pid=0
+ $manifest=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($journal.candidate.data)) | ConvertFrom-Json
+ $backupFile=Join-Path $data ('updates\'+$manifest.installer.sha256+'\backup\transcoderd-worker.exe')
+ $savedBackup=Join-Path $EvidenceDirectory 'worker-backup.exe'
+ Copy-Item -LiteralPath $backupFile -Destination $savedBackup
+ [IO.File]::WriteAllBytes($backupFile,[byte[]]@(1,2,3))
  $journal | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $journalPath -Encoding utf8
  & schtasks.exe /Run /TN TranscoderDUpdateRecovery
  if ($LASTEXITCODE -ne 0) { throw 'Recovery task could not be invoked.' }
+ $deadline=[DateTime]::UtcNow.AddSeconds(60);$failedRecovery=$false
+ while ([DateTime]::UtcNow -lt $deadline) {
+  $recovery=Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
+  if ($recovery.phase -eq 'recovering' -and $recovery.error -match 'rollback snapshot') { $failedRecovery=$true;break }
+  Start-Sleep -Milliseconds 250
+ }
+ if (-not $failedRecovery) { throw 'Corrupt rollback snapshot was not rejected.' }
+ $lockedState=Get-Content -LiteralPath (Join-Path $data 'updates\state.json') -Raw | ConvertFrom-Json
+ if (-not $lockedState.pending -or (Get-Service TranscoderDWorker).Status -ne 'Stopped') { throw 'Unsafe recovery restarted work or released the mandatory lock.' }
+ Copy-Item -LiteralPath $savedBackup -Destination $backupFile -Force
+ Remove-Item -LiteralPath $savedBackup -Force
+ Write-Output 'Unsafe recovery kept the service stopped and retried the verified rollback snapshot.'
  $status=Wait-Status {param($s) $s.version -eq 'v99.0.0' -and $s.update.pending -and $s.update.phase -eq 'retrying'} 180
  Assert-Owner;Assert-Locked
  Remove-Item -LiteralPath (Join-Path $data 'updates\fixture-fail-install') -Force

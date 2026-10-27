@@ -2,16 +2,16 @@
 
 ## 1. Mandatory update state, release authenticity and staging
 
-- [ ] 1.1 Add separate persisted mandatory-update/status models with authenticated pending target, admission barrier, failed-attempt tracking and next retry; verify migration, restart persistence, rejection of opt-out/deferral requests and public token redaction with Go tests, and document fields in the desktop protocol reference.
+- [x] 1.1 Add separate persisted mandatory-update/status models with authenticated pending target, admission barrier, failed-attempt tracking and next retry; verify migration, restart persistence, rejection of opt-out/deferral requests and public token redaction with Go tests, and document fields in the desktop protocol reference.
 - [x] 1.2 Implement a versioned Ed25519-signed Windows manifest describing the exact installer and expected installed files; verify valid fixtures and rejection of bad signatures, digests, sizes, paths, architecture and non-newer/draft/prerelease versions with unit tests.
-- [ ] 1.3 Provision the protected release signing secret without printing private material, commit the public verification key and document bootstrap/rotation; verify a CI signing probe with the public key and prove missing signing configuration cannot publish eligible metadata.
-- [ ] 1.4 Implement hourly independent release checks, bounded jitter/timeouts, explicit check-now and automatic retries capped at six hours; verify clock-injected mandatory progress, newer-target supersession, missing Windows assets and startup without a tray.
+- [x] 1.3 Provision the protected release signing secret without printing private material, commit the public verification key and document bootstrap/rotation; verify a CI signing probe with the public key and prove missing signing configuration cannot publish eligible metadata.
+- [x] 1.4 Implement hourly independent release checks, bounded jitter/timeouts, explicit check-now and automatic retries capped at six hours; verify clock-injected mandatory progress, newer-target supersession, missing Windows assets and startup without a tray.
 - [ ] 1.5 Stage and revalidate installer/metadata in protected directories with progress and free-space checks while the pending admission barrier remains active; verify slow/failed downloads, restart interruption, storage failure, reparse points and unauthorized-file replacement, and document storage/cleanup requirements.
 
 ## 2. Drain and coordinate both worker profiles
 
-- [ ] 2.1 Persist the pending update and establish the admission barrier immediately after authenticating a complete eligible release, then download and drain in parallel; verify there is no grace period, confirmation, deferral or user action required.
-- [ ] 2.2 Coordinate update maintenance with pending configuration, manual Setup and pause/limit controls; verify concurrent lifecycle requests yield one transaction and actionable English responses.
+- [x] 2.1 Persist the pending update and establish the admission barrier immediately after authenticating a complete eligible release, then download and drain in parallel; verify there is no grace period, confirmation, deferral or user action required.
+- [x] 2.2 Coordinate update maintenance with pending configuration, manual Setup and pause/limit controls; verify concurrent lifecycle requests yield one transaction and actionable English responses.
 - [ ] 2.3 Drain CPU/GPU through local runtime controls and wait for all active and reserved work, including uploads and prefetched jobs; implement the internal startup admission hold and verify no installer starts with nonzero counts/unreachable profiles, no child restart reopens requests and persisted server limits stay unchanged.
 - [ ] 2.4 Restore runtime admission only after successful update verification from the user's retained limits, pause and schedule; verify failed staging/install/rollback keeps the barrier, paused/outside-schedule cases remain correct and per-profile settings persist, and document the accepted-work boundary.
 

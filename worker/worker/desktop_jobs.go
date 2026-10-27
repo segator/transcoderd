@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"transcoder/model"
+	"transcoder/worker/config"
 	"transcoder/worker/control"
 	"transcoder/worker/job"
 	"transcoder/worker/step"
@@ -13,10 +14,25 @@ import (
 type jobRegistry struct {
 	mu    sync.RWMutex
 	items map[string]control.JobState
+	codec *config.FFMPEGConfig
+}
+
+func encoderProfile(codec string) string {
+	if codec == config.AV1NVENC {
+		return "gpu"
+	}
+	if codec != "" {
+		return "cpu"
+	}
+	return ""
 }
 
 func (r *jobRegistry) set(jobContext *job.Context, phase model.NotificationType, state string) {
-	item := control.JobState{JobID: jobContext.JobId.String(), Phase: string(phase), State: state}
+	codec := ""
+	if r.codec != nil {
+		codec = r.codec.VideoCodec
+	}
+	item := control.JobState{JobID: jobContext.JobId.String(), Phase: string(phase), State: state, Codec: codec, Profile: encoderProfile(codec)}
 	if jobContext.Source != nil {
 		item.Name = jobContext.Source.OriginalName
 		item.Downloaded = jobContext.Source.FilePath != ""

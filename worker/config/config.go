@@ -33,15 +33,21 @@ type FFMPEGConfig struct {
 }
 
 type Config struct {
-	TemporalPath    string          `mapstructure:"temporalPath" envconfig:"WORKER_TMP_PATH"`
-	Name            string          `mapstructure:"name" envconfig:"WORKER_NAME"`
-	StartAfter      *time.Duration  `mapstructure:"startAfter" envconfig:"WORKER_START_AFTER"`
-	StopAfter       *time.Duration  `mapstructure:"stopAfter" envconfig:"WORKER_STOP_AFTER"`
-	Schedule        *ScheduleConfig `mapstructure:"schedule"`
-	MaxActiveJobs   int             `mapstructure:"maxActiveJobs" envconfig:"WORKER_MAX_ACTIVE_JOBS"`
-	PGSConfig       *PGSConfig      `mapstructure:"pgsConfig"`
-	EncodeConfig    *FFMPEGConfig   `mapstructure:"ffmpegConfig"`
-	VerifyDeltaTime float64         `mapstructure:"verifyDeltaTime" envconfig:"WORKER_VERIFY_DELTA_TIME"`
+	TemporalPath    string           `mapstructure:"temporalPath" envconfig:"WORKER_TMP_PATH"`
+	Name            string           `mapstructure:"name" envconfig:"WORKER_NAME"`
+	StartAfter      *time.Duration   `mapstructure:"startAfter" envconfig:"WORKER_START_AFTER"`
+	StopAfter       *time.Duration   `mapstructure:"stopAfter" envconfig:"WORKER_STOP_AFTER"`
+	Schedule        *ScheduleConfig  `mapstructure:"schedule"`
+	MaxActiveJobs   int              `mapstructure:"maxActiveJobs" envconfig:"WORKER_MAX_ACTIVE_JOBS"`
+	PGSConfig       *PGSConfig       `mapstructure:"pgsConfig"`
+	EncodeConfig    *FFMPEGConfig    `mapstructure:"ffmpegConfig"`
+	Dashboard       *DashboardConfig `mapstructure:"dashboard"`
+	VerifyDeltaTime float64          `mapstructure:"verifyDeltaTime" envconfig:"WORKER_VERIFY_DELTA_TIME"`
+}
+
+type DashboardConfig struct {
+	ListenAddress string `mapstructure:"listenAddress" envconfig:"WORKER_DASHBOARD_LISTEN_ADDRESS"`
+	Token         string `mapstructure:"token" envconfig:"WORKER_DASHBOARD_TOKEN"`
 }
 
 func (c Config) HaveSettedPeriodTime() bool {

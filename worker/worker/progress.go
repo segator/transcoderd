@@ -19,6 +19,7 @@ type ReportStepProgressTracker struct {
 	logger             console.LeveledLogger
 	jobId              uuid.UUID
 	name               string
+	codec              string
 	stepId             string
 	lastUpdate         time.Time
 	startedAt          time.Time
@@ -102,7 +103,7 @@ func (e *ReportStepProgressTracker) updateSnapshot() {
 		bytesPerSecond = int64(float64(e.value) / elapsed.Seconds())
 	}
 	e.registry.set(e.snapshotKey(), control.TaskProgress{
-		JobID: e.jobId.String(), Name: e.name, StepID: e.stepId, Phase: string(e.notificationType),
+		JobID: e.jobId.String(), Name: e.name, Codec: e.codec, Profile: encoderProfile(e.codec), StepID: e.stepId, Phase: string(e.notificationType),
 		Percent: percent, ETASeconds: eta, ElapsedSeconds: int64(elapsed.Seconds()),
 		Value: e.value, Total: e.total, BytesPerSecond: bytesPerSecond,
 		Frames: e.frames, FramesPerSecond: e.framesPerSecond, EncoderSpeed: e.encoderSpeed,
@@ -118,9 +119,10 @@ func (e *ReportStepProgressTracker) finishSnapshot() {
 	}
 }
 
-func newReportStepProgressTracker(jobId uuid.UUID, stepId string, notificationType model.NotificationType, serverClient *serverclient.ServerClient, consoleStepTracker *console.StepTracker) *ReportStepProgressTracker {
+func newReportStepProgressTracker(jobId uuid.UUID, stepId string, notificationType model.NotificationType, codec string, serverClient *serverclient.ServerClient, consoleStepTracker *console.StepTracker) *ReportStepProgressTracker {
 	return &ReportStepProgressTracker{
 		jobId:              jobId,
+		codec:              codec,
 		stepId:             stepId,
 		startedAt:          time.Now(),
 		serverClient:       serverClient,

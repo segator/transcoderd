@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"transcoder/model"
+	"transcoder/version"
 	"transcoder/worker/control"
 	"transcoder/worker/desktop"
 
@@ -262,7 +263,7 @@ type supervisor struct {
 }
 
 func (s *supervisor) snapshotLocked() desktop.Status {
-	status := desktop.Status{Configured: s.state.Active != nil, Running: len(s.children) > 0, Pending: s.state.Pending != nil || s.state.PendingLimit, Message: s.message, Queue: s.queue, QueueError: s.queueError, Profiles: make(map[string]control.AdmissionStatus)}
+	status := desktop.Status{Configured: s.state.Active != nil, Running: len(s.children) > 0, Version: version.Version, Pending: s.state.Pending != nil || s.state.PendingLimit, Message: s.message, Queue: s.queue, QueueError: s.queueError, Profiles: make(map[string]control.AdmissionStatus)}
 	value := s.state.Active
 	if s.state.Pending != nil {
 		value = s.state.Pending

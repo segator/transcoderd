@@ -6,7 +6,7 @@ This reference records the configuration accepted by the current binaries. The O
 
 Both binaries register CLI flags, read YAML through Viper, and enable environment lookup with the `TR_` prefix. Configuration files are searched in `/etc/transcoderd/`, `$HOME/.transcoderd/`, and the current directory. CLI flags override values read from the file. The application does not install a Viper environment-key replacer; nested environment variable spellings such as `TR_WORKER_FFMPEGCONFIG_VIDEOCRF` have not been established as a supported interface. Use YAML or CLI flags for nested values unless the mapping is verified.
 
-The `envconfig` struct tags are not consumed by the Viper setup. They document field intent, but are not evidence that the corresponding environment variable works.
+The `envconfig` struct tags are not consumed by the Viper setup. They document field intent, but are not evidence that the corresponding environment variable works. The two dashboard settings are explicit exceptions and bind `TR_WORKER_DASHBOARD_LISTEN_ADDRESS` and `TR_WORKER_DASHBOARD_TOKEN`.
 
 Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDeltaTime` is a number of seconds, not a duration string. `server.database.scheme` is passed as the PostgreSQL database name (`dbname`).
 
@@ -64,6 +64,8 @@ server:
 | `worker.temporalPath` | OS temporary directory | Parent of `worker-<name>` workspaces. |
 | `worker.threads` | Number of CPUs, capped at 16 | Registered flag; the current encoder does not read this field. See `BASELINE.md`. |
 | `worker.maxActiveJobs` | `2` | Startup FFmpeg encode target. The worker may admit up to two additional pipeline jobs beyond the effective encode target (including a positive `parallelJobs` override) for preparation and verification/upload overlap. A value saved by `control set-max-jobs N` in the server database takes precedence on subsequent starts; `0` disables new requests and leaves the last positive encode target in place. |
+| `worker.dashboard.listenAddress` | Empty (disabled) | Optional local HTTP dashboard address, for example `127.0.0.1:8090` or `0.0.0.0:8090` inside Docker. Requires a dashboard token. YAML, `--worker.dashboard.listenAddress`, or `TR_WORKER_DASHBOARD_LISTEN_ADDRESS`. |
+| `worker.dashboard.token` | Empty | Bearer token for the optional local dashboard API. Required when a dashboard listen address is configured. YAML, `--worker.dashboard.token`, or `TR_WORKER_DASHBOARD_TOKEN`. |
 | `worker.ffmpegConfig.parallelJobs` | `0` | Initial FFmpeg encode target: inherits `worker.maxActiveJobs`; a positive advanced override sets the startup target. A positive runtime `control set-max-jobs N` replaces this target. |
 | `worker.ffmpegConfig.threads` | `0` | Value passed to FFmpeg's `-threads` option; zero lets FFmpeg decide. |
 | `worker.ffmpegConfig.videoCodec` | `av1_nvenc` | Selects the AV1 GPU profile, `libsvtav1` CPU profile, or explicit `libx265` rollback. |

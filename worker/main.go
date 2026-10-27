@@ -16,6 +16,7 @@ import (
 	"transcoder/worker/config"
 	"transcoder/worker/console"
 	"transcoder/worker/control"
+	"transcoder/worker/dashboard"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/worker"
 
@@ -44,6 +45,8 @@ func init() {
 	}
 	pflag.Int("worker.threads", defaultThreads, "Worker Threads")
 	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum FFmpeg encode concurrency; the worker may accept two additional pipeline jobs; 0 disables new job requests")
+	pflag.String("worker.dashboard.listenAddress", "", "Optional HTTP listen address for the local browser dashboard (requires worker.dashboard.token)")
+	pflag.String("worker.dashboard.token", "", "Bearer token required by the local browser dashboard API")
 	pflag.Int("worker.pgsConfig.parallelJobs", 1, "Maximum PGS OCR actions per job")
 	pflag.String("worker.pgsConfig.executablePath", helper.BundledPath("pgs/PgsToSrt.exe", ""), "PgsToSrt executable; empty uses dotnet and DLLPath")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
@@ -181,6 +184,34 @@ func applicationRunWithShutdown(wg *sync.WaitGroup, ctx context.Context, updater
 		defer wg.Done()
 		controlServer.Serve(ctx)
 	}()
+	dashboardConfig := opts.Worker.Dashboard
+	var dashboardAddress, dashboardToken string
+	if dashboardConfig != nil {
+		dashboardAddress, dashboardToken = dashboardConfig.ListenAddress, dashboardConfig.Token
+	}
+	dashboardServer, err := dashboard.Start(dashboardAddress, dashboardToken, encodeWorker)
+	if err != nil {
+		_ = controlServer.Close()
+		return err
+	}
+	if dashboardServer != nil {
+		log.WithField("address", dashboardAddress).Info("Starting worker browser dashboard")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := dashboardServer.Serve(); err != nil {
+				log.WithError(err).Error("Worker browser dashboard stopped")
+			}
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-ctx.Done()
+			if err := dashboardServer.Shutdown(); err != nil {
+				log.WithError(err).Warn("Could not shut down worker browser dashboard cleanly")
+			}
+		}()
+	}
 
 	coordinator := worker.NewServerCoordinator(serverClient, encodeWorker, updater, renderService.Logger())
 	coordinator.Run(wg, ctx)

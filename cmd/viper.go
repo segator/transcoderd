@@ -23,6 +23,12 @@ func ViperConfig(opts *CommandLineConfig) {
 	}
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix("TR")
+	if err := viper.BindEnv("worker.dashboard.listenAddress", "TR_WORKER_DASHBOARD_LISTEN_ADDRESS"); err != nil {
+		log.Panic(err)
+	}
+	if err := viper.BindEnv("worker.dashboard.token", "TR_WORKER_DASHBOARD_TOKEN"); err != nil {
+		log.Panic(err)
+	}
 	err := viper.ReadInConfig()
 	if err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError

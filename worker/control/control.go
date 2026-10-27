@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const controlRequestTimeout = 15 * time.Second
+
 type AdmissionStatus struct {
 	Accepting       bool           `json:"accepting"`
 	ActiveJobs      uint32         `json:"activeJobs"`
@@ -30,6 +32,7 @@ type JobState struct {
 	JobID      string `json:"jobId"`
 	Name       string `json:"name,omitempty"`
 	Profile    string `json:"profile,omitempty"`
+	Codec      string `json:"codec,omitempty"`
 	Phase      string `json:"phase"`
 	State      string `json:"state"`
 	Downloaded bool   `json:"downloaded"`
@@ -39,6 +42,7 @@ type TaskProgress struct {
 	JobID           string  `json:"jobId"`
 	Name            string  `json:"name,omitempty"`
 	Profile         string  `json:"profile,omitempty"`
+	Codec           string  `json:"codec,omitempty"`
 	StepID          string  `json:"stepId"`
 	Phase           string  `json:"phase"`
 	Percent         float64 `json:"percent"`
@@ -108,7 +112,10 @@ func (s *Server) acceptLoop() {
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	// PersistMaxActiveJobs may make a server request with its own 10-second
+	// timeout. Keep the pipe open long enough for that request to finish and
+	// return its result to the CLI/dashboard.
+	_ = conn.SetDeadline(time.Now().Add(controlRequestTimeout))
 	var req Request
 	decoder := json.NewDecoder(bufio.NewReader(conn))
 	if err := decoder.Decode(&req); err != nil {
@@ -206,7 +213,7 @@ func Call(socketPath string, req Request) (Response, error) {
 		return Response{}, fmt.Errorf("connect to running worker control socket: %w", err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(controlRequestTimeout))
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return Response{}, fmt.Errorf("send control request: %w", err)
 	}

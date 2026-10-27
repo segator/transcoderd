@@ -183,8 +183,8 @@ func (Build) WindowsInstaller(ctx context.Context) error {
 	defer client.Close()
 	source := projectSource(client)
 	worker := windowsWorkerBinary(client, source)
-	service := goContainer(client, source).WithEnvVariable("GOOS", "windows").WithEnvVariable("GOARCH", "amd64").WithExec([]string{"go", "build", "-o", "/out/transcoderd-desktop-service.exe", "./cmd/windows-service"}).File("/out/transcoderd-desktop-service.exe")
-	ui := client.Container().From("mcr.microsoft.com/dotnet/sdk:8.0.427").WithDirectory("/src", client.Host().Directory(filepath.Join(projectRoot(), "windows", "desktop"), dagger.HostDirectoryOpts{Exclude: []string{"bin", "obj", "publish"}})).WithWorkdir("/src").WithExec([]string{"dotnet", "publish", "-c", "Release", "-r", "win-x64", "--self-contained", "true", "-o", "/out"}).Directory("/out")
+	service := goContainer(client, source).WithEnvVariable("GOOS", "windows").WithEnvVariable("GOARCH", "amd64").WithExec([]string{"go", "build", "-ldflags", ldflags("transcoderd-desktop-service"), "-o", "/out/transcoderd-desktop-service.exe", "./cmd/windows-service"}).File("/out/transcoderd-desktop-service.exe")
+	ui := client.Container().From("mcr.microsoft.com/dotnet/sdk:8.0.427").WithDirectory("/src", client.Host().Directory(filepath.Join(projectRoot(), "windows", "desktop"), dagger.HostDirectoryOpts{Exclude: []string{"bin", "obj", "publish"}})).WithDirectory("/worker/dashboard/wwwroot", client.Host().Directory(filepath.Join(projectRoot(), "worker", "dashboard", "wwwroot"))).WithWorkdir("/src").WithExec([]string{"dotnet", "publish", "-c", "Release", "-r", "win-x64", "--self-contained", "true", "-o", "/out"}).Directory("/out")
 	if _, err := service.Export(ctx, filepath.Join(projectRoot(), "dist", "transcoderd-desktop-service.exe")); err != nil {
 		return err
 	}

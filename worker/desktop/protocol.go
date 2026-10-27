@@ -16,6 +16,7 @@ type Request struct {
 type Status struct {
 	Configured bool                               `json:"configured"`
 	Running    bool                               `json:"running"`
+	Version    string                             `json:"version"`
 	Pending    bool                               `json:"pending"`
 	Settings   *PublicSettings                    `json:"settings,omitempty"`
 	Worker     *control.AdmissionStatus           `json:"worker,omitempty"`

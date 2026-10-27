@@ -398,7 +398,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 			result.Error = err.Error()
 			break
 		}
-		if err := managed.ValidateWorkspace(filepath.Dir(s.worker), value.WorkingDirectory); err != nil {
+		if err := managed.ValidateWorkspace(filepath.Dir(s.worker), value.WorkingDirectory, filepath.Join(s.dir, "updates")); err != nil {
 			result.Error = err.Error()
 			break
 		}

@@ -408,3 +408,15 @@ func TestInstallerWaitsForReservedRequests(t *testing.T) {
 		t.Fatal("installer did not run after the reserved request finished")
 	}
 }
+
+func TestWorkspaceCannotOverlapStagingCleanup(t *testing.T) {
+	root := t.TempDir()
+	stage := filepath.Join(root, "updates")
+	workspace := filepath.Join(stage, strings.Repeat("a", 64), "work")
+	if err := ValidateWorkspace(filepath.Join(root, "installation"), workspace, stage); err == nil {
+		t.Fatal("workspace inside update cleanup namespace was accepted")
+	}
+	if err := ValidateWorkspace(filepath.Join(root, "installation"), filepath.Join(root, "work"), stage); err != nil {
+		t.Fatal(err)
+	}
+}

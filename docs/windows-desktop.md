@@ -78,6 +78,7 @@ the boot trigger/no-logon scenario; the VM drill remains the rollout gate for
 that environment-dependent behavior.
 
 The working directory must be outside the application's installation folder
-(including junction aliases). The default remains the protected data directory's
+and `%ProgramData%\TranscoderD\updates` staging/cleanup area (including junction
+aliases). The default remains the protected data directory's
 `work` subfolder. Bootstrap Setup checks existing configuration before replacing
 files; move an unsafe workspace with the currently installed app first.

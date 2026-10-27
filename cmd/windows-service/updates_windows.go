@@ -30,7 +30,7 @@ func (s *supervisor) initializeUpdates(ctx context.Context, owner string) error 
 		s.mu.Unlock()
 		for _, settings := range []*desktop.Settings{active, pending} {
 			if settings != nil {
-				if err := managed.ValidateWorkspace(filepath.Dir(s.worker), settings.WorkingDirectory); err != nil {
+				if err := managed.ValidateWorkspace(filepath.Dir(s.worker), settings.WorkingDirectory, filepath.Join(s.dir, "updates")); err != nil {
 					return err
 				}
 			}
@@ -101,7 +101,7 @@ func recordInstallation(installDir string) error {
 	}
 	for _, settings := range []*desktop.Settings{state.Active, state.Pending} {
 		if settings != nil {
-			if err = managed.ValidateWorkspace(installDir, settings.WorkingDirectory); err != nil {
+			if err = managed.ValidateWorkspace(installDir, settings.WorkingDirectory, filepath.Join(dataDir(), "updates")); err != nil {
 				return err
 			}
 		}

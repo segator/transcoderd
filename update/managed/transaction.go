@@ -12,7 +12,7 @@ import (
 )
 
 // ValidateWorkspace keeps user data out of the tree that Setup replaces.
-func ValidateWorkspace(install, workspace string) error {
+func ValidateWorkspace(install, workspace string, reserved ...string) error {
 	if workspace == "" {
 		return nil
 	}
@@ -35,10 +35,13 @@ func ValidateWorkspace(install, workspace string) error {
 			current = parent
 		}
 	}
-	root, work := strings.ToLower(resolve(install)), strings.ToLower(resolve(workspace))
-	rel, err := filepath.Rel(root, work)
-	if err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))) {
-		return errors.New("working directory must be outside the application installation folder before updating")
+	work := strings.ToLower(resolve(workspace))
+	for _, directory := range append([]string{install}, reserved...) {
+		root := strings.ToLower(resolve(directory))
+		rel, err := filepath.Rel(root, work)
+		if err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))) {
+			return errors.New("working directory must be outside folders reserved for application installation and updates")
+		}
 	}
 	return nil
 }

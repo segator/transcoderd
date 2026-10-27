@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"dagger.io/dagger"
 )
@@ -58,13 +59,23 @@ func (Test) WindowsUpdateFixtures(ctx context.Context) error {
 	}
 	extra := "-X transcoder/update/managed.FixtureMode=true -X transcoder/update/managed.FixtureKey=" + base64.StdEncoding.EncodeToString(pub) + " -X transcoder/update/managed.FixtureEndpoint=http://127.0.0.1:18781/latest"
 	source := projectSource(client)
+	var builds sync.WaitGroup
+	results := make(chan error, 2)
 	for _, version := range []string{"v99.0.0", "v99.1.0"} {
-		builder, setup := windowsInstallerBuild(client, source, version, extra, true)
-		for _, entry := range []struct{ source, name string }{{"/" + setup, setup}, {"/windows-installation-files.json", "files.json"}} {
-			if _, err = builder.File(entry.source).Export(ctx, filepath.Join(dir, version, entry.name)); err != nil {
-				return err
+		builds.Go(func() {
+			builder, setup := windowsInstallerBuild(client, source, version, extra, true)
+			for _, entry := range []struct{ source, name string }{{"/" + setup, setup}, {"/windows-installation-files.json", "files.json"}} {
+				if _, err := builder.File(entry.source).Export(ctx, filepath.Join(dir, version, entry.name)); err != nil {
+					results <- err
+					return
+				}
 			}
-		}
+		})
+	}
+	builds.Wait()
+	close(results)
+	for err := range results {
+		return err
 	}
 	for _, entry := range []struct{ pkg, name string }{{"./cmd/windows-update-manifest", "sign.exe"}, {"./cmd/windows-update-fixture", "feed.exe"}} {
 		binary := windowsGoBinary(client, source, entry.pkg, "fixture", "v99.0.0", extra, "windows")

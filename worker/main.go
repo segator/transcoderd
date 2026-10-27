@@ -173,6 +173,9 @@ func applicationRunWithShutdown(wg *sync.WaitGroup, ctx context.Context, updater
 	}
 
 	encodeWorker := worker.NewEncodeWorker(opts.Worker, serverClient, renderService)
+	if os.Getenv("TRANSCODERD_ADMISSION_HOLD") == "1" {
+		encodeWorker.HoldAdmission()
+	}
 	encodeWorker.RequireWorkerSettings()
 	encodeWorker.Run(wg, ctx)
 	controlServer, err := control.Start(control.ConfiguredPath(), encodeWorker, shutdown)

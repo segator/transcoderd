@@ -16,7 +16,7 @@ The specs state observable behavior and the configuration values that affect it.
 | `subtitles` | `worker/ffmpeg/ffprobe.go`, `worker/step/MKVExtractStep.go`, `worker/step/PGStoSrtStep.go` |
 | `persistence` | `server/repository/repository.go`, `server/repository/resources/database/` |
 | `maintenance-and-recovery` | `server/scheduler/scheduler.go`, `worker/job/job.go`, `worker/worker/executor.go` |
-| `self-update` | `update/update.go`, `server/web/web.go`, `worker/worker/coordinator.go` |
+| `self-update` | `update/update.go`, `update/managed/`, `cmd/windows-service/updates_windows.go`, `server/web/web.go`, `worker/worker/coordinator.go` |
 
 ## Known implementation gaps
 

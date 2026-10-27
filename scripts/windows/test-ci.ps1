@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory=$true)][string]$Fixture,
     [Parameter(Mandatory=$true)][string]$EvidenceDirectory,
     [string]$PostgresBin = $env:PGBIN,
-    [string]$DesktopInstaller
+    [string]$DesktopInstaller,
+    [string]$UpdateFixtures
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -76,7 +77,9 @@ try {
             -WorkingDirectory $run -PassThru -NoNewWindow -RedirectStandardOutput $serverLog -RedirectStandardError $serverErr
     }
     finally { $env:PATH = $previousPath }
-    if ($DesktopInstaller) {
+    if ($UpdateFixtures) {
+        & (Join-Path $PSScriptRoot 'test-desktop-updates.ps1') -FixtureDirectory $UpdateFixtures -ServerURL "http://127.0.0.1:$httpPort" -TestBinary $TestBinary -SourceDirectory $source -Fixture $Fixture -EvidenceDirectory $EvidenceDirectory
+    } elseif ($DesktopInstaller) {
         & (Join-Path $PSScriptRoot 'test-desktop-installer.ps1') -Installer $DesktopInstaller -ServerURL "http://127.0.0.1:$httpPort" -TestBinary $TestBinary
     } else {
         & (Join-Path $PSScriptRoot 'test-worker.ps1') -Bundle $Bundle -TestBinary $TestBinary `

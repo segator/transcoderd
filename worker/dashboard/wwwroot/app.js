@@ -3,7 +3,40 @@ const $ = id => document.getElementById(id);
 document.body.classList.toggle('browser-host', !window.chrome?.webview);
 const pending = new Map();
 let sequence = 0, current = null, dirty = false, shownSetup = false, lastJobs = {cpu:0,gpu:2}, polling = false, selectedFilters = new Set(), lastBrowserLimit = 1, dashboardPromptAllowed = true;
+let configurationLocked = true, pendingUpdate = null;
+try { pendingUpdate = JSON.parse(localStorage.getItem('transcoderd.pending-update') || 'null'); } catch {}
+function lockConfiguration(locked) {
+  configurationLocked = locked;
+  $('settings-controls').disabled = locked;
+  $('save').disabled = locked;
+  $('show-token').disabled = locked;
+  $('settings-lock').hidden = !locked;
+  $('settings-lock').textContent = pendingUpdate?.pending ? 'Configuration is locked until the mandatory update completes.' : 'Configuration is locked until the service status is confirmed.';
+  if (locked) $('toggle-pause').disabled = true;
+}
+function renderUpdate(update) {
+  if (update !== undefined) {
+    pendingUpdate = update?.pending ? update : null;
+    try { if (pendingUpdate) localStorage.setItem('transcoderd.pending-update', JSON.stringify(pendingUpdate)); else localStorage.removeItem('transcoderd.pending-update'); } catch {}
+  }
+  const u = pendingUpdate;
+  $('update-alert').hidden = !u?.pending;
+  document.body.classList.toggle('update-pending', Boolean(u?.pending));
+  if (u?.pending) {
+    const phases = {pending:'Preparing update',downloading:'Downloading update',draining:'Waiting for accepted jobs',installing:'Installing update',verifying:'Verifying installation',recovering:'Recovering installation',retrying:'Update will retry automatically','restart-required':'Windows restart required'};
+    $('update-title').textContent = `${phases[u.phase] || 'Mandatory update pending'} · ${u.targetVersion || 'new version'}`;
+    $('update-message').textContent = u.message || 'New jobs are blocked. All accepted jobs and uploads will finish before installation.';
+    const details = [];
+    if (u.total > 0) details.push(`${fileSize(u.downloaded || 0) || '0 MB'} of ${fileSize(u.total)}`);
+    if (current?.worker) details.push(`${current.worker.activeJobs || 0} accepted jobs · ${current.worker.reservedJobs || 0} requests finishing`);
+    if (u.nextRetry && !u.nextRetry.startsWith('0001')) details.push(`Next attempt: ${new Date(u.nextRetry).toLocaleString('en-US')}`);
+    $('update-detail').textContent = details.join(' · ');
+    $('update-progress').style.width = `${u.total > 0 ? Math.min(100, Math.max(0, (u.downloaded || 0) * 100 / u.total)) : 0}%`;
+  }
+}
+renderUpdate(); lockConfiguration(true);
 function request(command, data = {}) {
+  if (configurationLocked && (command === 'configure' || command === 'set-max-jobs')) return Promise.reject(new Error('Configuration is locked until the mandatory update completes or service status is confirmed.'));
   return new Promise((resolve, reject) => {
     if (!window.chrome?.webview) {
       (async () => {
@@ -92,6 +125,8 @@ function encoderLabel(job, progress) {
 }
 function render(status) {
   current = status;
+  renderUpdate(status.update || null);
+  lockConfiguration(Boolean(status.update?.pending));
   document.body.classList.toggle('browser-host', !window.chrome?.webview);
   $('app-version').textContent = `VERSION ${status.version || '—'}`;
   if (!window.chrome?.webview) {
@@ -125,25 +160,25 @@ function render(status) {
   $('server-queue').innerHTML = queue ? (queue.jobs?.length ? queue.jobs.map((j, i) => `<div class="queue-item"><span class="queue-num">${String(i+1).padStart(2,'0')}</span><div class="queue-info"><div class="queue-name" title="${escapeHTML(j.name)}">${escapeHTML(j.name)}</div><div class="queue-meta">${escapeHTML(fileSize(j.size) ? `Awaiting assignment · ${fileSize(j.size)}` : 'Awaiting assignment')}</div></div><span class="badge ready">Queued</span></div>`).join('') : empty('Queue empty','There are no jobs waiting to be assigned.',true)) : empty('Queue unavailable',status.queueError === 'unsupported' ? 'Update the server to view its queue.' : 'The queue will appear when the server is available.',true);
   const notice = !status.configured ? 'Configure the connection to start your worker.' : status.pending ? 'Changes are pending and will be applied when current jobs finish.' : status.message || (worker?.maxActiveJobs === 0 ? 'New assignments are paused. Current jobs will continue.' : worker?.withinSchedule === false ? 'Outside the work schedule. New assignments will resume during the next window.' : '');
   $('notice').classList.toggle('hidden', !notice); $('notice-text').textContent = notice; $('notice-start').classList.add('hidden'); $('notice-settings').classList.remove('hidden');
-  $('toggle-pause').disabled = !worker || status.pending;
+  $('toggle-pause').disabled = configurationLocked || !worker || status.pending;
   $('toggle-pause').textContent = isPaused ? '▶  Resume' : 'Ⅱ  Pause new jobs';
   if (!dirty && status.settings) { const s = status.settings; $('domain').value = s.domain; $('name').value = s.name; $('working-directory').value = s.workingDirectory || ''; $('cpu-codec').value = s.cpuCodec; $('cpu-jobs').value = s.cpuJobs; $('gpu-codec').value = s.gpuCodec; $('gpu-jobs').value = s.gpuJobs; $('schedule').value = (s.schedule || []).join('\n'); $('token-note').textContent = s.tokenSet ? 'Token saved. Leave blank to keep it.' : 'Your token is stored securely on this machine.'; }
   if (!status.configured && !shownSetup) { shownSetup = true; page('settings'); request('show-window').catch(() => {}); }
 }
 async function refresh() {
   if (polling) return; polling = true;
-  try { render(await request('status')); }
+  try { render(await request('status')); window.__lastServiceError = null; }
   catch (error) { window.__lastServiceError = String(error?.message || error); $('connection').className = 'connection error'; $('connection').innerHTML = '<i></i> Service disconnected'; $('notice').classList.remove('hidden'); $('notice-text').textContent = window.chrome?.webview ? 'The Windows service is unavailable.' : (error?.message || 'The worker dashboard is unavailable.'); $('notice-start').classList.toggle('hidden', !window.chrome?.webview); $('notice-settings').classList.add('hidden'); $('toggle-pause').disabled = true; }
-  finally { polling = false; }
+  finally { if (window.__lastServiceError) lockConfiguration(true); polling = false; }
 }
 $('refresh').addEventListener('click', () => { if (!window.chrome?.webview) dashboardPromptAllowed = true; refresh(); });
 $('notice-start').addEventListener('click', async () => { try { await request('start-service'); toast('Starting service…'); setTimeout(refresh, 2000); } catch (err) { toast(err.message); } });
 $('settings-form').addEventListener('input', () => { dirty = true; });
 $('settings-form').addEventListener('submit', async e => {
-  e.preventDefault(); $('save').disabled = true;
+  e.preventDefault(); if (configurationLocked) { toast('Configuration is locked while the mandatory update completes.'); return; } $('save').disabled = true;
   const settings = {domain:$('domain').value.trim(), token:$('token').value, name:$('name').value.trim(), workingDirectory:$('working-directory').value.trim(), cpuCodec:$('cpu-codec').value, cpuJobs:Number($('cpu-jobs').value), gpuCodec:$('gpu-codec').value, gpuJobs:Number($('gpu-jobs').value), schedule:$('schedule').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)};
   try { const status = await request('configure', {settings}); $('token').value = ''; dirty = false; render(status); toast(status.pending ? 'Changes saved; they will apply when current jobs finish.' : 'Settings saved.'); page('overview'); }
-  catch (err) { toast(err.message); } finally { $('save').disabled = false; }
+  catch (err) { toast(err.message); } finally { $('save').disabled = configurationLocked; }
 });
 $('toggle-pause').addEventListener('click', async () => { try { const paused = current?.worker?.maxActiveJobs === 0; if (!window.chrome?.webview) { render(await request('set-max-jobs', {maxJobs:paused ? lastBrowserLimit : 0})); } else { const cpuJobs = paused ? lastJobs.cpu : 0, gpuJobs = paused ? lastJobs.gpu : 0; render(await request('set-max-jobs', {cpuJobs,gpuJobs})); } toast(paused ? 'Worker profiles resumed.' : 'New assignments paused for both profiles.'); } catch (err) { toast(err.message); } });
 document.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => {
@@ -154,5 +189,5 @@ document.querySelectorAll('[data-filter]').forEach(button => button.addEventList
   document.querySelectorAll('[data-filter]').forEach(chip => chip.classList.toggle('active', chip.dataset.filter === 'all' ? selectedFilters.size === 0 : selectedFilters.has(chip.dataset.filter)));
   if (current) render(current);
 }));
-$('show-token').addEventListener('click', () => { $('token').type = $('token').type === 'password' ? 'text' : 'password'; });
+$('show-token').addEventListener('click', () => { if (!configurationLocked) $('token').type = $('token').type === 'password' ? 'text' : 'password'; });
 refresh(); setInterval(refresh, 2000);

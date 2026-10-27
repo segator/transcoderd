@@ -26,6 +26,22 @@ func TestInitialMaximumDefaultsToTwo(t *testing.T) {
 	}
 }
 
+func TestManagedAdmissionHoldSurvivesPersistedLimits(t *testing.T) {
+	worker := testAdmissionWorker(2)
+	worker.HoldAdmission()
+	worker.RequireWorkerSettings()
+	if err := worker.SetMaxActiveJobs(4); err != nil {
+		t.Fatal(err)
+	}
+	worker.MarkWorkerSettingsResolved()
+	if worker.ReserveJobSlot() || worker.AdmissionStatus().Accepting {
+		t.Fatal("managed update hold reopened after loading server limits")
+	}
+	if got := worker.AdmissionStatus().MaxEncodes; got != 4 {
+		t.Fatalf("accepted pipeline encode capacity = %d, want 4", got)
+	}
+}
+
 func TestZeroMaximumStopsAdmissionAndPositiveMaximumRestoresIt(t *testing.T) {
 	worker := testAdmissionWorker(2)
 	if err := worker.SetMaxActiveJobs(0); err != nil {

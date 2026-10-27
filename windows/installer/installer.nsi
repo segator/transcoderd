@@ -30,40 +30,93 @@ ShowUninstDetails show
 Function .onInit
   StrCpy $INSTDIR "$PROGRAMFILES64\TranscoderD"
   ${IfNot} ${RunningX64}
-    MessageBox MB_ICONSTOP "TranscoderD requires 64-bit Windows."
-    Abort
+    Push "TranscoderD requires 64-bit Windows."
+    Call FailInstall
   ${EndIf}
+FunctionEnd
+
+Function FailInstall
+  Pop $2
+  DetailPrint "$2"
+  IfSilent silent_failure
+  MessageBox MB_ICONSTOP "$2"
+silent_failure:
+  SetErrorLevel 1
+  Abort
 FunctionEnd
 
 Section "TranscoderD" Main
   SetShellVarContext current
+  StrCpy $R9 "0"
+  StrCpy $R8 "0"
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=service-helper.exe "${INPUT}/transcoderd-desktop-service.exe"
+  nsExec::ExecToStack '"$PLUGINSDIR\service-helper.exe" --record-installation "$INSTDIR"'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    Push "Could not preserve the installation owner: $1"
+    Call FailInstall
+  ${EndIf}
   IfFileExists "$INSTDIR\transcoderd-desktop-service.exe" 0 fresh
+  StrCpy $R9 "1"
   nsExec::ExecToStack '"$INSTDIR\transcoderd-desktop-service.exe" --prepare-upgrade'
   Pop $0
   Pop $1
   ${If} $0 != 0
-    MessageBox MB_ICONEXCLAMATION "Cannot upgrade yet. $1"
-    Abort
+    Push "Cannot upgrade yet. $1"
+    Call FailInstall
   ${EndIf}
   nsExec::ExecToStack '"$INSTDIR\transcoderd-desktop-service.exe" --uninstall'
   Pop $0
   Pop $1
   ${If} $0 != 0
-    MessageBox MB_ICONSTOP "Could not remove the previous service: $1"
-    Abort
+    Push "Could not remove the previous service: $1"
+    Call FailInstall
   ${EndIf}
-  IfFileExists "$INSTDIR\transcoderd-tray.exe" 0 fresh
+  IfFileExists "$INSTDIR\transcoderd-tray.exe" 0 after_tray
   ExecWait '"$INSTDIR\transcoderd-tray.exe" --quit'
   Sleep 1000
+after_tray:
+  nsExec::ExecToStack '"$PLUGINSDIR\service-helper.exe" --close-trays'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    Push "Could not close the installed dashboard: $1"
+    Call FailInstall
+  ${EndIf}
+  ClearErrors
+  RMDir /r "$INSTDIR"
+  ${If} ${Errors}
+    Push "Could not replace the previous installation files."
+    Call FailInstall
+  ${EndIf}
 fresh:
   SetOutPath "$INSTDIR"
+  ClearErrors
   File /r "${INPUT}\*"
+!ifdef FIXTURE
+  ReadEnvStr $R7 "ProgramData"
+  IfFileExists "$R7\TranscoderD\updates\fixture-fail-install" 0 fixture_install_ok
+  Delete "$INSTDIR\transcoderd-worker.exe"
+  SetErrorLevel 42
+  Abort
+fixture_install_ok:
+!endif
+  ${If} ${Errors}
+    Push "Could not write the installation files."
+    Call FailInstall
+  ${EndIf}
   ExecWait '"$INSTDIR\prerequisites\vc_redist.x64.exe" /install /quiet /norestart' $0
+  ${If} $0 == 3010
+    StrCpy $R8 "1"
+  ${EndIf}
   ${If} $0 != 0
   ${AndIf} $0 != 3010
   ${AndIf} $0 != 1638
-    MessageBox MB_ICONSTOP "Could not install Microsoft Visual C++ Runtime (code $0)."
-    Abort
+    Push "Could not install Microsoft Visual C++ Runtime (code $0)."
+    Call FailInstall
   ${EndIf}
   SetRegView 64
   ReadRegStr $0 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
@@ -74,18 +127,21 @@ fresh:
   ${If} $0 == ""
   ${OrIf} $0 == "0.0.0.0"
     ExecWait '"$INSTDIR\prerequisites\MicrosoftEdgeWebview2Setup.exe" /silent /install' $0
+    ${If} $0 == 3010
+      StrCpy $R8 "1"
+    ${EndIf}
     ${If} $0 != 0
     ${AndIf} $0 != 3010
-      MessageBox MB_ICONSTOP "Could not install Microsoft Edge WebView2 Runtime (code $0)."
-      Abort
+      Push "Could not install Microsoft Edge WebView2 Runtime (code $0)."
+      Call FailInstall
     ${EndIf}
   ${EndIf}
   nsExec::ExecToStack '"$INSTDIR\transcoderd-desktop-service.exe" --install'
   Pop $0
   Pop $1
   ${If} $0 != 0
-    MessageBox MB_ICONSTOP "Could not install the service: $1"
-    Abort
+    Push "Could not install the service: $1"
+    Call FailInstall
   ${EndIf}
   WriteUninstaller "$INSTDIR\uninstall.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\TranscoderD" "DisplayName" "TranscoderD Worker"
@@ -93,9 +149,21 @@ fresh:
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\TranscoderD" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\TranscoderD" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\TranscoderD" "NoRepair" 1
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "TranscoderD" '"$INSTDIR\transcoderd-tray.exe" --background'
-  CreateDirectory "$SMPROGRAMS\TranscoderD"
-  CreateShortcut "$SMPROGRAMS\TranscoderD\TranscoderD.lnk" "$INSTDIR\transcoderd-tray.exe"
+  ${If} $R9 == "0"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "TranscoderD" '"$INSTDIR\transcoderd-tray.exe" --background'
+    CreateDirectory "$SMPROGRAMS\TranscoderD"
+    CreateShortcut "$SMPROGRAMS\TranscoderD\TranscoderD.lnk" "$INSTDIR\transcoderd-tray.exe"
+  ${EndIf}
+  ${If} $R8 == "1"
+    SetRebootFlag true
+    SetErrorLevel 3010
+  ${EndIf}
+!ifdef FIXTURE
+  ReadEnvStr $R7 "ProgramData"
+  IfFileExists "$R7\TranscoderD\updates\fixture-restart-required" 0 fixture_no_restart
+  SetErrorLevel 3010
+fixture_no_restart:
+!endif
 SectionEnd
 
 Section "Uninstall"

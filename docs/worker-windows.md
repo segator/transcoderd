@@ -95,8 +95,23 @@ uploaded even on failure. The optional WSL/NVENC test above is local hardware
 validation and is not part of the hosted runner job.
 
 When Release Please creates a release, its full version is passed to the Windows
-build. Only after the native tests, tool checks and CPU E2E pass does the Windows
-job upload `transcoderd-worker-<version>-windows-amd64.zip` and
-`transcoderd-worker-windows-amd64.exe` to the same release tag. The raw executable
-is the asset selected by Windows self-update. PR runs upload CI artifacts without
+build. Only after the native tests, tool checks, CPU E2E and mandatory updater/recovery
+E2E pass does the Windows job upload `transcoderd-worker-<version>-windows-amd64.zip` and
+`transcoderd-worker-windows-amd64.exe`, the complete Setup installer and signed
+`windows-update.json` / `windows-update.json.sig` to the same release tag.
+Portable CLI workers select the raw executable. Managed desktop installations
+use the authenticated complete installer, including media tools and UI. The
+release signing secret must match the pinned public verification key; signing or
+verification failure prevents publishing eligible update metadata. PR runs upload CI artifacts without
 publishing release assets.
+
+
+The Dagger target `mage test:windowsUpdateFixtures` builds two complete test-only
+installers and an isolated local release feed. `test-ci.ps1 -UpdateFixtures`
+validates a SYSTEM upgrade during a real SVT-AV1 encode, immediate admission and
+configuration blocking, upload completion, partial-install rollback, recovery-task
+entry and automatic retry. Fixture trust keys and feed overrides are compiled
+only into fixture binaries, never production builds. These destructive tests
+refuse to run outside an isolated GitHub runner. See
+[desktop update operations](windows-desktop.md) for the one-time bootstrap and
+isolated-VM reboot drill.

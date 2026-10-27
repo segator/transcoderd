@@ -5,10 +5,13 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -141,5 +144,27 @@ func TestPreparedFailurePreservesInstallationAndSchedulesRetry(t *testing.T) {
 	}
 	if contents, err := os.ReadFile(sentinel); err != nil || string(contents) != "preserve me" {
 		t.Fatalf("prepared failure changed original files: %s, %v", contents, err)
+	}
+}
+
+func TestRecoveryTaskXMLRegistersWithWindowsScheduler(t *testing.T) {
+	if os.Getenv("GITHUB_ACTIONS") != "true" || !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("SYSTEM recovery task registration requires an isolated runner")
+	}
+	source, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(t.TempDir(), "recovery & unicode é.exe")
+	if err = CopyFile(source, helper); err != nil {
+		t.Fatal(err)
+	}
+	task := fmt.Sprintf("TranscoderD-XML-Test-%d", time.Now().UnixNano())
+	defer func() { _, _ = exec.Command("schtasks.exe", "/Delete", "/TN", task, "/F").CombinedOutput() }()
+	if err = registerRecoveryTask(helper, task); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("schtasks.exe", "/Query", "/TN", task).CombinedOutput(); err != nil {
+		t.Fatalf("registered task is unavailable: %v %s", err, output)
 	}
 }

@@ -76,3 +76,8 @@ Hosted CI invokes the actual SYSTEM recovery task and simulates interrupted and
 restart-required journal states. It does not reboot its hosted runner or prove
 the boot trigger/no-logon scenario; the VM drill remains the rollout gate for
 that environment-dependent behavior.
+
+The working directory must be outside the application's installation folder
+(including junction aliases). The default remains the protected data directory's
+`work` subfolder. Bootstrap Setup checks existing configuration before replacing
+files; move an unsafe workspace with the currently installed app first.

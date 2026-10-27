@@ -25,6 +25,16 @@ func (s *supervisor) initializeUpdates(ctx context.Context, owner string) error 
 		return err
 	}
 	s.updates = managed.NewManager(s.dir, version.Version, client, managed.Hooks{Drain: s.drainForUpdate, Install: func(c *managed.Candidate, m *managed.Manifest, path string) error {
+		s.mu.Lock()
+		active, pending := s.state.Active, s.state.Pending
+		s.mu.Unlock()
+		for _, settings := range []*desktop.Settings{active, pending} {
+			if settings != nil {
+				if err := managed.ValidateWorkspace(filepath.Dir(s.worker), settings.WorkingDirectory); err != nil {
+					return err
+				}
+			}
+		}
 		return managed.PrepareInstall(s.dir, filepath.Dir(s.worker), owner, version.Version, c, m, path)
 	}, Recover: managed.RecoverRunning})
 	go s.updates.Run(ctx)
@@ -84,6 +94,17 @@ func (s *supervisor) startProfileLocked(profile desktop.Profile, held bool) erro
 func recordInstallation(installDir string) error {
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		return errors.New("administrator privileges are required")
+	}
+	state, err := desktop.Load(dataDir())
+	if err != nil {
+		return err
+	}
+	for _, settings := range []*desktop.Settings{state.Active, state.Pending} {
+		if settings != nil {
+			if err = managed.ValidateWorkspace(installDir, settings.WorkingDirectory); err != nil {
+				return err
+			}
+		}
 	}
 	if saved, err := managed.ReadInstallation(dataDir()); err == nil {
 		if !samePath(saved.Dir, installDir) {

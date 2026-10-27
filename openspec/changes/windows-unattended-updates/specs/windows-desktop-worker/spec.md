@@ -72,3 +72,10 @@ The English dashboard SHALL show installed and target versions, check result, do
 #### Scenario: User changes encoding settings during maintenance
 - **WHEN** a mandatory update is pending and a client attempts to change encoder settings or limits
 - **THEN** the service rejects the change with an English maintenance message instead of starting another lifecycle transition
+
+### Requirement: Workspace survives complete updates
+The service SHALL keep download and encoding workspaces outside the application installation directory that Setup replaces. Empty workspace configuration SHALL retain the existing protected data-directory default. Configuration and bootstrap Setup SHALL reject a workspace inside the installation, including existing junction aliases, before replacing files.
+
+#### Scenario: Workspace points into the installation
+- **WHEN** configuration or bootstrap Setup encounters an installation folder or its descendant as the download/encoding workspace
+- **THEN** it rejects the unsafe path with an English explanation before replacing files, allowing the user to choose a separate workspace using the installed version

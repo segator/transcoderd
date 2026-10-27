@@ -7,8 +7,41 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
+
+// ValidateWorkspace keeps user data out of the tree that Setup replaces.
+func ValidateWorkspace(install, workspace string) error {
+	if workspace == "" {
+		return nil
+	}
+	// Resolve existing ancestors too, including a junction above a new directory.
+	resolve := func(path string) string {
+		current := filepath.Clean(path)
+		var suffix []string
+		for {
+			if resolved, err := filepath.EvalSymlinks(current); err == nil {
+				for i := len(suffix) - 1; i >= 0; i-- {
+					resolved = filepath.Join(resolved, suffix[i])
+				}
+				return resolved
+			}
+			parent := filepath.Dir(current)
+			if parent == current {
+				return filepath.Clean(path)
+			}
+			suffix = append(suffix, filepath.Base(current))
+			current = parent
+		}
+	}
+	root, work := strings.ToLower(resolve(install)), strings.ToLower(resolve(workspace))
+	rel, err := filepath.Rel(root, work)
+	if err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))) {
+		return errors.New("working directory must be outside the application installation folder before updating")
+	}
+	return nil
+}
 
 type Transaction struct {
 	Phase           string    `json:"phase"`

@@ -367,3 +367,24 @@ func TestPersistedTargetCannotDowngradeNewerInstallation(t *testing.T) {
 		t.Fatal("unverified installation released the barrier")
 	}
 }
+
+func TestWorkspaceRejectsAliasedInstallationAncestors(t *testing.T) {
+	root := t.TempDir()
+	install := filepath.Join(root, "install")
+	if err := os.Mkdir(install, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateWorkspace(install, filepath.Join(install, "new", "work")); err == nil {
+		t.Fatal("nested workspace was accepted")
+	}
+	if err := ValidateWorkspace(install, filepath.Join(root, "work")); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "alias")
+	if err := os.Symlink(install, link); err != nil {
+		t.Skipf("junction/symlink creation unavailable: %v", err)
+	}
+	if err := ValidateWorkspace(install, filepath.Join(link, "not-created", "work")); err == nil {
+		t.Fatal("workspace under a linked installation ancestor was accepted")
+	}
+}

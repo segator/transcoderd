@@ -40,3 +40,4 @@ These observations are not normative requirements. They need separate fixes or e
 ## Verification boundary
 
 `openspec validate --all --strict` checks document structure. Go unit tests cover parts of scheduling, media inspection, context persistence, and steps. PostgreSQL integration tests and Docker end-to-end tests use the `integration` build tag. Structural validation does not prove behavior; each future code change needs tests for the scenarios it affects.
+- Complete Windows upgrades previously assumed the configured workspace was outside the installation tree, although desktop configuration accepted nested paths. The mandatory updater change rejects those paths (including existing junction aliases) during configuration and bootstrap before Setup can replace files; existing affected installations must choose an external workspace before bootstrap.

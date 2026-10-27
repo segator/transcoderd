@@ -63,3 +63,25 @@ func TestProtectedUpdateFilesHavePrivilegedOwner(t *testing.T) {
 		t.Fatalf("journal owner is not the administrators group: %v", err)
 	}
 }
+
+func TestWorkspaceRemainsOutsideInstallation(t *testing.T) {
+	for _, tt := range []struct {
+		name, workspace string
+		allowed         bool
+	}{
+		{"default", "", true},
+		{"another drive", `D:\Encoding`, true},
+		{"sibling", `C:\Program Files\TranscoderD-other\work`, true},
+		{"installation root", `C:\Program Files\TranscoderD`, false},
+		{"nested", `C:\Program Files\TranscoderD\work`, false},
+		{"case insensitive", `c:\PROGRAM FILES\transcoderd\work`, false},
+		{"normalized path", `C:\Program Files\other\..\TranscoderD\work`, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateWorkspace(`C:\Program Files\TranscoderD`, tt.workspace)
+			if (err == nil) != tt.allowed {
+				t.Fatalf("ValidateWorkspace() = %v, allowed %v", err, tt.allowed)
+			}
+		})
+	}
+}

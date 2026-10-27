@@ -81,8 +81,10 @@ Measured native test results and their scope are recorded in
 
 ## Hosted CI and releases
 
-The workflow runs Linux CI first, then the Dagger Windows cross-build, then native
-validation on `windows-2025`. Dagger also builds a test-only Windows server under
+Focused Windows update/administration unit tests run natively in parallel with
+Linux CI, so task registration and permission failures stop before packaging.
+Dagger builds every distributed binary and installer after those gates, followed
+by full native media, service and upgrade validation on `windows-2025`. Dagger also builds a test-only Windows server under
 `dist/windows-tests/`; it is not a distributed server product or release asset.
 
 The native job runs all unit and bundled-tool tests and then

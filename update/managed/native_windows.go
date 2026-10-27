@@ -231,7 +231,7 @@ func registerRecovery(helper string) error {
 
 func registerRecoveryTask(helper, taskName string) error {
 	start := time.Now().Add(5 * time.Minute).UTC().Format("2006-01-02T15:04:05Z")
-	doc := `<?xml version="1.0" encoding="UTF-16"?><Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Triggers><BootTrigger><Enabled>true</Enabled></BootTrigger><TimeTrigger><Repetition><Interval>PT5M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition><StartBoundary>` + start + `</StartBoundary><Enabled>true</Enabled></TimeTrigger></Triggers><Principals><Principal id="System"><UserId>S-1-5-18</UserId><LogonType>ServiceAccount</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions Context="System"><Exec><Command>` + escapedXML(helper) + `</Command><Arguments>--recover</Arguments></Exec></Actions></Task>`
+	doc := `<?xml version="1.0" encoding="UTF-16"?><Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Triggers><BootTrigger><Enabled>true</Enabled></BootTrigger><TimeTrigger><Repetition><Interval>PT5M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition><StartBoundary>` + start + `</StartBoundary><Enabled>true</Enabled></TimeTrigger></Triggers><Principals><Principal id="System"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions Context="System"><Exec><Command>` + escapedXML(helper) + `</Command><Arguments>--recover</Arguments></Exec></Actions></Task>`
 	units := utf16.Encode([]rune(doc))
 	encoded := make([]byte, 2+2*len(units))
 	binary.LittleEndian.PutUint16(encoded, 0xfeff)
@@ -242,7 +242,7 @@ func registerRecoveryTask(helper, taskName string) error {
 	if err := os.WriteFile(file, encoded, 0600); err != nil {
 		return err
 	}
-	out, err := exec.Command("schtasks.exe", "/Create", "/TN", taskName, "/XML", file, "/F").CombinedOutput()
+	out, err := exec.Command("schtasks.exe", "/Create", "/TN", taskName, "/XML", file, "/RU", "SYSTEM", "/F").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("register Windows update recovery: %w: %s", err, string(out))
 	}

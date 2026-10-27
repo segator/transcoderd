@@ -28,7 +28,7 @@ func fixtureManifest(t *testing.T) (Manifest, ed25519.PublicKey, ed25519.Private
 	installer := []byte("test installer bytes")
 	digest := sha256.Sum256(installer)
 	m := Manifest{Schema: 1, Version: "v99.1.0", Architecture: "amd64", Installer: File{Name: "transcoderd-worker-v99.1.0-windows-amd64-setup.exe", Size: int64(len(installer)), SHA256: hex.EncodeToString(digest[:])}}
-	for _, name := range []string{"transcoderd-worker.exe", "transcoderd-desktop-service.exe", "transcoderd-updater.exe", "transcoderd-tray.exe", "wwwroot/index.html"} {
+	for _, name := range []string{"transcoderd-worker.exe", "transcoderd-desktop-service.exe", "transcoderd-updater.exe", "transcoderd-tray.exe", "wwwroot/index.html", "bin/ffmpeg.exe", "bin/ffprobe.exe", "bin/mkvextract.exe", "pgs/PgsToSrt.exe", "pgs/PgsToSrt.dll", "tessdata/eng.traineddata"} {
 		m.Files = append(m.Files, File{Name: name, Size: 1, SHA256: strings.Repeat("0", 64)})
 	}
 	return m, pub, key, installer

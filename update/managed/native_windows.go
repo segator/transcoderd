@@ -268,7 +268,15 @@ func RecoverRunning(t *Transaction) error {
 			defer func() { _ = windows.CloseHandle(h) }()
 			var code uint32
 			if windows.GetExitCodeProcess(h, &code) == nil && code == 259 {
-				return nil
+				var image [32768]uint16
+				size := uint32(len(image))
+				key, e := PublicKey()
+				if e == nil {
+					manifest, e := Verify(t.Candidate.Data, t.Candidate.Signature, key)
+					if e == nil && windows.QueryFullProcessImageName(h, 0, &image[0], &size) == nil && strings.EqualFold(windows.UTF16ToString(image[:size]), filepath.Join(StageDir(DataDir(), manifest), "transcoderd-updater.exe")) {
+						return nil
+					}
+				}
 			}
 		}
 	}

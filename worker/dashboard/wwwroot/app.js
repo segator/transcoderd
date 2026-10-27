@@ -23,10 +23,10 @@ function renderUpdate(update) {
   $('update-alert').hidden = !u?.pending;
   document.body.classList.toggle('update-pending', Boolean(u?.pending));
   if (u?.pending) {
-    const phases = {pending:'Preparing update',downloading:'Downloading update',draining:'Waiting for accepted jobs',installing:'Installing update',verifying:'Verifying installation',recovering:'Recovering installation',retrying:'Update will retry automatically','restart-required':'Windows restart required'};
+    const phases = {pending:'Preparing update',prepared:'Preparing installation',downloading:'Downloading update',draining:'Waiting for accepted jobs',installing:'Installing update',verifying:'Verifying installation',recovering:'Recovering installation',retrying:'Update will retry automatically','restart-required':'Windows restart required'};
     $('update-title').textContent = `${phases[u.phase] || 'Mandatory update pending'} · ${u.targetVersion || 'new version'}`;
     $('update-message').textContent = u.message || 'New jobs are blocked. All accepted jobs and uploads will finish before installation.';
-    const details = [];
+    const details = [`Installed: ${u.installedVersion || current?.version || 'unknown'}`];
     if (u.total > 0) details.push(`${fileSize(u.downloaded || 0) || '0 MB'} of ${fileSize(u.total)}`);
     if (current?.worker) details.push(`${current.worker.activeJobs || 0} accepted jobs · ${current.worker.reservedJobs || 0} requests finishing`);
     if (u.nextRetry && !u.nextRetry.startsWith('0001')) details.push(`Next attempt: ${new Date(u.nextRetry).toLocaleString('en-US')}`);
@@ -127,6 +127,7 @@ function render(status) {
   current = status;
   renderUpdate(status.update || null);
   lockConfiguration(Boolean(status.update?.pending));
+  $('check-update').hidden = !window.chrome?.webview || !status.update;
   document.body.classList.toggle('browser-host', !window.chrome?.webview);
   $('app-version').textContent = `VERSION ${status.version || '—'}`;
   if (!window.chrome?.webview) {
@@ -135,7 +136,7 @@ function render(status) {
     if (status.worker?.maxActiveJobs > 0) lastBrowserLimit = status.worker.maxActiveJobs;
   }
   const worker = status.worker, jobs = worker?.jobs || [], progress = worker?.progress || [];
-  const admission = !status.configured ? 'Service connected' : !worker ? 'Worker starting' : worker.maxActiveJobs === 0 ? 'Paused' : worker.withinSchedule === false ? 'Outside schedule' : worker.accepting ? (worker.maxAcceptedJobs > 0 && (worker.activeJobs + worker.reservedJobs) >= worker.maxAcceptedJobs ? 'At capacity' : 'Accepting jobs') : 'Waiting for settings';
+  const admission = status.update?.pending ? 'Mandatory update' : !status.configured ? 'Service connected' : !worker ? 'Worker starting' : worker.maxActiveJobs === 0 ? 'Paused' : worker.withinSchedule === false ? 'Outside schedule' : worker.accepting ? (worker.maxAcceptedJobs > 0 && (worker.activeJobs + worker.reservedJobs) >= worker.maxAcceptedJobs ? 'At capacity' : 'Accepting jobs') : 'Waiting for settings';
   $('connection').className = 'connection online'; $('connection').innerHTML = `<i></i> ${admission}`;
   const isPaused = worker?.maxActiveJobs === 0;
   if (status.settings) lastJobs = {cpu:status.settings.cpuJobs, gpu:status.settings.gpuJobs};
@@ -171,6 +172,7 @@ async function refresh() {
   catch (error) { window.__lastServiceError = String(error?.message || error); $('connection').className = 'connection error'; $('connection').innerHTML = '<i></i> Service disconnected'; $('notice').classList.remove('hidden'); $('notice-text').textContent = window.chrome?.webview ? 'The Windows service is unavailable.' : (error?.message || 'The worker dashboard is unavailable.'); $('notice-start').classList.toggle('hidden', !window.chrome?.webview); $('notice-settings').classList.add('hidden'); $('toggle-pause').disabled = true; }
   finally { if (window.__lastServiceError) lockConfiguration(true); polling = false; }
 }
+$('check-update').addEventListener('click', async () => { $('check-update').disabled = true; try { await request('check-update'); toast('Checking for updates…'); } catch (err) { toast(err.message); } finally { $('check-update').disabled = false; } });
 $('refresh').addEventListener('click', () => { if (!window.chrome?.webview) dashboardPromptAllowed = true; refresh(); });
 $('notice-start').addEventListener('click', async () => { try { await request('start-service'); toast('Starting service…'); setTimeout(refresh, 2000); } catch (err) { toast(err.message); } });
 $('settings-form').addEventListener('input', () => { dirty = true; });

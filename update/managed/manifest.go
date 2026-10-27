@@ -100,7 +100,7 @@ func (m Manifest) Validate() error {
 		}
 		seen[name] = true
 	}
-	for _, required := range []string{"transcoderd-worker.exe", "transcoderd-desktop-service.exe", "transcoderd-updater.exe", "transcoderd-tray.exe", "wwwroot/index.html"} {
+	for _, required := range []string{"transcoderd-worker.exe", "transcoderd-desktop-service.exe", "transcoderd-updater.exe", "transcoderd-tray.exe", "wwwroot/index.html", "bin/ffmpeg.exe", "bin/ffprobe.exe", "bin/mkvextract.exe", "pgs/pgstosrt.exe", "pgs/pgstosrt.dll", "tessdata/eng.traineddata"} {
 		if !seen[required] {
 			return fmt.Errorf("windows update is missing %s", required)
 		}

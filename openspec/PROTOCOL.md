@@ -79,7 +79,8 @@ For upload, the worker sends the encoded bytes with `Content-Length`, `checksum`
 
 ## Windows managed-update control
 
-The restricted desktop named pipe accepts `status`, `configure`, `set-max-jobs`
+The optional numeric request `id` correlates browser bridge requests. The
+restricted desktop named pipe accepts `status`, `configure`, `set-max-jobs`
 and `check-update`. `check-update` queues an immediate release check; it cannot
 select an endpoint, key, path, executable or installer arguments. Unknown fields
 are rejected. There is no update-disable, postpone or confirmation command.

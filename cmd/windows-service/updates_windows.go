@@ -45,7 +45,7 @@ func (s *supervisor) drainForUpdate() (int, int, error) {
 			}
 			continue
 		}
-		r, err := control.Call(workerPipe(profile), control.Request{Command: "drain"})
+		r, err := control.Call(workerPipe(profile), control.Request{Command: "hold-admission"})
 		if err != nil {
 			return 0, 0, fmt.Errorf("waiting for %s worker control: %w", profile, err)
 		}

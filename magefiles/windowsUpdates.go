@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"os"
 	"path/filepath"
@@ -44,10 +44,11 @@ func (Test) WindowsUpdateFixtures(ctx context.Context) error {
 		return err
 	}
 	defer client.Close()
-	pub, key, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return err
-	}
+	// Public test-only trust: stable fixtures let Dagger reuse installer layers
+	// on retries. Production binaries trust the separate pinned release key.
+	seed := sha256.Sum256([]byte("TranscoderD isolated Windows update fixtures v1"))
+	key := ed25519.NewKeyFromSeed(seed[:])
+	pub := key.Public().(ed25519.PublicKey)
 	dir := filepath.Join(projectRoot(), "dist", "windows-update-fixtures")
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return err

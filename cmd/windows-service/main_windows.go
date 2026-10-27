@@ -535,7 +535,7 @@ func (s *supervisor) run(ctx context.Context) {
 						}
 					}
 					if s.children[profile.Key] != nil {
-						_, _ = control.Call(workerPipe(profile.Key), control.Request{Command: "drain"})
+						_, _ = control.Call(workerPipe(profile.Key), control.Request{Command: "hold-admission"})
 					}
 				}
 			}

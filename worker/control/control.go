@@ -126,6 +126,12 @@ func (s *Server) handle(conn net.Conn) {
 	stop := false
 	switch req.Command {
 	case "status":
+	case "hold-admission":
+		if h, ok := s.state.(interface{ HoldAdmission() }); ok {
+			h.HoldAdmission()
+		} else {
+			result.Error = "mandatory admission hold is unavailable"
+		}
 	case "set-max-jobs":
 		if err := s.state.PersistMaxActiveJobs(req.MaxJobs); err != nil {
 			result.Error = err.Error()

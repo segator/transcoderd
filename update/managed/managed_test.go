@@ -319,3 +319,32 @@ func TestMissingAssetsDoNotEstablishPendingTarget(t *testing.T) {
 		t.Fatal("incomplete release blocked admission")
 	}
 }
+
+func TestInsufficientSpace(t *testing.T) {
+	if err := AvailableSpace(t.TempDir(), int64(1<<62)); err == nil {
+		t.Fatal("AvailableSpace() accepted an impossible reservation")
+	}
+}
+
+func TestCommittedTransactionFinishesClearingBarrierAfterRestart(t *testing.T) {
+	c := fixtureClient(t, nil)
+	candidate, manifest, err := c.Check(context.Background(), "v2.8.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err = Save(dir, State{Status: Status{Pending: true, Phase: "verifying", TargetVersion: manifest.Version}, Candidate: candidate}); err != nil {
+		t.Fatal(err)
+	}
+	if err = SaveJSON(TransactionPath(dir), &Transaction{Phase: "completed", Candidate: *candidate}); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(dir, manifest.Version, c, Hooks{Install: func(*Candidate, *Manifest, string) error { t.Fatal("committed update was installed twice"); return nil }})
+	if err = m.Step(context.Background(), time.Now(), false); err != nil {
+		t.Fatal(err)
+	}
+	state, err := Load(dir)
+	if err != nil || state.Pending || state.Phase != "updated" {
+		t.Fatalf("recovered commit = %+v, %v", state, err)
+	}
+}

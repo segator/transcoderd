@@ -71,7 +71,9 @@ func main() {
 				_, _ = fmt.Fprint(w, "corrupt installer")
 				return
 			}
-			http.ServeFile(w, r, filepath.Join(dir, filepath.Base(r.URL.Path)))
+			// The request selects an allowlisted asset; never form a disk path
+			// from the request URL, even in the isolated fixture server.
+			http.ServeFile(w, r, filepath.Join(dir, "transcoderd-worker-"+s.Version+"-windows-amd64-setup.exe"))
 		}
 	})
 	srv := &http.Server{Addr: "127.0.0.1:18781", Handler: h, ReadHeaderTimeout: 5 * time.Second}

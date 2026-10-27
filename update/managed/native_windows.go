@@ -15,6 +15,8 @@ import (
 	"time"
 	"unsafe"
 
+	"transcoder/helper/command"
+
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
@@ -526,13 +528,16 @@ func RunHelper(ctx context.Context) error {
 	if err = serviceStop(); err != nil {
 		return recoverAfterError(ctx, dir, t, backup, err)
 	}
-	cmd := exec.CommandContext(ctx, installer, "/S")
 	log, err := os.OpenFile(filepath.Join(stage, "installer.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return recoverAfterError(ctx, dir, t, backup, err)
 	}
-	cmd.Stdout, cmd.Stderr = log, log
-	err = cmd.Run()
+	installCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+	defer cancel()
+	writeLog := func(b []byte, _ bool) { _, _ = log.Write(b) }
+	// The shared command runner kills the complete Windows Job Object on a
+	// timeout, so a stuck prerequisite cannot outlive Setup and lock rollback.
+	_, err = command.NewCommand(installer, "/S").SetStdoutFunc(writeLog).SetStderrFunc(writeLog).RunWithContext(installCtx)
 	_ = log.Close()
 	if err != nil {
 		var exit *exec.ExitError

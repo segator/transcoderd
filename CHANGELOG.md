@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.1](https://github.com/segator/transcoderd/compare/v2.8.0...v2.8.1) (2026-10-27)
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/Microsoft/go-winio from 0.6.2 to 0.6.4 ([#189](https://github.com/segator/transcoderd/issues/189)) ([c3fb3fc](https://github.com/segator/transcoderd/commit/c3fb3fc872587ec36c004f74223f63c4c25ea347))
+
 ## [2.8.0](https://github.com/segator/transcoderd/compare/v2.7.3...v2.8.0) (2026-10-26)
 
 

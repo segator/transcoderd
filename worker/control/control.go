@@ -30,6 +30,7 @@ type JobState struct {
 	JobID      string `json:"jobId"`
 	Name       string `json:"name,omitempty"`
 	Profile    string `json:"profile,omitempty"`
+	Codec      string `json:"codec,omitempty"`
 	Phase      string `json:"phase"`
 	State      string `json:"state"`
 	Downloaded bool   `json:"downloaded"`
@@ -39,6 +40,7 @@ type TaskProgress struct {
 	JobID           string  `json:"jobId"`
 	Name            string  `json:"name,omitempty"`
 	Profile         string  `json:"profile,omitempty"`
+	Codec           string  `json:"codec,omitempty"`
 	StepID          string  `json:"stepId"`
 	Phase           string  `json:"phase"`
 	Percent         float64 `json:"percent"`

@@ -61,6 +61,7 @@ func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerCli
 		activeJobs:    0,
 		maxActiveJobs: workerConfig.MaxActiveJobs,
 		encodePool:    newEncodeConcurrency(workerConfig.EncodeParallelJobs()),
+		jobs:          jobRegistry{codec: workerConfig.EncodeConfig},
 	}
 	stepExecutors := setupStepExecutors(jobExecutor)
 	jobExecutor.trackPipeline(stepExecutors)
@@ -535,7 +536,11 @@ func (e *JobExecutor) ConsoleTrackStep(stepId string, notificationType model.Not
 // ReportTrackStep This one is like consoleTrackStep but also reports progress to server
 func (e *JobExecutor) ReportTrackStep(jobContext *job.Context, stepId string, notificationType model.NotificationType) *ReportStepProgressTracker {
 	consoleTracker := e.ConsoleTrackStep(stepId, notificationType)
-	tracker := newReportStepProgressTracker(jobContext.JobId, stepId, notificationType, e.client, consoleTracker)
+	codec := ""
+	if e.workerConfig != nil && e.workerConfig.EncodeConfig != nil {
+		codec = e.workerConfig.EncodeConfig.VideoCodec
+	}
+	tracker := newReportStepProgressTracker(jobContext.JobId, stepId, notificationType, codec, e.client, consoleTracker)
 	if jobContext.Source != nil {
 		tracker.name = jobContext.Source.OriginalName
 	}

@@ -112,6 +112,35 @@ mounts. See [GPU validation](av1-nvenc-validation.md).
 
 ## CLI-only CPU and GPU workers
 
+### Optional browser dashboard
+
+The same live worker dashboard can be served by a Linux or Docker worker. It is
+disabled unless `worker.dashboard.listenAddress` is set, and then requires a
+separate dashboard bearer token. The API exposes local status and pause/resume
+controls; it does not expose the server queue or worker configuration editor.
+Use a trusted network or a reverse proxy that provides HTTPS when accessing it
+outside the host. The browser stores the token locally for that origin.
+
+For Docker, publish the selected port and set the dashboard token through a
+secret/environment-backed configuration rather than committing it in a file:
+
+```yaml
+worker:
+  dashboard:
+    listenAddress: "0.0.0.0:8090"
+    token: "replace-with-a-long-random-token"
+```
+
+Then publish `8090` and open `http://<worker-host>:8090/`. The dashboard asks
+for the token on first use. Keep the port private or terminate TLS at a trusted
+reverse proxy; the built-in listener serves HTTP only. CLI flags are also
+available as `--worker.dashboard.listenAddress` and `--worker.dashboard.token`.
+
+The dashboard shows the worker build version and live local jobs. Activity
+chips can be combined to focus on encoding, downloads, uploads, or preparation.
+The server queue remains a Windows service view because Linux workers do not
+currently fetch the global queue for dashboard display.
+
 Run one worker instance per encoder. The ordinary node-specific settings are
 its name, `maxActiveJobs`, and `videoCodec`. Encoder defaults supply preset,
 quality, pixel format, audio, and mux options. Omitted encode concurrency

@@ -93,6 +93,7 @@ func TestWorkerConfigValidation(t *testing.T) {
 		{"negative parallel encodes", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: -1}}},
 		{"unsupported codec", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2, VideoCodec: "unknown"}}},
 		{"excess threads", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2, Threads: 256}}},
+		{"dashboard address requires token", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2}, Dashboard: &DashboardConfig{ListenAddress: "127.0.0.1:8090"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -112,6 +113,9 @@ func TestWorkerAV1YAMLOverrides(t *testing.T) {
     videoCodec: libsvtav1
     videoCRF: 27
     parallelJobs: 2
+  dashboard:
+    listenAddress: 127.0.0.1:8090
+    token: local-dashboard-token
 `
 	if err := v.ReadConfig(strings.NewReader(configFile)); err != nil {
 		t.Fatalf("ReadConfig() error = %v", err)
@@ -126,7 +130,7 @@ func TestWorkerAV1YAMLOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveVideoSettings() error = %v", err)
 	}
-	if parsed.Worker.MaxActiveJobs != 4 || parsed.Worker.EncodeConfig.ParallelJobs != 2 || settings.Codec != AV1SVT || settings.CRF != 27 {
+	if parsed.Worker.MaxActiveJobs != 4 || parsed.Worker.EncodeConfig.ParallelJobs != 2 || settings.Codec != AV1SVT || settings.CRF != 27 || parsed.Worker.Dashboard == nil || parsed.Worker.Dashboard.ListenAddress != "127.0.0.1:8090" || parsed.Worker.Dashboard.Token != "local-dashboard-token" {
 		t.Errorf("YAML worker = %+v, video = %+v", parsed.Worker, settings)
 	}
 }

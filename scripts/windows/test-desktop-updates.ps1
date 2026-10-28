@@ -109,7 +109,7 @@ try {
  Write-Output 'Partial installer failure rolled back all installation files and retained the mandatory lock.'
  $journalPath=Join-Path $data 'updates\transaction.json'
  Stop-Service TranscoderDWorker;(Get-Service TranscoderDWorker).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))
- $journal=Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
+ $journal=Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json -AsHashtable
  $journal.phase='verifying';$journal.pid=0
  $manifest=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($journal.candidate.data)) | ConvertFrom-Json
  $backupFile=Join-Path $data ('updates\'+$manifest.installer.sha256+'\backup\transcoderd-worker.exe')
@@ -149,7 +149,7 @@ try {
  # Exercise the post-boot branch through its real task entry point. A physical
  # reboot/no-logon drill is documented separately for an isolated VM.
  Stop-Service TranscoderDWorker;(Get-Service TranscoderDWorker).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))
- $journal=Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
+ $journal=Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json -AsHashtable
  $journal.bootTime=[DateTime]::UtcNow.AddYears(-1).ToString('o');$journal.pid=0
  $journal | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $journalPath -Encoding utf8
  & schtasks.exe /Run /TN TranscoderDUpdateRecovery

@@ -59,21 +59,21 @@ func TestZeroMaximumStopsAdmissionAndPositiveMaximumRestoresIt(t *testing.T) {
 	worker.ReleaseJobSlot()
 }
 
-func TestAdmissionAllowsExactlyTwoPipelineBufferJobs(t *testing.T) {
+func TestAdmissionAllowsExactlyOnePipelineBufferJob(t *testing.T) {
 	worker := testAdmissionWorker(2)
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 3; i++ {
 		if !worker.ReserveJobSlot() {
-			t.Fatalf("ReserveJobSlot() failed for accepted job %d of 4", i+1)
+			t.Fatalf("ReserveJobSlot() failed for accepted job %d of 3", i+1)
 		}
 	}
 	if worker.ReserveJobSlot() {
-		t.Fatal("ReserveJobSlot() accepted a fifth job beyond two encode slots and two pipeline buffer jobs")
+		t.Fatal("ReserveJobSlot() accepted a fourth job beyond two encode slots and one pipeline buffer job")
 	}
 	status := worker.AdmissionStatus()
-	if status.MaxActiveJobs != 2 || status.MaxAcceptedJobs != 4 {
-		t.Fatalf("status = encode target %d, admission ceiling %d; want 2 and 4", status.MaxActiveJobs, status.MaxAcceptedJobs)
+	if status.MaxActiveJobs != 2 || status.MaxAcceptedJobs != 3 {
+		t.Fatalf("status = encode target %d, admission ceiling %d; want 2 and 3", status.MaxActiveJobs, status.MaxAcceptedJobs)
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 3; i++ {
 		worker.ReleaseJobSlot()
 	}
 }
@@ -91,18 +91,18 @@ func TestAdmissionCeilingIsZeroWhenDisabled(t *testing.T) {
 func TestAdmissionCeilingUsesEffectiveEncodeOverride(t *testing.T) {
 	worker := testAdmissionWorker(4)
 	worker.encodePool.SetTarget(2)
-	if got := worker.AdmissionStatus().MaxAcceptedJobs; got != 4 {
-		t.Fatalf("MaxAcceptedJobs with two encodes and a two-job buffer = %d, want 4", got)
+	if got := worker.AdmissionStatus().MaxAcceptedJobs; got != 3 {
+		t.Fatalf("MaxAcceptedJobs with two encodes and a one-job buffer = %d, want 3", got)
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 3; i++ {
 		if !worker.ReserveJobSlot() {
 			t.Fatalf("reservation %d failed below the effective admission ceiling", i+1)
 		}
 	}
 	if worker.ReserveJobSlot() {
-		t.Fatal("worker admitted more than two jobs beyond the effective encode target")
+		t.Fatal("worker admitted more than one job beyond the effective encode target")
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 3; i++ {
 		worker.ReleaseJobSlot()
 	}
 }
@@ -198,5 +198,22 @@ func TestSetMaximumRejectsNegativeValues(t *testing.T) {
 	}
 	if got := worker.AdmissionStatus().MaxActiveJobs; got != 2 {
 		t.Fatalf("maximum after invalid updates = %d, want 2", got)
+	}
+}
+
+func TestMixedProfileAdmissionIsBoundedByConfiguredSlotsPlusOneEach(t *testing.T) {
+	for _, target := range []int{1, 4} {
+		worker := testAdmissionWorker(target)
+		for i := 0; i < target+1; i++ {
+			if !worker.ReserveJobSlot() {
+				t.Fatalf("profile %d rejected reservation %d", target, i+1)
+			}
+		}
+		if worker.ReserveJobSlot() {
+			t.Fatalf("profile %d exceeded its one-job buffer", target)
+		}
+		if got := worker.AdmissionStatus().MaxAcceptedJobs; got != target+1 {
+			t.Fatalf("admission ceiling = %d, want %d", got, target+1)
+		}
 	}
 }

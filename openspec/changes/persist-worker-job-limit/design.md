@@ -51,3 +51,5 @@ For an operator's `set-max-jobs` control request, the worker asks the server to 
 2. Deploy workers with the new control behavior. Workers with no stored row continue using their existing startup configuration.
 3. Operators use `control set-max-jobs N` to persist and apply a value; use zero to pause admission and a positive value to resume it.
 4. Rollback workers first if needed. The additive table can remain unused; do not drop it as part of application rollback.
+
+The `pause-queued-encodes` follow-up retains server precedence for standalone workers. Windows service-owned profile limits instead synchronize the local desired value before admission. Operator zero now also holds queued encodes; maintenance drain remains separate.

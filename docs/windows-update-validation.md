@@ -66,3 +66,14 @@ restart-required journals. It does not reboot the hosted VM or prove the boot
 trigger with no logged-in user. Perform the isolated-VM drill in
 [Windows desktop operations](windows-desktop.md#isolated-vm-reboot-drill) before
 broad unattended rollout. Windows is never rebooted automatically by this updater.
+
+
+## Pause and bounded-prefetch regression
+
+The follow-up pause fix has Linux Go/race coverage and native Windows queue tests
+for one/four encode slots, held prefetched work, Resume, paused/restored startup,
+service-owned limits replacing stale server values, and maintenance draining from
+pause. CI's early `windows-unit` job now includes `worker/worker` so these regressions
+run before packaging. Shared UI checks and the Dagger-built tray also pass locally.
+These queue tests simulate encode completion; the complete service/media E2E still
+runs in the ordinary native workflow.

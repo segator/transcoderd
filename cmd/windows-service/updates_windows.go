@@ -71,7 +71,7 @@ func (s *supervisor) startProfileLocked(profile desktop.Profile, held bool) erro
 	}
 	cmd := exec.Command(s.worker, "--noUpdates")
 	cmd.Dir = s.dir
-	cmd.Env = append(os.Environ(), "TRANSCODERD_INTERNAL_CONFIG="+filepath.Join(s.dir, "config-"+profile.Key+".yaml"), "TRANSCODERD_CONTROL_PIPE="+workerPipe(profile.Key))
+	cmd.Env = append(os.Environ(), "TRANSCODERD_INTERNAL_CONFIG="+filepath.Join(s.dir, "config-"+profile.Key+".yaml"), "TRANSCODERD_CONTROL_PIPE="+workerPipe(profile.Key), "TRANSCODERD_MANAGED_PROFILE=1")
 	if held {
 		cmd.Env = append(cmd.Env, "TRANSCODERD_ADMISSION_HOLD=1")
 	}

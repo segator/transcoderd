@@ -117,7 +117,11 @@ The dashboard SHALL aggregate active jobs, progress, encode counts, and admissio
 
 #### Scenario: Pause and resume mixed profiles
 - **WHEN** the user pauses or resumes the worker
-- **THEN** new assignments stop or resume for both profiles while already accepted work continues
+- **THEN** new assignments and queued FFmpeg starts stop or resume for both profiles, while running encodes and downstream work finish
+
+#### Scenario: Configured limits govern startup
+- **WHEN** the desktop specifies one CPU and four GPU encodes and the server retains different old limits
+- **THEN** both workers use the desktop limits before starting encodes or accepting assignments, with at most one additional pipeline job per enabled profile
 
 ### Requirement: Restricted local administration
 The service SHALL restrict its control channel to the installing Windows user, SYSTEM and administrators. It SHALL restrict configuration files containing the server token and privileged update state to SYSTEM and administrators. It SHALL NOT expose a network management port or accept arbitrary executable paths, download URLs or command arguments through update controls.

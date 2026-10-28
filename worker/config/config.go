@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// DefaultMaxActiveJobs is the number of jobs a worker accepts by default.
+// DefaultMaxActiveJobs is the default FFmpeg encode target.
 const DefaultMaxActiveJobs = 2
 
 type PGSConfig struct {
@@ -58,7 +58,7 @@ func (c Config) EncodeParallelJobs() int {
 	if c.EncodeConfig != nil && c.EncodeConfig.ParallelJobs > 0 {
 		return c.EncodeConfig.ParallelJobs
 	}
-	// A zero admission limit still allows jobs already persisted on disk to resume.
+	// Keep a positive capacity for maintenance draining even when user-paused.
 	if c.MaxActiveJobs == 0 {
 		return 1
 	}

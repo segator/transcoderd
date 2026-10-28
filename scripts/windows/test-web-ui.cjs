@@ -34,9 +34,9 @@ context.render({version:'2.8.2-test',configured:true,worker:{maxActiveJobs:0,max
   {jobId:'2',phase:'Download',percent:75,value:1.5*1024**3,total:2*1024**3,bytesPerSecond:20*1024**2},
   {jobId:'3',phase:'Upload',percent:50,value:550*1024**2,total:3*1024**3}
 ]},queue:{total:1,jobs:[{name:'<script>evil</script>'}]}});
-assert.match(element('toggle-pause').textContent, /Resume/, 'pause follows admission, even if accepted work can still encode');
+assert.match(element('toggle-pause').textContent, /Resume/, 'pause retains active encodes while holding queued work');
 assert.match(element('connection').innerHTML, /Paused/);
-assert.match(element('notice-text').textContent, /assignments are paused/);
+assert.match(element('notice-text').textContent, /queued encodes are paused/);
 assert.equal(element('stat-encoding').textContent, 1);
 assert.ok(!element('job-list').innerHTML.includes('<img'), 'job titles must be escaped');
 assert.ok(!element('server-queue').innerHTML.includes('<script>'), 'server titles must be escaped');
@@ -46,6 +46,16 @@ assert.match(element('job-list').innerHTML, /GPU · NVENC · AV1/);
 assert.match(element('job-list').innerHTML, /1\.5 GB of 2\.0 GB · 20\.0 MB\/s/, 'download progress should use MB/GB units');
 assert.match(element('job-list').innerHTML, /550\.0 MB of 3\.0 GB/, 'upload progress should use MB/GB units');
 
+context.render({configured:true,worker:{maxActiveJobs:0,paused:true,maxEncodes:5,activeEncodes:5,jobs:[{jobId:'ready',name:'waiting.mkv',downloaded:true,phase:'FFMPEG',state:'queued'}],progress:[]}});
+assert.match(element('notice-text').textContent,/Running encodes and uploads will finish/);
+assert.match(element('job-list').innerHTML,/Waiting for Resume/);
+assert.equal(element('stat-ready').textContent,1);
+context.render({configured:true,pending:true,worker:{maxActiveJobs:0,paused:false,jobs:[],progress:[]}});
+assert.match(element('connection').innerHTML,/Finishing accepted work/);
+assert.equal(element('toggle-pause').disabled,true,'maintenance drain cannot be bypassed with Resume');
+context.render({configured:true,worker:{maxActiveJobs:5,paused:false,maxEncodes:5,activeEncodes:7,jobs:[],progress:[]}});
+assert.equal(element('stat-encoding').textContent,7,'encodes above a lowered target must not be hidden');
+context.render({configured:true,worker:{maxActiveJobs:2,jobs:[{jobId:'1',name:'encoded.mkv',phase:'FFMPEG',state:'running'},{jobId:'2',name:'film.mkv',phase:'Download',state:'running'}],progress:[]}});
 filterButtons[1].click();
 assert.ok(!element('job-list').innerHTML.includes('film.mkv'), 'encoding filter should hide downloads');
 filterButtons[2].click();

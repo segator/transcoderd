@@ -73,7 +73,7 @@ internal sealed class MainForm : Form
     private readonly bool rejectSmoke;
     private readonly bool updateSmoke;
     private bool quitting;
-    private int lastTarget = 2;
+    private int lastCPU = 0, lastGPU = 2;
     private readonly ToolStripMenuItem pauseItem;
     private readonly ToolStripMenuItem resumeItem;
     private bool configurationAllowed;
@@ -91,8 +91,8 @@ internal sealed class MainForm : Form
         Controls.Add(browser);
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open TranscoderD", null, (_, _) => ShowWindow());
-        pauseItem = (ToolStripMenuItem)menu.Items.Add("Pause new jobs", null, async (_, _) => await SetLimit(0));
-        resumeItem = (ToolStripMenuItem)menu.Items.Add("Resume", null, async (_, _) => await SetLimit(lastTarget));
+        pauseItem = (ToolStripMenuItem)menu.Items.Add("Pause queued encodes", null, async (_, _) => await SetPaused(true));
+        resumeItem = (ToolStripMenuItem)menu.Items.Add("Resume", null, async (_, _) => await SetPaused(false));
         pauseItem.Enabled = resumeItem.Enabled = false;
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit tray", null, (_, _) => { quitting = true; Close(); });
@@ -163,7 +163,7 @@ internal sealed class MainForm : Form
                 if (updating && !updateNotified) { tray.ShowBalloonTip(6000, "Mandatory update", "New jobs and configuration are blocked. Accepted jobs will finish before automatic installation.", ToolTipIcon.Info); }
                 updateNotified = updating;
             }
-            if (command == "status" && result.RootElement.TryGetProperty("status", out var status) && status.TryGetProperty("worker", out var worker) && worker.ValueKind == JsonValueKind.Object && worker.TryGetProperty("maxActiveJobs", out var target) && target.TryGetInt32(out int n) && n > 0) lastTarget = n;
+            if (command == "status" && result.RootElement.TryGetProperty("status", out var status) && status.TryGetProperty("settings", out var settings) && settings.ValueKind == JsonValueKind.Object) { lastCPU = settings.GetProperty("cpuJobs").GetInt32(); lastGPU = settings.GetProperty("gpuJobs").GetInt32(); }
             Reply(id, true, result.RootElement.GetRawText());
         } catch (Exception ex) { configurationAllowed = false; pauseItem.Enabled = resumeItem.Enabled = false; Reply(id, false, JsonSerializer.Serialize(ex.Message)); }
     }
@@ -172,10 +172,10 @@ internal sealed class MainForm : Form
         if (browser.IsDisposed || browser.CoreWebView2 == null) return;
         browser.CoreWebView2.PostWebMessageAsJson($"{{\"id\":{id},\"ok\":{(ok ? "true" : "false")},\"payload\":{payload}}}");
     }
-    private async Task SetLimit(int value)
+    private async Task SetPaused(bool paused)
     {
         if (!configurationAllowed) { ShowWindow(); return; }
-        try { var response = await client.SendAsync(JsonSerializer.Serialize(new { command = "set-max-jobs", maxJobs = value })); using var doc = JsonDocument.Parse(response); if (doc.RootElement.TryGetProperty("error", out var error) && error.GetString() is { Length: > 0 } text) throw new IOException(text); }
+        try { var response = await client.SendAsync(JsonSerializer.Serialize(new { command = "set-max-jobs", cpuJobs = paused ? 0 : lastCPU, gpuJobs = paused ? 0 : lastGPU })); using var doc = JsonDocument.Parse(response); if (doc.RootElement.TryGetProperty("error", out var error) && error.GetString() is { Length: > 0 } text) throw new IOException(text); }
         catch { ShowWindow(); }
     }
     private static void StartService()

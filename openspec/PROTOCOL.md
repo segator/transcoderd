@@ -100,3 +100,17 @@ without mutating saved or running configuration. Status and progress remain
 readable. The UI locks on unconfirmed service status and retains its last pending
 alert across disconnects and reloads. Linux browser dashboards do not expose the
 Windows installer lifecycle.
+
+
+## Worker pause and maintenance drain
+
+Worker status includes `paused`, indicating whether queued FFmpeg starts are
+held. Operator `set-max-jobs 0` persists zero, stops new requests and queued
+encodes, and lets running encodes, verification and uploads finish. Positive
+values resume at that encode target. The admission ceiling is the effective
+encode target plus one accepted pipeline job per profile, including reservations.
+Windows service workers synchronize their service-owned targets before admission
+instead of loading older server overrides. Paused Windows startup holds restored
+encodes too. Internal `drain` and `hold-admission` permit accepted queued work to
+finish without persisting a change to the user's pause preference. The mandatory
+update/configuration lifecycle owns those temporary maintenance transitions.

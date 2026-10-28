@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -160,10 +161,55 @@ func TestLocalAdmissionDrainDoesNotPersistZero(t *testing.T) {
 		encodePool:    newEncodeConcurrency(2),
 		client:        client,
 	}
-	if err := executor.SetMaxActiveJobs(0); err != nil {
+	if err := executor.DrainAcceptedJobs(); err != nil {
 		t.Fatal(err)
 	}
 	if requests != 0 {
 		t.Errorf("local drain sent %d persistence requests, want zero", requests)
+	}
+}
+
+func TestManagedLimitsReplaceStaleServerSettingsBeforeAdmission(t *testing.T) {
+	for _, target := range []int{0, 1, 4} {
+		t.Run(fmt.Sprint(target), func(t *testing.T) {
+			worker := testAdmissionWorker(target)
+			worker.UseManagedLimits()
+			worker.RequireWorkerSettings()
+			persisted := -1
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if worker.ReserveJobSlot() {
+					t.Error("worker accepted a job before managed settings were synchronized")
+				}
+				if r.Method == http.MethodGet {
+					t.Error("managed worker read stale server override")
+					_, _ = w.Write([]byte(`{"maxActiveJobs":8}`))
+					return
+				}
+				var settings serverclient.WorkerSettings
+				if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
+					t.Error(err)
+					return
+				}
+				if settings.MaxActiveJobs == nil {
+					t.Error("managed target missing")
+					return
+				}
+				persisted = *settings.MaxActiveJobs
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+			client := serverclient.NewServerClient(&web.Config{Domain: server.URL}, "managed")
+			coordinator := NewServerCoordinator(client, worker, nil, testConsoleLogger{})
+			if !coordinator.loadPersistedWorkerSettings(context.Background()) {
+				t.Fatal("managed synchronization failed")
+			}
+			if persisted != target || worker.AdmissionStatus().MaxActiveJobs != target {
+				t.Fatalf("managed target = %d, runtime %d, want %d", persisted, worker.AdmissionStatus().MaxActiveJobs, target)
+			}
+			_, encodeTarget := worker.encodePool.Status()
+			if encodeTarget != max(1, target) {
+				t.Fatalf("encode target = %d, want %d", encodeTarget, max(1, target))
+			}
+		})
 	}
 }

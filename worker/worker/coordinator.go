@@ -84,7 +84,7 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 				}
 				if requireUpdate {
 					q.worker.ReleaseJobSlot()
-					if err := q.worker.SetMaxActiveJobs(0); err != nil {
+					if err := q.worker.DrainAcceptedJobs(); err != nil {
 						q.logger.Errorf("Error stopping job admission for update: %v", err)
 						continue
 					}
@@ -121,10 +121,17 @@ func (q *ServerCoordinator) loadPersistedWorkerSettings(ctx context.Context) boo
 	for {
 		q.worker.settingsMu.Lock()
 		settingsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		settings, err := q.serverClient.GetWorkerSettings(settingsCtx)
+		var settings *serverclient.WorkerSettings
+		var err error
+		if q.worker.managedLimits {
+			// Synchronize service-owned limits without loading stale server overrides.
+			err = q.serverClient.SetWorkerMaxActiveJobs(settingsCtx, q.worker.AdmissionStatus().MaxActiveJobs)
+		} else {
+			settings, err = q.serverClient.GetWorkerSettings(settingsCtx)
+		}
 		cancel()
 		if err == nil {
-			if settings.MaxActiveJobs != nil {
+			if settings != nil && settings.MaxActiveJobs != nil {
 				if err := q.worker.SetMaxActiveJobs(*settings.MaxActiveJobs); err != nil {
 					q.worker.settingsMu.Unlock()
 					q.logger.Errorf("Error applying persisted worker job limit: %v", err)
@@ -137,7 +144,7 @@ func (q *ServerCoordinator) loadPersistedWorkerSettings(ctx context.Context) boo
 			return true
 		}
 		q.worker.settingsMu.Unlock()
-		q.logger.Errorf("Error loading persisted worker settings; job admission remains closed: %v", err)
+		q.logger.Errorf("Error synchronizing worker settings; job admission remains closed: %v", err)
 		timer := time.NewTimer(5 * time.Second)
 		select {
 		case <-ctx.Done():

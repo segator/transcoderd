@@ -29,7 +29,7 @@ The dashboard API SHALL report the running application version, worker admission
 - **THEN** it sees the installed version and the worker's current local status without requiring a central-server queue endpoint
 
 ### Requirement: Worker admission control
-The dashboard API SHALL allow an authorized client to pause or resume new job admission using the worker's existing control interface. Existing accepted jobs SHALL continue.
+The dashboard API SHALL allow an authorized client to pause or resume new job admission and queued FFmpeg starts using the worker's control interface. Running encodes and downstream work SHALL finish; queued encodes SHALL wait for Resume.
 
 #### Scenario: Pause assignments
 - **WHEN** an authorized client pauses the worker

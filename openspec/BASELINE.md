@@ -33,6 +33,8 @@ These observations are not normative requirements. They need separate fixes or e
 
 ## Resolved implementation discrepancies
 
+- Before `pause-queued-encodes`, the implemented two-job prefetch buffer exceeded the unsynchronized main admission contract; zero admission continued prefetched encodes, and Windows startup could replace local profile limits with stale server values. The change reduces the buffer to one, separates user pause from maintenance drain and gives service-owned profiles authoritative startup limits.
+
 - Native Windows CPU CI exposed a download close failure: syncing the read-only source invokes Windows FlushFileBuffers without write access and prevents checksum publication. Download streams now close without a write flush, then publish their checksum; upload streams retain their sync. A read-only download regression and the complete native E2E cover this fix.
 
 - PR 187 initially replaced the Linux builder's FFmpeg hash with the official release tarball hash, incorrectly treating the upstream pin as stale. CI demonstrated that Linux downloads the GitHub n9.0.2 tag archive, whose verified SHA-256 is `6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9`. The override was removed. Windows retains the separate official tar.gz (`84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98`), verified with FFmpeg release key `FCF986EA15E6E293A5644F10B4322F04D67658D8`. Both recipes retain source version 9.0.2 and their intended archive/hash pair.

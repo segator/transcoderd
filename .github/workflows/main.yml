@@ -41,7 +41,7 @@ jobs:
           }
       - name: Native update and administration unit tests
         shell: pwsh
-        run: go test -v -timeout 2m ./update/managed ./cmd/windows-service ./cmd/windows-update-manifest ./worker/control ./worker/desktop
+        run: go test -v -timeout 2m ./update/managed ./cmd/windows-service ./cmd/windows-update-manifest ./worker/control ./worker/desktop ./worker/worker
 
   ci:
     runs-on: transcoderd

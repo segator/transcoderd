@@ -296,7 +296,7 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 		}
 		status.Settings = &settings
 	}
-	combined := control.AdmissionStatus{WithinSchedule: true}
+	combined := control.AdmissionStatus{WithinSchedule: true, Paused: true}
 	enabled := map[string]bool{}
 	if s.state.Active != nil {
 		for _, profile := range s.state.Active.Profiles() {
@@ -326,6 +326,7 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 		combined.MaxActiveJobs += profileStatus.MaxActiveJobs
 		combined.MaxAcceptedJobs += profileStatus.MaxAcceptedJobs
 		combined.ActiveEncodes += profileStatus.ActiveEncodes
+		combined.Paused = combined.Paused && profileStatus.Paused
 		if enabled[profile] {
 			combined.MaxEncodes += profileStatus.MaxEncodes
 		}
@@ -657,7 +658,7 @@ func (s *supervisor) run(ctx context.Context) {
 					}
 					cmd := exec.Command(s.worker, "--noUpdates")
 					cmd.Dir = s.dir
-					cmd.Env = append(os.Environ(), "TRANSCODERD_INTERNAL_CONFIG="+filepath.Join(s.dir, "config-"+profile.Key+".yaml"), "TRANSCODERD_CONTROL_PIPE="+workerPipe(profile.Key))
+					cmd.Env = append(os.Environ(), "TRANSCODERD_INTERNAL_CONFIG="+filepath.Join(s.dir, "config-"+profile.Key+".yaml"), "TRANSCODERD_CONTROL_PIPE="+workerPipe(profile.Key), "TRANSCODERD_MANAGED_PROFILE=1")
 					logFile, err := os.OpenFile(filepath.Join(s.dir, "worker-"+profile.Key+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 					if err != nil {
 						s.message = "Could not open a worker log"

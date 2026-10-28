@@ -117,6 +117,10 @@ Before replacing installation files, the service SHALL stop new assignments loca
 - **WHEN** an update completes for a paused worker or outside its admission schedule
 - **THEN** the service retains that pause or schedule and does not admit jobs contrary to it
 
+#### Scenario: User paused before the update
+- **WHEN** an authenticated mandatory update is detected while user pause holds prefetched encodes
+- **THEN** maintenance permits accepted work to finish without accepting new assignments and the upgraded worker retains the user's saved pause
+
 ### Requirement: Recoverable Windows installation transaction
 Complete Windows upgrades SHALL use one durable installation transaction that survives service termination and machine restart. The system SHALL keep a recoverable previous installation until installed files and service health match the intended release. Failed installation or health validation SHALL restore the previous installation and configuration while retaining the pending update and admission block. Unsafe recovery SHALL remain stopped and report its error.
 

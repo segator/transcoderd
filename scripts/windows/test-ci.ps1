@@ -99,3 +99,8 @@ finally {
     if (Test-Path $serverErr) { Get-Content -Encoding UTF8 -LiteralPath $serverErr }
     Write-Output "CI E2E evidence: $EvidenceDirectory"
 }
+
+# Every test/process failure above throws before reaching this point. Optional
+# native cleanup (for example deleting an already-removed recovery task) must
+# not leave its LASTEXITCODE as the successful harness's result.
+$global:LASTEXITCODE = 0

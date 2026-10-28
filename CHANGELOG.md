@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.9.0](https://github.com/segator/transcoderd/compare/v2.8.1...v2.9.0) (2026-10-28)
+
+
+### 🎉 Features
+
+* **dashboard:** share worker UI across platforms ([#191](https://github.com/segator/transcoderd/issues/191)) ([148b945](https://github.com/segator/transcoderd/commit/148b94552f2d26d372dddb2fccfc0686a1c8dbc6))
+* **windows:** enforce signed unattended installation updates ([#193](https://github.com/segator/transcoderd/issues/193)) ([0fdef3f](https://github.com/segator/transcoderd/commit/0fdef3f677bf2f3e4e0bc23896fe6e97ea54c5da))
+
 ## [2.8.1](https://github.com/segator/transcoderd/compare/v2.8.0...v2.8.1) (2026-10-27)
 
 

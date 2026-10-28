@@ -12,6 +12,7 @@ type encodeConcurrency struct {
 	mu      sync.Mutex
 	active  int
 	target  int
+	paused  bool
 	changed chan struct{}
 }
 
@@ -38,10 +39,23 @@ func (c *encodeConcurrency) Status() (active, target int) {
 	return c.active, c.target
 }
 
+func (c *encodeConcurrency) SetPaused(paused bool) {
+	c.mu.Lock()
+	c.paused = paused
+	c.mu.Unlock()
+	c.notify()
+}
+
+func (c *encodeConcurrency) Paused() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.paused
+}
+
 func (c *encodeConcurrency) tryStart() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.active >= c.target {
+	if c.paused || c.active >= c.target {
 		return false
 	}
 	c.active++

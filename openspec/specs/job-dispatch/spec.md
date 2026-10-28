@@ -36,19 +36,19 @@ An active worker SHALL send a presence event approximately every five seconds an
 - **THEN** the worker sends a presence event and evaluates whether to request work
 
 ### Requirement: Local job admission limit
-A worker SHALL request a new job only when its active-job count plus in-flight reservations is below the current maximum, the maximum is greater than zero, and any configured time window permits work. The registered default maximum SHALL be two. Setting the maximum to zero at startup or runtime SHALL prevent new requests while active and restored jobs continue. Lowering the maximum SHALL affect future requests only.
+A worker SHALL admit at most its effective FFmpeg encode target plus one pipeline job, counting accepted jobs and in-flight reservations. Admission SHALL require a positive maximum and an open schedule. The default encode target SHALL remain two. Zero SHALL stop requests and new encodes; running encodes and downstream work SHALL finish. Lowering a positive target SHALL not interrupt active encodes.
 
 #### Scenario: Ordinary active-job limit
-- **WHEN** no time window is configured and two jobs are active at the default limit
+- **WHEN** no time window is configured and three jobs are active or reserved at the default target
 - **THEN** the worker does not request another job
 
 #### Scenario: Custom active-job limit
-- **WHEN** `worker.maxActiveJobs` is `4` and three jobs are active
+- **WHEN** the effective encode target is `4` and four jobs are active
 - **THEN** the worker can request another job
 
 #### Scenario: Zero active-job limit
 - **WHEN** the active-job maximum is set to zero at startup or runtime
-- **THEN** the worker requests no new jobs and continues active or restored jobs
+- **THEN** the worker requests no new jobs and finishes running encodes and downstream work while retaining queued encodes
 
 #### Scenario: Lower maximum while jobs are active
 - **WHEN** an operator lowers the maximum below the number of active jobs
@@ -56,10 +56,10 @@ A worker SHALL request a new job only when its active-job count plus in-flight r
 
 #### Scenario: Raise maximum while worker is ready
 - **WHEN** an operator raises the maximum above the active-job count
-- **THEN** the worker may request jobs until the active-job count reaches the new maximum
+- **THEN** the worker may request jobs until the active-job count reaches the new encode target plus one
 
 #### Scenario: Limit within configured window
-- **WHEN** local time is inside a configured interval but active jobs and reservations have reached the limit
+- **WHEN** local time is inside a configured interval but active jobs and reservations have reached the encode target plus one
 - **THEN** the worker does not request another job
 
 #### Scenario: Outside configured window
@@ -67,7 +67,7 @@ A worker SHALL request a new job only when its active-job count plus in-flight r
 - **THEN** the worker does not request a job
 
 ### Requirement: Runtime worker admission controls
-A running worker SHALL provide local controls to report admission, job, and encode counts and set the job maximum to any non-negative integer without restart. A positive value SHALL update admission and the FFmpeg encode target. Zero SHALL stop requests and preserve the previous positive encode target. Lowering the target SHALL let active encodes finish before admitting another. Controls SHALL remain local and SHALL NOT expose a remotely reachable management endpoint.
+Local controls SHALL persist operator limits before reporting success. Positive maxima SHALL set FFmpeg concurrency and resume queued encodes. Zero SHALL retain the positive target but stop requests and new encodes; running encodes and downstream work SHALL finish. Startup SHALL use server overrides for standalone workers and service-owned Windows limits. Maintenance draining SHALL finish accepted work without changing saved preferences. Controls SHALL remain local.
 
 #### Scenario: Read runtime admission status
 - **WHEN** an operator runs the local status command
@@ -75,7 +75,7 @@ A running worker SHALL provide local controls to report admission, job, and enco
 
 #### Scenario: Disable new job requests
 - **WHEN** an operator sets the maximum to zero
-- **THEN** the worker stops new requests and leaves accepted and restored jobs running, including their later FFmpeg phase at the previous positive encode target
+- **THEN** the worker stops new requests and lets active encodes, verification and uploads finish, and holds waiting FFmpeg jobs until a positive maximum resumes them
 
 #### Scenario: A request is already in flight
 - **WHEN** an operator sets the maximum to zero while a reserved request is waiting for the server
@@ -92,6 +92,26 @@ A running worker SHALL provide local controls to report admission, job, and enco
 #### Scenario: Reject invalid maximum
 - **WHEN** an operator supplies a negative or non-integer maximum
 - **THEN** the command reports an error and leaves the current maximum unchanged
+
+#### Scenario: Paused encode slot becomes free
+- **WHEN** an active encode finishes while paused and another accepted job is ready to encode
+- **THEN** that queued job remains waiting until the user resumes
+
+#### Scenario: Separate maintenance drain
+- **WHEN** maintenance drains a paused worker for configuration or installation
+- **THEN** all accepted work may finish while new assignments remain blocked and the saved pause preference remains intact
+
+#### Scenario: Restore a persisted maximum after restart
+- **WHEN** a standalone worker restarts with a persisted maximum for its configured worker name
+- **THEN** it applies that value before requesting new jobs, even when its startup configuration specifies another maximum
+
+#### Scenario: Use startup maximum when no override exists
+- **WHEN** a standalone worker starts and the server has no persisted maximum for its configured worker name
+- **THEN** it uses its configured startup maximum
+
+#### Scenario: Server unavailable during persistence
+- **WHEN** an operator changes the maximum while the server cannot persist the request
+- **THEN** the local control reports an error and does not report the change as successful
 
 ### Requirement: Bounded concurrent encoding
 The worker SHALL bound FFmpeg jobs by target and preserve per-job workspace, progress, and outcome. Startup target SHALL use positive `worker.ffmpegConfig.parallelJobs`, else `worker.maxActiveJobs` with minimum one for restored work. Positive runtime `set-max-jobs` SHALL replace the target. Each non-FFmpeg phase SHALL have one consumer.
@@ -111,6 +131,14 @@ The worker SHALL bound FFmpeg jobs by target and preserve per-job workspace, pro
 #### Scenario: Default encode concurrency follows admission
 - **WHEN** `worker.maxActiveJobs` is `4` and the encode concurrency override is omitted
 - **THEN** up to four accepted jobs can encode simultaneously
+
+#### Scenario: Desktop startup has stale server limits
+- **WHEN** a Windows service worker starts with four configured GPU slots and a higher old server maximum
+- **THEN** the service-owned limit is persisted before new requests, no more than four jobs encode at once, and restored work observes that limit
+
+#### Scenario: Paused Windows startup
+- **WHEN** the Windows service restarts with its saved pause preference
+- **THEN** restored queued encodes do not start until Resume or maintenance draining
 
 ### Requirement: Weekly admission schedule
 The worker SHALL accept optional `worker.schedule.windows` with default empty and `worker.schedule.timeZone` with default `Local`.

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"transcoder/model"
+	"transcoder/update/managed"
 	"transcoder/version"
 	"transcoder/worker/control"
 	"transcoder/worker/desktop"
@@ -112,7 +113,7 @@ func startService() error {
 	if err != nil {
 		return err
 	}
-	defer m.Disconnect()
+	defer func() { _ = m.Disconnect() }()
 	s, err := m.OpenService(serviceName)
 	if err != nil {
 		return err
@@ -125,6 +126,11 @@ func startService() error {
 }
 
 func install(owner string) error {
+	if saved, err := managed.ReadInstallation(dataDir()); err == nil {
+		owner = saved.Owner
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	if _, err := windows.StringToSid(owner); err != nil {
 		return fmt.Errorf("invalid installing user SID: %w", err)
 	}
@@ -135,11 +141,14 @@ func install(owner string) error {
 	if err != nil {
 		return err
 	}
+	if err = managed.SaveInstallation(dataDir(), managed.Installation{Dir: filepath.Dir(exe), Owner: owner}); err != nil {
+		return err
+	}
 	m, err := mgr.Connect()
 	if err != nil {
 		return err
 	}
-	defer m.Disconnect()
+	defer func() { _ = m.Disconnect() }()
 	if old, err := m.OpenService(serviceName); err == nil {
 		old.Close()
 		return errors.New("service already exists; stop and remove it before reinstalling")
@@ -161,7 +170,7 @@ func uninstall() error {
 	if err != nil {
 		return err
 	}
-	defer m.Disconnect()
+	defer func() { _ = m.Disconnect() }()
 	s, err := m.OpenService(serviceName)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil
@@ -185,7 +194,7 @@ func prepareUpgrade() error {
 	if err != nil {
 		return err
 	}
-	defer m.Disconnect()
+	defer func() { _ = m.Disconnect() }()
 	s, err := m.OpenService(serviceName)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil
@@ -260,10 +269,22 @@ type supervisor struct {
 	pipeSuffix   string
 	systemOwner  bool
 	testCancel   context.CancelFunc
+	updates      *managed.Manager
+	updateHeld   bool
 }
 
 func (s *supervisor) snapshotLocked() desktop.Status {
 	status := desktop.Status{Configured: s.state.Active != nil, Running: len(s.children) > 0, Version: version.Version, Pending: s.state.Pending != nil || s.state.PendingLimit, Message: s.message, Queue: s.queue, QueueError: s.queueError, Profiles: make(map[string]control.AdmissionStatus)}
+	// Only isolated fixture builds can inject a failed post-install health check.
+	if managed.FixtureMode == "true" && version.Version == "v99.1.0" {
+		if _, err := os.Stat(filepath.Join(s.dir, "updates", "fixture-fail-health")); err == nil {
+			status.Version = "unhealthy-fixture"
+		}
+	}
+	if s.updates != nil {
+		update := s.updates.Snapshot()
+		status.Update = &update
+	}
 	value := s.state.Active
 	if s.state.Pending != nil {
 		value = s.state.Pending
@@ -275,7 +296,7 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 		}
 		status.Settings = &settings
 	}
-	combined := control.AdmissionStatus{WithinSchedule: true}
+	combined := control.AdmissionStatus{WithinSchedule: true, Paused: true}
 	enabled := map[string]bool{}
 	if s.state.Active != nil {
 		for _, profile := range s.state.Active.Profiles() {
@@ -305,6 +326,7 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 		combined.MaxActiveJobs += profileStatus.MaxActiveJobs
 		combined.MaxAcceptedJobs += profileStatus.MaxAcceptedJobs
 		combined.ActiveEncodes += profileStatus.ActiveEncodes
+		combined.Paused = combined.Paused && profileStatus.Paused
 		if enabled[profile] {
 			combined.MaxEncodes += profileStatus.MaxEncodes
 		}
@@ -338,13 +360,19 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := desktop.Response{}
-	if s.maintenance && (req.Command == "configure" || req.Command == "set-max-jobs") {
-		result.Error = "An installation or upgrade is being prepared"
+	if (s.maintenance || s.updatePending()) && (req.Command == "configure" || req.Command == "set-max-jobs") {
+		result.Error = managed.LockedMessage
 		result.Status = s.snapshotLocked()
 		return result
 	}
 	switch req.Command {
 	case "status":
+	case "check-update":
+		if s.updates == nil {
+			result.Error = "The update service is unavailable"
+		} else {
+			s.updates.CheckNow()
+		}
 	case "shutdown-test":
 		if s.testCancel == nil {
 			result.Error = "Unknown command"
@@ -368,6 +396,10 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		value.Domain = strings.TrimRight(strings.TrimSpace(value.Domain), "/")
 		value.Name = strings.TrimSpace(value.Name)
 		if err := value.Validate(); err != nil {
+			result.Error = err.Error()
+			break
+		}
+		if err := managed.ValidateWorkspace(filepath.Dir(s.worker), value.WorkingDirectory, filepath.Join(s.dir, "updates")); err != nil {
 			result.Error = err.Error()
 			break
 		}
@@ -414,16 +446,19 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 				result.Error = "The number of concurrent encodes must be between 0 and 64"
 				break
 			}
-			if req.MaxJobs == 0 {
+			switch {
+			case req.MaxJobs == 0:
 				cpuJobs, gpuJobs = 0, 0
-			} else if cpuJobs > 0 && gpuJobs == 0 {
+			case cpuJobs > 0 && gpuJobs == 0:
 				cpuJobs = req.MaxJobs
-			} else if gpuJobs > 0 && cpuJobs == 0 {
+			case gpuJobs > 0 && cpuJobs == 0:
 				gpuJobs = req.MaxJobs
-			} else {
+			default:
 				result.Error = "Use separate CPU and GPU limits"
-				break
 			}
+		}
+		if result.Error != "" {
+			break
 		}
 		if cpuJobs < 0 || gpuJobs < 0 || cpuJobs > 64 || gpuJobs > 64 || cpuJobs+gpuJobs > 64 {
 			result.Error = "CPU and GPU concurrent encodes must each be between 0 and 64 and total no more than 64"
@@ -461,6 +496,10 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		}
 		s.state = next
 	case "prepare-upgrade":
+		if s.updatePending() {
+			result.Error = managed.LockedMessage
+			break
+		}
 		s.maintenance = true
 		for _, profile := range []string{"cpu", "gpu"} {
 			if s.children[profile] != nil {
@@ -490,7 +529,30 @@ func (s *supervisor) run(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		s.mu.Lock()
-		if !s.maintenance && s.state.Active != nil {
+		updatePending := s.updatePending()
+		if updatePending {
+			s.updateHeld = true
+			if s.state.Active != nil && !s.maintenance {
+				for _, profile := range s.state.Active.Profiles() {
+					if s.children[profile.Key] == nil {
+						if err := s.startProfileLocked(profile, true); err != nil {
+							s.message = err.Error()
+						}
+					}
+					if s.children[profile.Key] != nil {
+						_, _ = control.Call(workerPipe(profile.Key), control.Request{Command: "hold-admission"})
+					}
+				}
+			}
+		} else if s.updateHeld {
+			for profile := range s.children {
+				_, _ = control.Call(workerPipe(profile), control.Request{Command: "shutdown"})
+			}
+			if s.allChildrenStoppedLocked() {
+				s.updateHeld = false
+			}
+		}
+		if !s.maintenance && !updatePending && !s.updateHeld && s.state.Active != nil {
 			if s.state.Pending == nil && s.state.PendingLimit && s.allChildrenStoppedLocked() {
 				ok := true
 				for _, profile := range s.state.Active.Profiles() {
@@ -596,7 +658,7 @@ func (s *supervisor) run(ctx context.Context) {
 					}
 					cmd := exec.Command(s.worker, "--noUpdates")
 					cmd.Dir = s.dir
-					cmd.Env = append(os.Environ(), "TRANSCODERD_INTERNAL_CONFIG="+filepath.Join(s.dir, "config-"+profile.Key+".yaml"), "TRANSCODERD_CONTROL_PIPE="+workerPipe(profile.Key))
+					cmd.Env = append(os.Environ(), "TRANSCODERD_INTERNAL_CONFIG="+filepath.Join(s.dir, "config-"+profile.Key+".yaml"), "TRANSCODERD_CONTROL_PIPE="+workerPipe(profile.Key), "TRANSCODERD_MANAGED_PROFILE=1")
 					logFile, err := os.OpenFile(filepath.Join(s.dir, "worker-"+profile.Key+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 					if err != nil {
 						s.message = "Could not open a worker log"
@@ -767,7 +829,9 @@ func (s *supervisor) handleConnection(c net.Conn) {
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
 	var req desktop.Request
-	if err := json.NewDecoder(bufio.NewReader(io.LimitReader(c, 65536))).Decode(&req); err != nil {
+	decoder := json.NewDecoder(bufio.NewReader(io.LimitReader(c, 65536)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		_ = json.NewEncoder(c).Encode(desktop.Response{Error: "Invalid request"})
 		return
 	}
@@ -788,6 +852,9 @@ func (h *handler) Execute(_ []string, changes <-chan svc.ChangeRequest, statuses
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s := &supervisor{dir: h.dir, worker: h.worker, state: state, systemOwner: true, children: map[string]*exec.Cmd{}, done: map[string]chan error{}}
+	if err := s.initializeUpdates(ctx, h.owner); err != nil {
+		return false, 1
+	}
 	ready := make(chan error, 1)
 	go func() { ready <- s.serve(ctx, h.owner) }()
 	workerDone := make(chan struct{})
@@ -841,6 +908,35 @@ func runConsole(dir, worker string) error {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--close-trays" {
+		if err := managed.CloseInstalledTrays(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 3 && os.Args[1] == "--record-installation" {
+		if err := recordInstallation(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 3 && os.Args[1] == "--install-owner" {
+		if !windows.GetCurrentProcessToken().IsElevated() {
+			os.Exit(1)
+		}
+		i, err := managed.ReadInstallation(dataDir())
+		if err != nil || i.Owner != os.Args[2] {
+			fmt.Fprintln(os.Stderr, "Installation identity mismatch")
+			os.Exit(1)
+		}
+		if err = install(i.Owner); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 4 && os.Args[1] == "--console" {
 		if err := runConsole(os.Args[2], os.Args[3]); err != nil {
 			fmt.Fprintln(os.Stderr, err)

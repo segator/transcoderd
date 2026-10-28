@@ -27,6 +27,8 @@ type JobExecutor struct {
 	reservedJobs    int
 	maxActiveJobs   int
 	settingsPending bool
+	admissionHeld   bool
+	managedLimits   bool
 
 	workerConfig *config.Config
 	tempPath     string
@@ -43,10 +45,9 @@ type JobExecutor struct {
 	stepExecutors map[model.NotificationType]*step.Executor
 }
 
-// pipelineBufferJobs keeps one job available for encoding while allowing a
-// recently encoded job to finish verification/upload. The buffer is bounded
-// so slower downstream stages cannot grow the worker's queue without limit.
-const pipelineBufferJobs = 2
+// One extra accepted job overlaps preparation or upload without accumulating
+// multiple prefetched movies for each encoder profile.
+const pipelineBufferJobs = 1
 
 func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerClient, renderService *console.RenderService) *JobExecutor {
 	tempPath := filepath.Join(workerConfig.TemporalPath, fmt.Sprintf("worker-%s", workerConfig.Name))
@@ -63,6 +64,7 @@ func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerCli
 		encodePool:    newEncodeConcurrency(workerConfig.EncodeParallelJobs()),
 		jobs:          jobRegistry{codec: workerConfig.EncodeConfig},
 	}
+	jobExecutor.encodePool.SetPaused(workerConfig.MaxActiveJobs == 0)
 	stepExecutors := setupStepExecutors(jobExecutor)
 	jobExecutor.trackPipeline(stepExecutors)
 	jobExecutor.stepExecutors = stepExecutors
@@ -266,13 +268,14 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 		maxAccepted = maxAcceptedJobs(maxEncodes)
 	}
 	return AdmissionStatus{
-		Accepting:       !e.settingsPending && e.maxActiveJobs > 0 && withinSchedule,
+		Accepting:       !e.admissionHeld && !e.settingsPending && e.maxActiveJobs > 0 && withinSchedule,
 		ActiveJobs:      e.ActiveJobs(),
 		ReservedJobs:    e.reservedJobs,
 		MaxActiveJobs:   e.maxActiveJobs,
 		MaxAcceptedJobs: maxAccepted,
 		ActiveEncodes:   activeEncodes,
 		MaxEncodes:      maxEncodes,
+		Paused:          e.encodePool != nil && e.encodePool.Paused(),
 		WithinSchedule:  withinSchedule,
 		Progress:        e.progress.snapshot(),
 		Jobs:            e.jobs.snapshot(),
@@ -286,10 +289,31 @@ func (e *JobExecutor) SetMaxActiveJobs(max int) error {
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
 	e.maxActiveJobs = max
-	if max > 0 && e.encodePool != nil {
-		e.encodePool.SetTarget(max)
+	if e.encodePool != nil {
+		if max > 0 {
+			e.encodePool.SetTarget(max)
+		}
+		e.encodePool.SetPaused((max == 0 || e.settingsPending) && !e.admissionHeld)
 	}
 	return nil
+}
+
+// DrainAcceptedJobs closes requests but permits queued encodes to finish.
+// Unlike operator pause it does not persist a preference or hold the encode pool.
+func (e *JobExecutor) DrainAcceptedJobs() error {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	e.maxActiveJobs = 0
+	if e.encodePool != nil {
+		e.encodePool.SetPaused(false)
+	}
+	return nil
+}
+
+// UseManagedLimits makes the service-owned configuration authoritative at startup.
+// Call before Run so restored jobs and admission use the selected profile limit.
+func (e *JobExecutor) UseManagedLimits() {
+	e.managedLimits = true
 }
 
 func (e *JobExecutor) PersistMaxActiveJobs(max int) error {
@@ -317,12 +341,29 @@ func (e *JobExecutor) RequireWorkerSettings() {
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
 	e.settingsPending = true
+	if e.encodePool != nil && !e.admissionHeld {
+		e.encodePool.SetPaused(true)
+	}
+}
+
+// HoldAdmission prevents persisted server settings from reopening requests during
+// a managed installation update. Accepted pipeline work continues normally.
+func (e *JobExecutor) HoldAdmission() {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	e.admissionHeld = true
+	if e.encodePool != nil {
+		e.encodePool.SetPaused(false)
+	}
 }
 
 func (e *JobExecutor) MarkWorkerSettingsResolved() {
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
 	e.settingsPending = false
+	if e.encodePool != nil && e.maxActiveJobs > 0 {
+		e.encodePool.SetPaused(false)
+	}
 }
 
 func (e *JobExecutor) ReserveJobSlot() bool {
@@ -336,7 +377,7 @@ func (e *JobExecutor) ReserveJobSlot() bool {
 }
 
 func (e *JobExecutor) canReserveJobSlotAt(now time.Time) bool {
-	if e.settingsPending || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
+	if e.admissionHeld || e.settingsPending || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
 		return false
 	}
 	encodeTarget := e.maxActiveJobs

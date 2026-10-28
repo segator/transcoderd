@@ -92,6 +92,9 @@ func windowsWorkerBundle(client *dagger.Client, binary *dagger.File) *dagger.Con
 		WithFile("/bundle/transcoderd-worker.exe", binary).
 		WithDirectory("/bundle/pgs", pgs.Directory("/windows-pgs")).
 		WithDirectory("/bundle/tessdata", pgs.Directory("/src/tessdata")).
+		// Linux Tesseract's config/font symlinks are not used by PgsToSrt OCR.
+		// Ship regular trained-data files; Windows cannot resolve those links.
+		WithExec([]string{"bash", "-c", "find /bundle/tessdata -type l -delete"}).
 		WithFile("/bundle/licenses/TranscoderD.txt", client.Host().File(filepath.Join(projectRoot(), "LICENSE"))).
 		WithNewFile("/bundle/licenses/PgsToSrt-source.txt", "PgsToSrt source: https://github.com/Tentacule/PgsToSrt/tree/"+pgstosrtVersion+"\nLocal patch: pgs-patches/pgstosrt-bitmap-bounds.patch\n").
 		WithExec([]string{"bash", "-c", "cp -a /mkv/mkvtoolnix/mkvextract.exe /bundle/bin/ && find /mkv/mkvtoolnix -maxdepth 1 -iname '*.dll' -exec cp -t /bundle/bin/ {} + && cp -a /mkv/mkvtoolnix/doc/COPYING.txt /bundle/licenses/mkvtoolnix.txt"}).
@@ -100,6 +103,17 @@ func windowsWorkerBundle(client *dagger.Client, binary *dagger.File) *dagger.Con
 }
 
 const windowsMKVSHA256 = "01d76dbfdbd5615d9e02f69b0710d1429a902d47a98c8eee33bd884c4fcb3cbf"
+
+// Windows checks Windows-specific service, updater and worker code via Dagger.
+func (Lint) Windows(ctx context.Context) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	_, err = lintContainer(client, projectSource(client)).WithEnvVariable("GOOS", "windows").WithEnvVariable("GOARCH", "amd64").WithExec([]string{"golangci-lint", "run"}).Sync(ctx)
+	return err
+}
 
 // WindowsE2e runs a native Windows worker against an isolated Linux server and
 // PostgreSQL. Invoke from WSL after build:windows. WINDOWS_BUNDLE is the local
@@ -174,23 +188,26 @@ func (Test) WindowsE2e(ctx context.Context) error {
 		"-Bundle", bundle, "-TestBinary", testBinary, "-ServerURL", endpoint, "-Codec", envOrDefault("WINDOWS_CODEC", "libsvtav1"))
 }
 
-// WindowsInstaller packages the worker, background service and web tray UI.
+// WindowsInstaller packages the complete managed Windows installation.
 func (Build) WindowsInstaller(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
-	source := projectSource(client)
-	worker := windowsWorkerBinary(client, source)
-	service := goContainer(client, source).WithEnvVariable("GOOS", "windows").WithEnvVariable("GOARCH", "amd64").WithExec([]string{"go", "build", "-ldflags", ldflags("transcoderd-desktop-service"), "-o", "/out/transcoderd-desktop-service.exe", "./cmd/windows-service"}).File("/out/transcoderd-desktop-service.exe")
-	ui := client.Container().From("mcr.microsoft.com/dotnet/sdk:8.0.427").WithDirectory("/src", client.Host().Directory(filepath.Join(projectRoot(), "windows", "desktop"), dagger.HostDirectoryOpts{Exclude: []string{"bin", "obj", "publish"}})).WithDirectory("/worker/dashboard/wwwroot", client.Host().Directory(filepath.Join(projectRoot(), "worker", "dashboard", "wwwroot"))).WithWorkdir("/src").WithExec([]string{"dotnet", "publish", "-c", "Release", "-r", "win-x64", "--self-contained", "true", "-o", "/out"}).Directory("/out")
-	if _, err := service.Export(ctx, filepath.Join(projectRoot(), "dist", "transcoderd-desktop-service.exe")); err != nil {
-		return err
+	src := projectSource(client)
+	builder, setup := windowsInstallerBuild(client, src, projectVersion, "", false)
+	for _, entry := range []struct{ source, target string }{
+		{"/stage/transcoderd-desktop-service.exe", "transcoderd-desktop-service.exe"},
+		{"/stage/transcoderd-updater.exe", "transcoderd-updater.exe"},
+		{"/windows-installation-files.json", "windows-installation-files.json"},
+		{"/" + setup, setup},
+	} {
+		if _, err = builder.File(entry.source).Export(ctx, filepath.Join(projectRoot(), "dist", entry.target)); err != nil {
+			return err
+		}
 	}
-	bundle := windowsWorkerBundle(client, worker).Directory("/bundle")
-	setup := "transcoderd-worker-" + projectVersion + "-windows-amd64-setup.exe"
-	builder := client.Container().From("debian:trixie-slim").WithExec([]string{"bash", "-c", "apt-get update && apt-get install -y --no-install-recommends nsis curl ca-certificates && rm -rf /var/lib/apt/lists/*"}).WithDirectory("/stage", bundle).WithDirectory("/stage", ui).WithFile("/stage/transcoderd-desktop-service.exe", service).WithFile("/installer.nsi", client.Host().File(filepath.Join(projectRoot(), "windows", "installer", "installer.nsi"))).WithExec([]string{"bash", "-c", `mkdir -p /stage/prerequisites; curl -fLsS --retry 5 'https://download.visualstudio.microsoft.com/download/pr/990c720a-46ce-4dc7-87b9-c2eb615d34b9/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe' -o /stage/prerequisites/vc_redist.x64.exe; echo 'cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b  /stage/prerequisites/vc_redist.x64.exe' | sha256sum -c; curl -fLsS --retry 5 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/4a41d80d-4493-4463-a466-d0988b97f1c4/MicrosoftEdgeWebview2Setup.exe' -o /stage/prerequisites/MicrosoftEdgeWebview2Setup.exe; echo 'ca4c9016c70e2184c5e231662e0e98abf4826647180ef3faab32fcb1ca2ec15e  /stage/prerequisites/MicrosoftEdgeWebview2Setup.exe' | sha256sum -c`}).WithExec([]string{"makensis", "-DVERSION=" + projectVersion, "-DINPUT=/stage", "-DOUTPUT=/" + setup, "/installer.nsi"})
-	_, err = builder.File("/"+setup).Export(ctx, filepath.Join(projectRoot(), "dist", setup))
+	tool := windowsGoBinary(client, src, "./cmd/windows-update-manifest", "windows-update-manifest", projectVersion, "", "windows")
+	_, err = tool.Export(ctx, filepath.Join(projectRoot(), "dist", "windows-update-manifest.exe"))
 	return err
 }

@@ -6,7 +6,7 @@ const assetRoot = 'worker/dashboard/wwwroot';
 assert.match(fs.readFileSync(`${assetRoot}/index.html`, 'utf8'), /<html lang="en">/, 'the dashboard language must be English');
 const elements = new Map();
 function element(id) {
-  if (!elements.has(id)) elements.set(id, {id, textContent:'', innerHTML:'', value:'', disabled:false, dataset:{}, classList:{add(){}, remove(){}, toggle(){}}, addEventListener(){}});
+  if (!elements.has(id)) elements.set(id, {id, textContent:'', innerHTML:'', value:'', disabled:false, dataset:{},style:{},handlers:{},classList:{add(){}, remove(){}, toggle(){}}, addEventListener(name,callback){this.handlers[name]=callback;}});
   return elements.get(id);
 }
 const filterButtons = ['all','encoding','downloading','uploading','preparation'].map(filter => ({
@@ -14,10 +14,12 @@ const filterButtons = ['all','encoding','downloading','uploading','preparation']
   addEventListener(_name, callback) { this.callback = callback; },
   click() { this.callback?.(); }
 }));
+const saved = new Map();
+const storage = {getItem:key=>saved.get(key)??null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)};
 const context = {
   document:{body:{classList:{toggle(){}}},getElementById:element,querySelectorAll:selector => selector === '[data-filter]' ? filterButtons : []},
   window:{chrome:{webview:{addEventListener(){},postMessage(){}}}},
-  setTimeout(){}, clearTimeout(){}, setInterval(){}, console
+  localStorage:storage,setTimeout(){}, clearTimeout(){}, setInterval(){}, console
 };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(`${assetRoot}/activity.js`, 'utf8'), context);
@@ -32,9 +34,9 @@ context.render({version:'2.8.2-test',configured:true,worker:{maxActiveJobs:0,max
   {jobId:'2',phase:'Download',percent:75,value:1.5*1024**3,total:2*1024**3,bytesPerSecond:20*1024**2},
   {jobId:'3',phase:'Upload',percent:50,value:550*1024**2,total:3*1024**3}
 ]},queue:{total:1,jobs:[{name:'<script>evil</script>'}]}});
-assert.match(element('toggle-pause').textContent, /Resume/, 'pause follows admission, even if accepted work can still encode');
+assert.match(element('toggle-pause').textContent, /Resume/, 'pause retains active encodes while holding queued work');
 assert.match(element('connection').innerHTML, /Paused/);
-assert.match(element('notice-text').textContent, /assignments are paused/);
+assert.match(element('notice-text').textContent, /queued encodes are paused/);
 assert.equal(element('stat-encoding').textContent, 1);
 assert.ok(!element('job-list').innerHTML.includes('<img'), 'job titles must be escaped');
 assert.ok(!element('server-queue').innerHTML.includes('<script>'), 'server titles must be escaped');
@@ -44,6 +46,16 @@ assert.match(element('job-list').innerHTML, /GPU · NVENC · AV1/);
 assert.match(element('job-list').innerHTML, /1\.5 GB of 2\.0 GB · 20\.0 MB\/s/, 'download progress should use MB/GB units');
 assert.match(element('job-list').innerHTML, /550\.0 MB of 3\.0 GB/, 'upload progress should use MB/GB units');
 
+context.render({configured:true,worker:{maxActiveJobs:0,paused:true,maxEncodes:5,activeEncodes:5,jobs:[{jobId:'ready',name:'waiting.mkv',downloaded:true,phase:'FFMPEG',state:'queued'}],progress:[]}});
+assert.match(element('notice-text').textContent,/Running encodes and uploads will finish/);
+assert.match(element('job-list').innerHTML,/Waiting for Resume/);
+assert.equal(element('stat-ready').textContent,1);
+context.render({configured:true,pending:true,worker:{maxActiveJobs:0,paused:false,jobs:[],progress:[]}});
+assert.match(element('connection').innerHTML,/Finishing accepted work/);
+assert.equal(element('toggle-pause').disabled,true,'maintenance drain cannot be bypassed with Resume');
+context.render({configured:true,worker:{maxActiveJobs:5,paused:false,maxEncodes:5,activeEncodes:7,jobs:[],progress:[]}});
+assert.equal(element('stat-encoding').textContent,7,'encodes above a lowered target must not be hidden');
+context.render({configured:true,worker:{maxActiveJobs:2,jobs:[{jobId:'1',name:'encoded.mkv',phase:'FFMPEG',state:'running'},{jobId:'2',name:'film.mkv',phase:'Download',state:'running'}],progress:[]}});
 filterButtons[1].click();
 assert.ok(!element('job-list').innerHTML.includes('film.mkv'), 'encoding filter should hide downloads');
 filterButtons[2].click();
@@ -62,4 +74,33 @@ context.render({configured:true,worker:{maxActiveJobs:2,maxEncodes:2,activeEncod
 assert.match(element('connection').innerHTML, /Waiting for settings/);
 context.render({configured:true,worker:{maxActiveJobs:2,maxEncodes:2,activeEncodes:2,activeJobs:3,reservedJobs:1,maxAcceptedJobs:4,withinSchedule:true,accepting:true,jobs:[],progress:[]}});
 assert.match(element('connection').innerHTML, /At capacity/);
-console.log('Dashboard UI: version, encoder identity, transfer sizes, filters, admission state and escaping passed.');
+context.render({configured:true,update:{pending:true,phase:'downloading',targetVersion:'v99.1.0',downloaded:5*1024**2,total:10*1024**2},worker:{activeJobs:2,reservedJobs:1,jobs:[],progress:[]}});
+assert.equal(element('update-alert').hidden,false,'mandatory update alert must be visible');
+assert.match(element('update-title').textContent,/v99\.1\.0/);
+assert.equal(element('settings-controls').disabled,true,'all configuration must be locked');
+assert.equal(element('save').disabled,true);
+assert.equal(element('show-token').disabled,true);
+assert.equal(element('toggle-pause').disabled,true);
+assert.equal(element('update-progress').style.width,'50%');
+assert.match(element('update-detail').textContent,/2 accepted jobs/);
+assert.ok(saved.has('transcoderd.pending-update'),'update lock must survive a page reload');
+(async()=>{
+  await assert.rejects(context.request('configure',{settings:{}}),/locked/);
+  await assert.rejects(context.request('set-max-jobs',{cpuJobs:9}),/locked/);
+  await element('settings-form').handlers.submit({preventDefault(){}});
+  assert.equal(element('save').disabled,true,'keyboard submission must not unlock the form');
+  context.renderUpdate();context.lockConfiguration(true);
+  assert.equal(element('update-alert').hidden,false,'disconnect must retain pending update alert');
+  elements.clear();
+  const reloaded = {...context};
+  vm.createContext(reloaded);
+  vm.runInContext(fs.readFileSync(`${assetRoot}/activity.js`, 'utf8'), reloaded);
+  vm.runInContext(fs.readFileSync(`${assetRoot}/app.js`, 'utf8'), reloaded);
+  assert.equal(element('update-alert').hidden,false,'reload must display the cached pending alert before service status arrives');
+  assert.equal(element('settings-controls').disabled,true,'reload must start with configuration locked');
+  await assert.rejects(reloaded.request('configure',{settings:{}}),/locked/);
+  context.render({configured:true,version:'99.1.0',update:{pending:false,phase:'updated'},worker:{jobs:[],progress:[]}});
+  assert.equal(element('settings-controls').disabled,false,'verified service status releases the lock');
+  assert.equal(saved.has('transcoderd.pending-update'),false);
+  console.log('Dashboard UI: version, encoders, transfer units, filters, mandatory update alert and configuration lock passed.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

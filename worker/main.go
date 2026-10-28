@@ -44,7 +44,7 @@ func init() {
 		defaultThreads = 16
 	}
 	pflag.Int("worker.threads", defaultThreads, "Worker Threads")
-	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum FFmpeg encode concurrency; the worker may accept two additional pipeline jobs; 0 disables new job requests")
+	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum FFmpeg encode concurrency; the worker may accept one additional pipeline job; 0 pauses requests and queued encodes")
 	pflag.String("worker.dashboard.listenAddress", "", "Optional HTTP listen address for the local browser dashboard (requires worker.dashboard.token)")
 	pflag.String("worker.dashboard.token", "", "Bearer token required by the local browser dashboard API")
 	pflag.Int("worker.pgsConfig.parallelJobs", 1, "Maximum PGS OCR actions per job")
@@ -173,6 +173,12 @@ func applicationRunWithShutdown(wg *sync.WaitGroup, ctx context.Context, updater
 	}
 
 	encodeWorker := worker.NewEncodeWorker(opts.Worker, serverClient, renderService)
+	if os.Getenv("TRANSCODERD_MANAGED_PROFILE") == "1" {
+		encodeWorker.UseManagedLimits()
+	}
+	if os.Getenv("TRANSCODERD_ADMISSION_HOLD") == "1" {
+		encodeWorker.HoldAdmission()
+	}
 	encodeWorker.RequireWorkerSettings()
 	encodeWorker.Run(wg, ctx)
 	controlServer, err := control.Start(control.ConfiguredPath(), encodeWorker, shutdown)

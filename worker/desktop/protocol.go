@@ -2,10 +2,12 @@ package desktop
 
 import (
 	"transcoder/model"
+	"transcoder/update/managed"
 	"transcoder/worker/control"
 )
 
 type Request struct {
+	ID       int64     `json:"id,omitempty"`
 	Command  string    `json:"command"`
 	Settings *Settings `json:"settings,omitempty"`
 	MaxJobs  int       `json:"maxJobs,omitempty"`
@@ -24,6 +26,7 @@ type Status struct {
 	Queue      *model.QueueSnapshot               `json:"queue,omitempty"`
 	QueueError string                             `json:"queueError,omitempty"`
 	Message    string                             `json:"message,omitempty"`
+	Update     *managed.Status                    `json:"update,omitempty"`
 }
 
 type Response struct {

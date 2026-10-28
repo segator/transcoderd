@@ -24,8 +24,9 @@ internal static class Program
         if (!created) { if (args.Contains("--quit")) quitEvent.Set(); else showEvent.Set(); return; }
         if (args.Contains("--quit")) return;
         bool rejectSmoke = args.Contains("--smoke-reject");
-        bool smoke = args.Contains("--smoke") || rejectSmoke;
-        using var form = new MainForm(sid, args.Contains("--background") || smoke, smoke, rejectSmoke);
+        bool updateSmoke = args.Contains("--smoke-update");
+        bool smoke = args.Contains("--smoke") || rejectSmoke || updateSmoke;
+        using var form = new MainForm(sid, args.Contains("--background") || smoke, smoke, rejectSmoke, updateSmoke);
         _ = Task.Run(() => { while (showEvent.WaitOne()) { if (form.IsDisposed) break; try { form.BeginInvoke((Action)form.ShowWindow); } catch (InvalidOperationException) { break; } } });
         _ = Task.Run(() => { quitEvent.WaitOne(); if (!form.IsDisposed) { try { form.BeginInvoke((Action)form.Quit); } catch (InvalidOperationException) { } } });
         Application.Run(form);
@@ -70,13 +71,19 @@ internal sealed class MainForm : Form
     private readonly WebView2 browser = new() { Dock = DockStyle.Fill };
     private readonly bool smoke;
     private readonly bool rejectSmoke;
+    private readonly bool updateSmoke;
     private bool quitting;
-    private int lastTarget = 2;
+    private int lastCPU = 0, lastGPU = 2;
+    private readonly ToolStripMenuItem pauseItem;
+    private readonly ToolStripMenuItem resumeItem;
+    private bool configurationAllowed;
+    private bool updateNotified;
 
-    public MainForm(string sid, bool background, bool smoke, bool rejectSmoke)
+    public MainForm(string sid, bool background, bool smoke, bool rejectSmoke, bool updateSmoke)
     {
         this.smoke = smoke;
         this.rejectSmoke = rejectSmoke;
+        this.updateSmoke = updateSmoke;
         client = new PipeClient(sid, smoke && !rejectSmoke);
         Icon appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? MakeIcon();
         Text = "TranscoderD"; Size = new Size(1180, 780); MinimumSize = new Size(800, 600);
@@ -84,8 +91,9 @@ internal sealed class MainForm : Form
         Controls.Add(browser);
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open TranscoderD", null, (_, _) => ShowWindow());
-        menu.Items.Add("Pause new jobs", null, async (_, _) => await SetLimit(0));
-        menu.Items.Add("Resume", null, async (_, _) => await SetLimit(lastTarget));
+        pauseItem = (ToolStripMenuItem)menu.Items.Add("Pause queued encodes", null, async (_, _) => await SetPaused(true));
+        resumeItem = (ToolStripMenuItem)menu.Items.Add("Resume", null, async (_, _) => await SetPaused(false));
+        pauseItem.Enabled = resumeItem.Enabled = false;
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit tray", null, (_, _) => { quitting = true; Close(); });
         tray = new NotifyIcon { Icon = appIcon, Text = "TranscoderD worker dashboard", ContextMenuStrip = menu, Visible = true };
@@ -115,7 +123,8 @@ internal sealed class MainForm : Form
                     bool ok = e.IsSuccess;
                     for (int i = 0; ok && i < 80; i++) {
                         string state = rejectSmoke ? "error" : "online";
-                        string result = await core.ExecuteScriptAsync($"Boolean(document.getElementById('settings-form') && document.getElementById('job-list') && document.getElementById('connection').classList.contains('{state}'))");
+                        string condition = updateSmoke ? "Boolean(!document.getElementById('update-alert').hidden && document.getElementById('update-alert').getBoundingClientRect().height > 0 && document.getElementById('settings-controls').disabled && document.getElementById('save').disabled && document.getElementById('toggle-pause').disabled && document.getElementById('update-title').textContent.includes('99.1.0'))" : $"Boolean(document.getElementById('settings-form') && document.getElementById('job-list') && document.getElementById('connection').classList.contains('{state}'))";
+                        string result = await core.ExecuteScriptAsync(condition);
                         if (result == "true") { Environment.ExitCode = 0; Quit(); return; }
                         await Task.Delay(250);
                     }
@@ -142,21 +151,31 @@ internal sealed class MainForm : Form
             string command = root.GetProperty("command").GetString() ?? "";
             if (command == "show-window") { if (!smoke) ShowWindow(); Reply(id, true, "{}"); return; }
             if (command == "start-service") { StartService(); Reply(id, true, "{}"); return; }
-            if (command is not ("status" or "configure" or "set-max-jobs")) throw new InvalidOperationException("Command not allowed");
+            if (command is not ("status" or "configure" or "set-max-jobs" or "check-update")) throw new InvalidOperationException("Command not allowed");
+            if (!configurationAllowed && (command is "configure" or "set-max-jobs")) throw new InvalidOperationException("Configuration is locked until the mandatory update completes or service status is confirmed.");
             string response = await client.SendAsync(root.GetRawText());
             using var result = JsonDocument.Parse(response);
-            if (command == "status" && result.RootElement.TryGetProperty("status", out var status) && status.TryGetProperty("worker", out var worker) && worker.ValueKind == JsonValueKind.Object && worker.TryGetProperty("maxActiveJobs", out var target) && target.TryGetInt32(out int n) && n > 0) lastTarget = n;
+            if (command == "status" && result.RootElement.TryGetProperty("status", out var serviceStatus)) {
+                bool updating = serviceStatus.TryGetProperty("update", out var update) && update.TryGetProperty("pending", out var pending) && pending.GetBoolean();
+                configurationAllowed = !updating;
+                pauseItem.Enabled = resumeItem.Enabled = configurationAllowed;
+                tray.Text = updating ? "TranscoderD — mandatory update pending" : "TranscoderD worker dashboard";
+                if (updating && !updateNotified) { tray.ShowBalloonTip(6000, "Mandatory update", "New jobs and configuration are blocked. Accepted jobs will finish before automatic installation.", ToolTipIcon.Info); }
+                updateNotified = updating;
+            }
+            if (command == "status" && result.RootElement.TryGetProperty("status", out var status) && status.TryGetProperty("settings", out var settings) && settings.ValueKind == JsonValueKind.Object) { lastCPU = settings.GetProperty("cpuJobs").GetInt32(); lastGPU = settings.GetProperty("gpuJobs").GetInt32(); }
             Reply(id, true, result.RootElement.GetRawText());
-        } catch (Exception ex) { Reply(id, false, JsonSerializer.Serialize(ex.Message)); }
+        } catch (Exception ex) { configurationAllowed = false; pauseItem.Enabled = resumeItem.Enabled = false; Reply(id, false, JsonSerializer.Serialize(ex.Message)); }
     }
     private void Reply(long id, bool ok, string payload)
     {
         if (browser.IsDisposed || browser.CoreWebView2 == null) return;
         browser.CoreWebView2.PostWebMessageAsJson($"{{\"id\":{id},\"ok\":{(ok ? "true" : "false")},\"payload\":{payload}}}");
     }
-    private async Task SetLimit(int value)
+    private async Task SetPaused(bool paused)
     {
-        try { var response = await client.SendAsync(JsonSerializer.Serialize(new { command = "set-max-jobs", maxJobs = value })); using var doc = JsonDocument.Parse(response); if (doc.RootElement.TryGetProperty("error", out var error) && error.GetString() is { Length: > 0 } text) throw new IOException(text); }
+        if (!configurationAllowed) { ShowWindow(); return; }
+        try { var response = await client.SendAsync(JsonSerializer.Serialize(new { command = "set-max-jobs", cpuJobs = paused ? 0 : lastCPU, gpuJobs = paused ? 0 : lastGPU })); using var doc = JsonDocument.Parse(response); if (doc.RootElement.TryGetProperty("error", out var error) && error.GetString() is { Length: > 0 } text) throw new IOException(text); }
         catch { ShowWindow(); }
     }
     private static void StartService()

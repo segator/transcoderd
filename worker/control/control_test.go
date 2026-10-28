@@ -46,7 +46,7 @@ func (f *fakeController) PersistMaxActiveJobs(max int) error {
 	f.status.MaxActiveJobs = max
 	f.status.MaxAcceptedJobs = max
 	if max > 0 {
-		f.status.MaxAcceptedJobs += 2
+		f.status.MaxAcceptedJobs++
 	}
 	f.status.Accepting = max > 0
 	if max > 0 {
@@ -55,7 +55,8 @@ func (f *fakeController) PersistMaxActiveJobs(max int) error {
 	return nil
 }
 
-func (f *fakeController) SetMaxActiveJobs(max int) error {
+func (f *fakeController) DrainAcceptedJobs() error {
+	max := 0
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.status.MaxActiveJobs = max
@@ -113,8 +114,8 @@ func TestControlCommandsUpdateRunningWorker(t *testing.T) {
 		want string
 	}{
 		{args: []string{"set-max-jobs", "0"}, want: "max jobs set to 0; admitted_limit=0; accepting=false encodes=2/2"},
-		{args: []string{"set-max-jobs", "1"}, want: "max jobs set to 1; admitted_limit=3; accepting=true encodes=2/1"},
-		{args: []string{"status"}, want: "accepting=true active=4 reserved=0 max_jobs=1 admitted_limit=3 encodes=2/1"},
+		{args: []string{"set-max-jobs", "1"}, want: "max jobs set to 1; admitted_limit=2; accepting=true encodes=2/1"},
+		{args: []string{"status"}, want: "accepting=true active=4 reserved=0 max_jobs=1 admitted_limit=2 encodes=2/1"},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.args, "-"), func(t *testing.T) {
@@ -178,4 +179,27 @@ func TestStartRejectsActiveSocketAndRemovesStaleSocket(t *testing.T) {
 	cancel()
 	server.Serve(ctx)
 	_ = server.Close()
+}
+
+func (f *fakeController) HoldAdmission() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status.Accepting = false
+}
+
+func TestMandatoryHoldPreservesLimitsAndAcceptedWork(t *testing.T) {
+	state := &fakeController{status: AdmissionStatus{Accepting: true, MaxActiveJobs: 4, MaxEncodes: 4, ActiveJobs: 3, ReservedJobs: 1}}
+	path := filepath.Join(t.TempDir(), "worker.sock")
+	server, err := Start(path, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	got, err := Call(path, Request{Command: "hold-admission"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Accepting || got.Status.MaxActiveJobs != 4 || got.Status.ActiveJobs != 3 || got.Status.ReservedJobs != 1 || state.persisted != 0 {
+		t.Fatalf("mandatory hold changed accepted work/limits: %+v", got.Status)
+	}
 }

@@ -16,7 +16,7 @@ The specs state observable behavior and the configuration values that affect it.
 | `subtitles` | `worker/ffmpeg/ffprobe.go`, `worker/step/MKVExtractStep.go`, `worker/step/PGStoSrtStep.go` |
 | `persistence` | `server/repository/repository.go`, `server/repository/resources/database/` |
 | `maintenance-and-recovery` | `server/scheduler/scheduler.go`, `worker/job/job.go`, `worker/worker/executor.go` |
-| `self-update` | `update/update.go`, `server/web/web.go`, `worker/worker/coordinator.go` |
+| `self-update` | `update/update.go`, `update/managed/`, `cmd/windows-service/updates_windows.go`, `server/web/web.go`, `worker/worker/coordinator.go` |
 
 ## Known implementation gaps
 
@@ -33,6 +33,8 @@ These observations are not normative requirements. They need separate fixes or e
 
 ## Resolved implementation discrepancies
 
+- Before `pause-queued-encodes`, the implemented two-job prefetch buffer exceeded the unsynchronized main admission contract; zero admission continued prefetched encodes, and Windows startup could replace local profile limits with stale server values. The change reduces the buffer to one, separates user pause from maintenance drain and gives service-owned profiles authoritative startup limits.
+
 - Native Windows CPU CI exposed a download close failure: syncing the read-only source invokes Windows FlushFileBuffers without write access and prevents checksum publication. Download streams now close without a write flush, then publish their checksum; upload streams retain their sync. A read-only download regression and the complete native E2E cover this fix.
 
 - PR 187 initially replaced the Linux builder's FFmpeg hash with the official release tarball hash, incorrectly treating the upstream pin as stale. CI demonstrated that Linux downloads the GitHub n9.0.2 tag archive, whose verified SHA-256 is `6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9`. The override was removed. Windows retains the separate official tar.gz (`84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98`), verified with FFmpeg release key `FCF986EA15E6E293A5644F10B4322F04D67658D8`. Both recipes retain source version 9.0.2 and their intended archive/hash pair.
@@ -40,3 +42,4 @@ These observations are not normative requirements. They need separate fixes or e
 ## Verification boundary
 
 `openspec validate --all --strict` checks document structure. Go unit tests cover parts of scheduling, media inspection, context persistence, and steps. PostgreSQL integration tests and Docker end-to-end tests use the `integration` build tag. Structural validation does not prove behavior; each future code change needs tests for the scenarios it affects.
+- Complete Windows upgrades previously assumed the configured workspace was outside the installation tree, although desktop configuration accepted nested paths. The mandatory updater change rejects those paths (including existing junction aliases) during configuration and bootstrap before Setup can replace files; existing affected installations must choose an external workspace before bootstrap.

@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      windows_debug_artifact_run:
+        description: 'Reuse Windows fixtures from this run for isolated test debugging; never publishes a release'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -23,6 +29,16 @@ jobs:
         with:
           go-version: 1.26.10
           cache-dependency-path: go.sum
+      - name: Validate installer test network isolation
+        shell: pwsh
+        run: |
+          . ./scripts/windows/test-network.ps1
+          $name = 'TranscoderD-Network-Probe-' + [guid]::NewGuid().ToString('N')
+          try {
+            New-InstallerTestNetworkIsolation -Name $name -Program "$env:SystemRoot\System32\notepad.exe" | Out-Null
+          } finally {
+            Remove-NetFirewallRule -Name $name -ErrorAction SilentlyContinue
+          }
       - name: Native update and administration unit tests
         shell: pwsh
         run: go test -v -timeout 2m ./update/managed ./cmd/windows-service ./cmd/windows-update-manifest ./worker/control ./worker/desktop
@@ -92,6 +108,7 @@ jobs:
         run: mage release:upload
 
   windows-build:
+    if: github.event_name != 'workflow_dispatch' || inputs.windows_debug_artifact_run == ''
     needs: [ci, windows-unit]
     env:
       PROJECT_VERSION: ${{ needs.ci.outputs.project_version }}
@@ -199,3 +216,56 @@ jobs:
           $assets += "$PWD/dist/windows-update.json.sig"
           gh release upload $env:RELEASE_TAG @assets --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Windows release asset upload failed.' }
+
+  windows-debug:
+    if: github.event_name == 'workflow_dispatch' && inputs.windows_debug_artifact_run != ''
+    needs: windows-unit
+    permissions:
+      contents: read
+      actions: read
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download existing fixtures for test debugging
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-worker
+          path: dist
+          run-id: ${{ inputs.windows_debug_artifact_run }}
+          github-token: ${{ github.token }}
+      - name: Extract portable tools
+        shell: pwsh
+        run: |
+          $archive = @(Get-ChildItem dist -Filter '*-windows-amd64.zip')
+          if ($archive.Count -ne 1) { throw 'Expected one Windows worker ZIP.' }
+          $bundle = Join-Path $env:RUNNER_TEMP 'TranscoderD debug tools'
+          Expand-Archive -LiteralPath $archive[0].FullName -DestinationPath $bundle
+          "WINDOWS_BUNDLE=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Validate normal installed service with current test scripts
+        shell: pwsh
+        run: |
+          $installer = @(Get-ChildItem dist -Filter '*-windows-amd64-setup.exe')
+          if ($installer.Count -ne 1) { throw 'Expected one Windows installer.' }
+          ./scripts/windows/test-ci.ps1 -Bundle $env:WINDOWS_BUNDLE `
+            -TestBinary "$PWD/dist/windows-tests/windows-bundle.test.exe" `
+            -ServerBinary "$PWD/dist/windows-tests/windows-e2e-server.exe" `
+            -Fixture "$PWD/integration/testdata/e2e_fixture.mkv" `
+            -EvidenceDirectory "$PWD/dist/windows-debug-installed" -DesktopInstaller $installer[0].FullName
+      - name: Validate mandatory update and recovery with current test scripts
+        shell: pwsh
+        run: |
+          ./scripts/windows/test-ci.ps1 -Bundle $env:WINDOWS_BUNDLE `
+            -TestBinary "$PWD/dist/windows-tests/windows-bundle.test.exe" `
+            -ServerBinary "$PWD/dist/windows-tests/windows-e2e-server.exe" `
+            -Fixture "$PWD/integration/testdata/e2e_fixture.mkv" `
+            -EvidenceDirectory "$PWD/dist/windows-debug-update" -UpdateFixtures "$PWD/dist/windows-update-fixtures"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-debug-test-logs
+          path: |
+            dist/windows-debug-installed/**/*.log
+            dist/windows-debug-installed/**/*.err
+            dist/windows-debug-update/**/*.log
+            dist/windows-debug-update/**/*.err

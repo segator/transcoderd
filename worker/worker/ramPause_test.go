@@ -299,3 +299,35 @@ func TestSeparateRAMStartupWaitsForResume(t *testing.T) {
 		t.Fatal("explicit Resume did not release startup RAM hold")
 	}
 }
+
+func TestFinishAcceptedJobsIsReversibleAndKeepsQueuedEncodesRunning(t *testing.T) {
+	worker, path := runningRAMWorker(t)
+	id := worker.jobs.snapshot()[0].JobID
+	if err := worker.SetJobPaused(id, true); err != nil {
+		t.Fatal(err)
+	}
+	before := ramProgressSize(path)
+	if err := worker.FinishAcceptedJobs(); err != nil {
+		t.Fatal(err)
+	}
+	awaitRAMWorker(t, func() bool { return ramProgressSize(path) > before })
+	if worker.AdmissionStatus().RAMPaused || worker.AdmissionStatus().SuspendedEncodes != 0 {
+		t.Fatal("finish kept RAM hold")
+	}
+	if worker.ReserveJobSlot() || worker.encodePool.Paused() {
+		t.Fatal("finish must close admission and release queued encodes")
+	}
+	worker.MarkWorkerSettingsResolved()
+	if worker.encodePool.Paused() {
+		t.Fatal("settings resolution stopped queued work")
+	}
+	if err := worker.SetRAMPaused(true); err == nil {
+		t.Fatal("pause interrupted finish")
+	}
+	if err := worker.SetMaxActiveJobs(2); err != nil {
+		t.Fatal(err)
+	}
+	if worker.finishing || worker.admissionHeld || !worker.ReserveJobSlot() {
+		t.Fatal("resume did not reopen admission")
+	}
+}

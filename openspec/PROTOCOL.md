@@ -130,3 +130,17 @@ Job status includes `canPause`, `individuallyPaused` and `pausedByWorker`. An in
 Local `set-admission-limit` carries `maxJobs` and persists a finish-active admission limit. Local `pause-encodes` / `resume-encodes` suspend or resume owned encoding processes immediately without changing the admission limit. Runtime status exposes `ramPaused` independently of `maxActiveJobs`; zero limit still identifies a stopped queue. Both holds gate new assignments/starts and releasing either preserves the other and individual job holds.
 
 The optional authenticated dashboard's existing `/api/worker/max-jobs` route now uses the explicit admission operation; `POST /api/worker/encodes/pause` and `/resume` use the RAM operation. The desktop bridge accepts the same RAM commands and saves `ramPaused` separately from its existing `paused` queue preference. Generated profile config carries `worker.ramPaused` and finish zero-limit policy. Both preferences are restored before accepting work, while maintenance temporarily releases live suspensions and preserves the saved preferences.
+
+### Explicit Windows shutdown after accepted work
+
+The restricted desktop pipe accepts `stop-after-current` with boolean
+`shutdownAfterCurrent`. Only `true` arms a transient request; omitted/false uses
+ordinary queue stop. Desktop status includes `shutdownPending`. Both profiles
+must confirm idle with no active jobs, encodes or reserved requests before the
+service invokes normal Windows shutdown once. Resume/configuration/maintenance,
+worker exit or control loss, and service restart cancel the request. The native
+tray handles `confirm-shutdown` locally and returns the user's boolean choice;
+this is not a service command. No HTTP power-management endpoint is exposed.
+The worker's local `finish-accepted` command closes admission and runs accepted
+queued work; the next explicit admission-limit change releases this operator
+hold. Maintenance admission holds remain independent.

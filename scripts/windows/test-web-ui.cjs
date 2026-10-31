@@ -152,15 +152,27 @@ assert.ok(saved.has('transcoderd.pending-update'),'update lock must survive a pa
   context.request=originalRequest;
   state.pending=false;state.worker.maxActiveJobs=2;state.worker.ramPaused=false;context.render(state);
   const actions=[];
-  context.request=async(command,data)=>{actions.push(command);if(command==='pause-encodes')state.worker.ramPaused=true;if(command==='resume-encodes')state.worker.ramPaused=false;if(command==='set-max-jobs')state.worker.maxActiveJobs=(data.cpuJobs??0)+(data.gpuJobs??0);return state;};
+  context.request=async(command,data)=>{actions.push(command);if(command==='pause-encodes')state.worker.ramPaused=true;if(command==='resume-encodes')state.worker.ramPaused=false;if(command==='confirm-shutdown')return {shutdownAfterCurrent:false};if(command==='stop-after-current')state.worker.maxActiveJobs=0;if(command==='set-max-jobs')state.worker.maxActiveJobs=(data.cpuJobs??0)+(data.gpuJobs??0);return state;};
   await originalRAMClick();
   assert.equal(actions[0],'pause-encodes');assert.equal(state.worker.maxActiveJobs,2);
   await originalQueueClick();
-  assert.equal(actions[1],'set-max-jobs');assert.equal(state.worker.ramPaused,true);assert.equal(state.worker.maxActiveJobs,0);
+  assert.equal(actions[1],'confirm-shutdown');assert.equal(actions[2],'stop-after-current');assert.equal(state.worker.ramPaused,true);assert.equal(state.worker.maxActiveJobs,0);
   await originalRAMClick();
-  assert.equal(actions[2],'resume-encodes');assert.equal(state.worker.maxActiveJobs,0);
+  assert.equal(actions[3],'resume-encodes');assert.equal(state.worker.maxActiveJobs,0);
   assert.match(element('toggle-pause').textContent,/Resume queue/);
   assert.match(element('toggle-encodes').textContent,/Pause encodes/);
+  state.worker.maxActiveJobs=2;context.render(state);
+  let asked=0,armed=0;
+  context.request=async(command,data)=>{
+   if(command==='confirm-shutdown'){asked++;return {shutdownAfterCurrent:true};}
+   if(command==='stop-after-current'){armed++;assert.equal(data.shutdownAfterCurrent,true);state.shutdownPending=true;state.worker.maxActiveJobs=0;}
+   if(command==='set-max-jobs'){state.shutdownPending=false;state.worker.maxActiveJobs=2;}
+   return state;
+  };
+  await originalQueueClick();
+  assert.equal(asked,1);assert.equal(armed,1);assert.equal(element('shutdown-pending').hidden,false);
+  await originalQueueClick();
+  assert.equal(asked,1,'Resume must not ask to shut down');assert.equal(state.shutdownPending,false);
   context.request=originalRequest;
   console.log('Dashboard UI: version, encoders, transfer units, filters, mandatory update alert and configuration lock passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -37,7 +37,7 @@ function renderUpdate(update) {
 }
 renderUpdate(); lockConfiguration(true);
 function request(command, data = {}) {
-  if (configurationLocked && ['configure','set-max-jobs','pause-job','resume-job','pause-encodes','resume-encodes'].includes(command)) return Promise.reject(new Error('Configuration is locked until the mandatory update completes or service status is confirmed.'));
+  if (configurationLocked && ['stop-after-current','configure','set-max-jobs','pause-job','resume-job','pause-encodes','resume-encodes'].includes(command)) return Promise.reject(new Error('Configuration is locked until the mandatory update completes or service status is confirmed.'));
   return new Promise((resolve, reject) => {
     if (!window.chrome?.webview) {
       (async () => {
@@ -53,7 +53,7 @@ function request(command, data = {}) {
       return;
     }
     const id = ++sequence;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error('The service is not responding.')); }, 14000);
+    const timer = command === 'confirm-shutdown' ? null : setTimeout(() => { pending.delete(id); reject(new Error('The service is not responding.')); }, 14000);
     pending.set(id, {resolve, reject, timer});
     window.chrome.webview.postMessage({id, command, ...data});
   });
@@ -171,10 +171,12 @@ function render(status) {
   $('server-queue').innerHTML = queue ? (queue.jobs?.length ? queue.jobs.map((j, i) => `<div class="queue-item"><span class="queue-num">${String(i+1).padStart(2,'0')}</span><div class="queue-info"><div class="queue-name" title="${escapeHTML(j.name)}">${escapeHTML(j.name)}</div><div class="queue-meta">${escapeHTML(fileSize(j.size) ? `Awaiting assignment · ${fileSize(j.size)}` : 'Awaiting assignment')}</div></div><span class="badge ready">Queued</span></div>`).join('') : empty('Queue empty','There are no jobs waiting to be assigned.',true)) : empty('Queue unavailable',status.queueError === 'unsupported' ? 'Update the server to view its queue.' : 'The queue will appear when the server is available.',true);
   const notice = !status.configured ? 'Configure the connection to start your worker.' : status.pending ? 'Changes are pending and will be applied when current jobs finish.' : status.message || (ramPause ? `Encoding is paused in RAM; RAM and VRAM remain allocated. ${isPaused ? 'The queue is also stopped.' : 'The queue will reopen when encoding resumes.'} Worker exit or PC restart loses live encoder state.` : isPaused ? 'The queue is stopped. Running encodes and uploads can finish; queued encodes wait for Resume queue.' : worker?.suspendedEncodes > 0 ? `${worker.suspendedEncodes} encoding(s) paused individually in RAM. Other work can continue.` : worker?.withinSchedule === false ? 'Outside the work schedule. New assignments resume during the next window.' : '');
   $('notice').classList.toggle('hidden', !notice); $('notice-text').textContent = notice; $('notice-start').classList.add('hidden'); $('notice-settings').classList.remove('hidden');
+  $('shutdown-pending').hidden = !status.shutdownPending;
+  $('shutdown-pending').textContent = status.shutdownPending ? 'This PC will shut down after all accepted jobs and uploads finish. Resume queue cancels shutdown.' : '';
   $('toggle-pause').disabled = configurationLocked || !worker || status.pending;
   $('toggle-pause').textContent = isPaused ? '▶ Resume queue' : 'Stop after current';
   $('toggle-pause').title = 'Stop new assignments and queued encode starts. Running encodes and uploads can finish. RAM and individual pauses remain unchanged.';
-  $('toggle-encodes').disabled = configurationLocked || !worker || status.pending;
+  $('toggle-encodes').disabled = configurationLocked || !worker || status.pending || status.shutdownPending;
   $('toggle-encodes').textContent = ramPause ? '▶ Resume encodes' : 'Ⅱ Pause encodes';
   $('toggle-encodes').title = 'Suspend active CPU/GPU encodes immediately in RAM. Keeps RAM/VRAM allocated. Resume preserves the queue setting and individual pauses.';
   if (!dirty && status.settings) { const s = status.settings; $('domain').value = s.domain; $('name').value = s.name; $('working-directory').value = s.workingDirectory || ''; $('cpu-codec').value = s.cpuCodec; $('cpu-jobs').value = s.cpuJobs; $('gpu-codec').value = s.gpuCodec; $('gpu-jobs').value = s.gpuJobs; $('pause-mode').value = 'ram'; $('schedule').value = (s.schedule || []).join('\n'); $('token-note').textContent = s.tokenSet ? 'Token saved. Leave blank to keep it.' : 'Your token is stored securely on this machine.'; }
@@ -196,14 +198,21 @@ $('settings-form').addEventListener('submit', async e => {
   try { const status = await request('configure', {settings}); $('token').value = ''; dirty = false; render(status); toast(status.pending ? 'Changes saved; they will apply when current jobs finish.' : 'Settings saved.'); page('overview'); }
   catch (err) { toast(err.message); } finally { $('save').disabled = configurationLocked; }
 });
+let queueActionPending = false;
 $('toggle-pause').addEventListener('click', async () => {
- if (configurationLocked || current?.pending) return;
+ if (queueActionPending || configurationLocked || current?.pending) return;
+ queueActionPending = true;
  const stopped = current?.worker?.maxActiveJobs === 0;
  try {
   if (!window.chrome?.webview) render(await request('set-max-jobs',{maxJobs:stopped ? lastBrowserLimit : 0}));
-  else render(await request('set-max-jobs',{cpuJobs:stopped ? lastJobs.cpu : 0,gpuJobs:stopped ? lastJobs.gpu : 0}));
-  toast(stopped ? 'Queue resumed. RAM and individual pauses are unchanged.' : 'Queue stopped. Running encodes can finish.');
- } catch(error) { toast(error.message); }
+  else if (stopped) render(await request('set-max-jobs',{cpuJobs:lastJobs.cpu,gpuJobs:lastJobs.gpu}));
+  else {
+   const choice = await request('confirm-shutdown');
+   if (configurationLocked || current?.pending) return;
+   render(await request('stop-after-current',{shutdownAfterCurrent:choice.shutdownAfterCurrent === true}));
+  }
+  toast(current?.shutdownPending ? 'Shutdown requested after all accepted work finishes. Resume queue cancels it.' : stopped ? 'Queue resumed. Pending shutdown canceled.' : 'Queue stopped. Running encodes can finish.');
+ } catch(error) { toast(error.message); } finally { queueActionPending = false; }
 });
 $('toggle-encodes').addEventListener('click',async () => {
  if (configurationLocked || current?.pending) return;

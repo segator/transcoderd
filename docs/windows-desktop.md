@@ -88,3 +88,14 @@ RAM pause requires the worker process and machine to stay running. Closing the t
 Implementation and test evidence: [RAM pause validation](ram-pause-validation.md).
 
 Each active encoding also has its own **Pause/Resume** button. Individual buttons always suspend in RAM independently of the queue control. Pausing one encoding leaves other work and configured limits unchanged; its encode slot remains occupied. Resume encodes preserves individual pauses; Resume queue never releases a RAM hold. Rows identify the individual and/or worker-profile hold; resume or re-enable a held profile before using its row control. Individual holds are live process state and do not survive worker exit. Configuration/update maintenance resumes all accepted encodes and blocks new individual pauses until it completes.
+
+When you click **Stop after current** in the Windows dashboard or tray, a native
+Yes/No question offers to shut down this PC afterwards. **No** performs the usual
+queue stop. **Yes** closes admission and finishes all accepted work, including
+queued encodes and uploads, then requests normal Windows shutdown. Suspended
+accepted encodes resume to finish. A visible message identifies the pending
+shutdown; **Resume queue** cancels it. This is a one-time request, never a saved
+setting: ordinary idle, scheduling, RAM pause, updates and configuration do not
+arm shutdown. Configuration, maintenance, worker exit/control loss or service
+restart cancels the request. Other applications can block normal Windows
+shutdown; TranscoderD does not force-close them or automatically retry failure.

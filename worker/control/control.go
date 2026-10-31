@@ -181,6 +181,14 @@ func (s *Server) handle(conn net.Conn) {
 		if err := s.state.PersistMaxActiveJobs(req.MaxJobs); err != nil {
 			result.Error = err.Error()
 		}
+	case "finish-accepted":
+		if d, ok := s.state.(interface{ FinishAcceptedJobs() error }); ok {
+			if err := d.FinishAcceptedJobs(); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "finishing accepted work is unavailable"
+		}
 	case "drain":
 		if d, ok := s.state.(interface{ DrainAcceptedJobs() error }); ok {
 			if err := d.DrainAcceptedJobs(); err != nil {

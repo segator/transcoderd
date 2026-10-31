@@ -256,26 +256,33 @@ func prepareUpgrade() error {
 }
 
 type supervisor struct {
-	mu           sync.Mutex
-	state        desktop.Persisted
-	dir, worker  string
-	children     map[string]*exec.Cmd
-	done         map[string]chan error
-	message      string
-	pendingDrain bool
-	readyToApply bool
-	maintenance  bool
-	queue        *model.QueueSnapshot
-	queueError   string
-	pipeSuffix   string
-	systemOwner  bool
-	testCancel   context.CancelFunc
-	updates      *managed.Manager
-	updateHeld   bool
+	mu              sync.Mutex
+	state           desktop.Persisted
+	dir, worker     string
+	children        map[string]*exec.Cmd
+	done            map[string]chan error
+	message         string
+	pendingDrain    bool
+	readyToApply    bool
+	maintenance     bool
+	queue           *model.QueueSnapshot
+	queueError      string
+	pipeSuffix      string
+	systemOwner     bool
+	testCancel      context.CancelFunc
+	updates         *managed.Manager
+	updateHeld      bool
+	shutdownPending bool
+	shutdownMessage string
+	powerOff        func() error
+	workerControl   func(string, control.Request) (control.Response, error)
 }
 
 func (s *supervisor) snapshotLocked() desktop.Status {
-	status := desktop.Status{Configured: s.state.Active != nil, Running: len(s.children) > 0, Version: version.Version, Pending: s.state.Pending != nil || s.state.PendingLimit, Message: s.message, Queue: s.queue, QueueError: s.queueError, Profiles: make(map[string]control.AdmissionStatus)}
+	status := desktop.Status{ShutdownPending: s.shutdownPending, Configured: s.state.Active != nil, Running: len(s.children) > 0, Version: version.Version, Pending: s.state.Pending != nil || s.state.PendingLimit, Message: s.message, Queue: s.queue, QueueError: s.queueError, Profiles: make(map[string]control.AdmissionStatus)}
+	if s.shutdownMessage != "" {
+		status.Message = s.shutdownMessage
+	}
 	// Only isolated fixture builds can inject a failed post-install health check.
 	if managed.FixtureMode == "true" && version.Version == "v99.1.0" {
 		if _, err := os.Stat(filepath.Join(s.dir, "updates", "fixture-fail-health")); err == nil {
@@ -364,11 +371,21 @@ func (s *supervisor) allChildrenStoppedLocked() bool {
 }
 
 func (s *supervisor) handle(req desktop.Request) desktop.Response {
+	if req.Command == "stop-after-current" && !req.ShutdownAfterCurrent {
+		zero := 0
+		req.Command, req.CPUJobs, req.GPUJobs = "set-max-jobs", &zero, &zero
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := desktop.Response{}
-	if (s.maintenance || s.updatePending()) && (req.Command == "configure" || req.Command == "set-max-jobs" || req.Command == "pause-job" || req.Command == "resume-job" || req.Command == "pause-encodes" || req.Command == "resume-encodes") {
+	if (s.maintenance || s.updatePending()) && (req.Command == "stop-after-current" || req.Command == "configure" || req.Command == "set-max-jobs" || req.Command == "pause-job" || req.Command == "resume-job" || req.Command == "pause-encodes" || req.Command == "resume-encodes") {
 		result.Error = managed.LockedMessage
+		result.Status = s.snapshotLocked()
+		return result
+	}
+	if s.shutdownPending && (req.Command == "pause-job" || req.Command == "resume-job" || req.Command == "pause-encodes" || req.Command == "resume-encodes") {
+		result.Error = "Resume queue to cancel shutdown before changing encoding pauses"
 		result.Status = s.snapshotLocked()
 		return result
 	}
@@ -386,7 +403,11 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		} else {
 			go func() { time.Sleep(200 * time.Millisecond); s.testCancel() }()
 		}
+	case "stop-after-current":
+		result.Error = s.stopAfterCurrentLocked(req.ShutdownAfterCurrent)
 	case "configure":
+		s.shutdownPending = false
+		s.shutdownMessage = ""
 		if req.Settings == nil {
 			result.Error = "Settings are missing"
 			break
@@ -471,6 +492,8 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		}
 		s.state = next
 	case "set-max-jobs":
+		s.shutdownPending = false
+		s.shutdownMessage = ""
 		if s.state.Active == nil {
 			result.Error = "Configure the server first"
 			break
@@ -550,6 +573,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		}
 		s.state = next
 	case "prepare-upgrade":
+		s.shutdownPending = false
 		if s.updatePending() {
 			result.Error = managed.LockedMessage
 			break
@@ -584,6 +608,10 @@ func (s *supervisor) run(ctx context.Context) {
 	for {
 		s.mu.Lock()
 		updatePending := s.updatePending()
+		if updatePending || s.maintenance || s.state.Pending != nil || s.state.PendingLimit {
+			s.shutdownPending = false
+		}
+		s.checkShutdownLocked()
 		if updatePending {
 			s.updateHeld = true
 			if s.state.Active != nil && !s.maintenance {
@@ -778,6 +806,7 @@ func (s *supervisor) run(ctx context.Context) {
 }
 
 func (s *supervisor) onChildStoppedLocked(err error) {
+	s.shutdownPending = false
 	if s.state.Pending != nil && s.readyToApply && s.allChildrenStoppedLocked() {
 		next := s.state
 		next.Active = next.Pending

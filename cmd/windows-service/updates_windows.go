@@ -47,6 +47,7 @@ func (s *supervisor) drainForUpdate() (int, int, error) {
 	if s.maintenance {
 		return 0, 0, errors.New("manual Setup is running; automatic update is waiting")
 	}
+	s.shutdownPending = false
 	active, reserved := 0, 0
 	for _, profile := range []string{"cpu", "gpu"} {
 		if s.children[profile] == nil {

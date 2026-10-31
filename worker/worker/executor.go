@@ -29,6 +29,7 @@ type JobExecutor struct {
 	maxActiveJobs   int
 	settingsPending bool
 	admissionHeld   bool
+	finishing       bool
 	managedLimits   bool
 
 	workerConfig    *config.Config
@@ -288,7 +289,7 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 		suspended = e.encodeProcesses.Suspended()
 		for i := range jobs {
 			if state, ok := pauseStates[jobs[i].JobID]; ok && jobs[i].Phase == string(model.FFMPEGSNotification) {
-				jobs[i].CanPause = !e.admissionHeld
+				jobs[i].CanPause = !e.admissionHeld && !e.finishing
 				jobs[i].IndividuallyPaused = state.Individual
 				jobs[i].PausedByWorker = state.General
 				if state.Paused {
@@ -302,7 +303,7 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 		mode = config.PauseFinish
 	}
 	return AdmissionStatus{
-		Accepting:        !e.admissionHeld && !e.settingsPending && !e.ramPaused && e.maxActiveJobs > 0 && withinSchedule,
+		Accepting:        !e.admissionHeld && !e.finishing && !e.settingsPending && !e.ramPaused && e.maxActiveJobs > 0 && withinSchedule,
 		RAMPaused:        !e.admissionHeld && (e.ramPaused || (e.maxActiveJobs == 0 && e.pauseMode == config.PauseRAM)),
 		ActiveJobs:       e.ActiveJobs(),
 		ReservedJobs:     e.reservedJobs,
@@ -334,6 +335,7 @@ func (e *JobExecutor) applyLimitLocked(max int, mode string, ram bool) error {
 			return err
 		}
 	}
+	e.finishing = false
 	e.maxActiveJobs = max
 	e.pauseMode = mode
 	e.ramPaused = ram
@@ -341,7 +343,7 @@ func (e *JobExecutor) applyLimitLocked(max int, mode string, ram bool) error {
 		if max > 0 {
 			e.encodePool.SetTarget(max)
 		}
-		e.encodePool.SetPaused((ram || max == 0 || e.settingsPending) && !e.admissionHeld)
+		e.encodePool.SetPaused((ram || max == 0 || e.settingsPending) && !e.admissionHeld && !e.finishing)
 	}
 	return nil
 }
@@ -355,10 +357,29 @@ func (e *JobExecutor) SetRAMPaused(paused bool) error {
 	}
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
-	if e.admissionHeld {
+	if e.admissionHeld || e.finishing {
 		return errors.New("RAM pause is unavailable while accepted work drains")
 	}
 	return e.applyLimitLocked(e.maxActiveJobs, config.PauseFinish, paused)
+}
+
+// FinishAcceptedJobs is an operator hold released by the next explicit limit change.
+func (e *JobExecutor) FinishAcceptedJobs() error {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	if e.encodeProcesses != nil {
+		if err := e.encodeProcesses.ResumeAll(); err != nil {
+			return err
+		}
+	}
+	e.finishing = true
+	e.pauseMode = config.PauseFinish
+	e.ramPaused = false
+	e.maxActiveJobs = 0
+	if e.encodePool != nil {
+		e.encodePool.SetPaused(false)
+	}
+	return nil
 }
 
 // DrainAcceptedJobs closes requests but permits queued encodes to finish.
@@ -408,7 +429,7 @@ func (e *JobExecutor) persistLimit(max int, admissionOnly bool) error {
 	e.admissionMu.Lock()
 	mode, ram := e.pauseMode, e.ramPaused
 	if admissionOnly {
-		ram = ram || (e.maxActiveJobs == 0 && mode == config.PauseRAM && !e.admissionHeld)
+		ram = ram || (e.maxActiveJobs == 0 && mode == config.PauseRAM && !e.admissionHeld && !e.finishing)
 		mode = config.PauseFinish
 	}
 	err := e.applyLimitLocked(max, mode, ram)
@@ -452,7 +473,7 @@ func (e *JobExecutor) MarkWorkerSettingsResolved() {
 	defer e.admissionMu.Unlock()
 	e.settingsPending = false
 	if e.encodePool != nil {
-		e.encodePool.SetPaused((e.maxActiveJobs == 0 || e.ramPaused) && !e.admissionHeld)
+		e.encodePool.SetPaused((e.maxActiveJobs == 0 || e.ramPaused) && !e.admissionHeld && !e.finishing)
 	}
 }
 
@@ -467,7 +488,7 @@ func (e *JobExecutor) ReserveJobSlot() bool {
 }
 
 func (e *JobExecutor) canReserveJobSlotAt(now time.Time) bool {
-	if e.admissionHeld || e.settingsPending || e.ramPaused || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
+	if e.admissionHeld || e.finishing || e.settingsPending || e.ramPaused || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
 		return false
 	}
 	encodeTarget := e.maxActiveJobs
@@ -689,7 +710,7 @@ func (e *JobExecutor) SetPauseMode(value string) error {
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
 	if e.encodeProcesses != nil {
-		if err := e.encodeProcesses.SetPaused((e.ramPaused || (mode == config.PauseRAM && e.maxActiveJobs == 0)) && !e.admissionHeld); err != nil {
+		if err := e.encodeProcesses.SetPaused((e.ramPaused || (mode == config.PauseRAM && e.maxActiveJobs == 0)) && !e.admissionHeld && !e.finishing); err != nil {
 			return err
 		}
 	}
@@ -708,7 +729,7 @@ func (e *JobExecutor) SetJobPaused(jobID string, paused bool) error {
 	}
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()
-	if e.admissionHeld {
+	if e.admissionHeld || e.finishing {
 		return errors.New("individual pause is unavailable while accepted work drains")
 	}
 	if e.encodeProcesses == nil {

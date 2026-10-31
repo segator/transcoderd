@@ -155,8 +155,12 @@ internal sealed class MainForm : Form
             string command = root.GetProperty("command").GetString() ?? "";
             if (command == "show-window") { if (!smoke) ShowWindow(); Reply(id, true, "{}"); return; }
             if (command == "start-service") { StartService(); Reply(id, true, "{}"); return; }
-            if (command is not ("status" or "configure" or "set-max-jobs" or "pause-job" or "resume-job" or "pause-encodes" or "resume-encodes" or "check-update")) throw new InvalidOperationException("Command not allowed");
-            if (!configurationAllowed && (command is "configure" or "set-max-jobs" or "pause-job" or "resume-job" or "pause-encodes" or "resume-encodes")) throw new InvalidOperationException("Configuration is locked until the mandatory update completes or service status is confirmed.");
+            if (command == "confirm-shutdown") {
+ bool yes = MessageBox.Show(this, "Shut down this PC after all accepted jobs finish?\n\nYes finishes accepted jobs, including queued encodes and uploads, then shuts down Windows. No only stops the queue. Resume queue cancels a pending shutdown.", "Stop after current", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+ Reply(id, true, JsonSerializer.Serialize(new { shutdownAfterCurrent = yes })); return;
+ }
+ if (command is not ("stop-after-current" or "status" or "configure" or "set-max-jobs" or "pause-job" or "resume-job" or "pause-encodes" or "resume-encodes" or "check-update")) throw new InvalidOperationException("Command not allowed");
+            if (!configurationAllowed && (command is "stop-after-current" or "configure" or "set-max-jobs" or "pause-job" or "resume-job" or "pause-encodes" or "resume-encodes")) throw new InvalidOperationException("Configuration is locked until the mandatory update completes or service status is confirmed.");
             string response = await client.SendAsync(root.GetRawText());
             using var result = JsonDocument.Parse(response);
             if (command == "status" && result.RootElement.TryGetProperty("status", out var serviceStatus)) {
@@ -179,7 +183,8 @@ internal sealed class MainForm : Form
     private async Task SetPaused(bool paused)
     {
         if (!configurationAllowed) { ShowWindow(); return; }
-        try { var response = await client.SendAsync(JsonSerializer.Serialize(new { command = "set-max-jobs", cpuJobs = paused ? 0 : lastCPU, gpuJobs = paused ? 0 : lastGPU })); using var doc = JsonDocument.Parse(response); if (doc.RootElement.TryGetProperty("error", out var error) && error.GetString() is { Length: > 0 } text) throw new IOException(text); }
+        bool shutdown = paused && MessageBox.Show(this, "Shut down this PC after all accepted jobs finish?\n\nYes finishes queued encodes and uploads before shutdown. No only stops the queue. Resume queue cancels shutdown.", "Stop after current", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+        try { var response = await client.SendAsync(JsonSerializer.Serialize(new { command = paused ? "stop-after-current" : "set-max-jobs", shutdownAfterCurrent = shutdown, cpuJobs = paused ? 0 : lastCPU, gpuJobs = paused ? 0 : lastGPU })); using var doc = JsonDocument.Parse(response); if (doc.RootElement.TryGetProperty("error", out var error) && error.GetString() is { Length: > 0 } text) throw new IOException(text); }
         catch { ShowWindow(); }
     }
     private async Task SetEncodesPaused(bool paused)

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.10.0](https://github.com/segator/transcoderd/compare/v2.9.0...v2.10.0) (2026-10-31)
+
+
+### 🎉 Features
+
+* **worker:** add independent queue and RAM pause controls ([#194](https://github.com/segator/transcoderd/issues/194)) ([7ad0300](https://github.com/segator/transcoderd/commit/7ad030089cd93b9ef7142ca502f1bb8c780e1926))
+
 ## [2.9.0](https://github.com/segator/transcoderd/compare/v2.8.1...v2.9.0) (2026-10-28)
 
 

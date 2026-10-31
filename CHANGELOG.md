@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.0](https://github.com/segator/transcoderd/compare/v2.10.0...v2.11.0) (2026-10-31)
+
+
+### 🎉 Features
+
+* **windows:** offer explicit shutdown after accepted work ([#196](https://github.com/segator/transcoderd/issues/196)) ([ce73e86](https://github.com/segator/transcoderd/commit/ce73e86a2fe7715c54cecc47a74a975872b7a84e))
+
 ## [2.10.0](https://github.com/segator/transcoderd/compare/v2.9.0...v2.10.0) (2026-10-31)
 
 

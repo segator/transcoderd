@@ -66,7 +66,7 @@ func (s *supervisor) drainForUpdate() (int, int, error) {
 }
 
 func (s *supervisor) startProfileLocked(profile desktop.Profile, held bool) error {
-	if err := desktop.WorkerConfigForProfile(s.dir, *s.state.Active, profile, s.state.Paused); err != nil {
+	if err := desktop.WorkerConfigForProfile(s.dir, *s.state.Active, profile, s.state.Paused, s.state.RAMPaused); err != nil {
 		return err
 	}
 	cmd := exec.Command(s.worker, "--noUpdates")

@@ -106,11 +106,27 @@ Windows installer lifecycle.
 
 Worker status includes `paused`, indicating whether queued FFmpeg starts are
 held. Operator `set-max-jobs 0` persists zero, stops new requests and queued
-encodes, and lets running encodes, verification and uploads finish. Positive
+encodes, and applies the configured `pauseMode` to active encodes while verification and uploads finish. Positive
 values resume at that encode target. The admission ceiling is the effective
 encode target plus one accepted pipeline job per profile, including reservations.
 Windows service workers synchronize their service-owned targets before admission
 instead of loading older server overrides. Paused Windows startup holds restored
 encodes too. Internal `drain` and `hold-admission` permit accepted queued work to
-finish without persisting a change to the user's pause preference. The mandatory
+finish, resuming any RAM-suspended encoder first, without persisting a change to the user's pause preference. The mandatory
 update/configuration lifecycle owns those temporary maintenance transitions.
+
+Local `set-pause-mode` accepts `pauseMode: "finish"` or `"ram"`. Runtime status includes `pauseMode` (default `finish`) and `suspendedEncodes` (actual owned suspended encoding process count); the corresponding `jobs` entries use `state: "paused"`. Existing `activeEncodes` includes the occupied encoding slots, including suspended ones. Desktop public settings include `pauseMode`; it is saved in the protected service configuration. HTTP server worker-settings payloads remain unchanged. No durable process or chunk checkpoints are exposed.
+
+## Individual encoding control
+
+Local `pause-job` and `resume-job` commands carry `jobId` (a job UUID), with CLI forms `control pause-job <UUID>` and `control resume-job <UUID>`. The worker resolves only owned active encoding processes. The desktop service resolves the owning CPU/GPU profile from live snapshots; callers cannot select a PID or trusted profile. Stale jobs and maintenance/pending-reconfiguration controls fail.
+
+The authenticated optional browser dashboard exposes `POST /api/worker/jobs/{jobId}/pause` and `/resume`, protected by its existing dashboard bearer token. Invalid UUIDs return 400, unknown/noncontrollable encodes 404, and rejected transitions 409. The routes return the refreshed worker status on success.
+
+Job status includes `canPause`, `individuallyPaused` and `pausedByWorker`. An individual hold uses RAM pause regardless of the general pause mode, retains its occupied slot, and does not alter admission or limits. General Resume does not clear individual holds. Individual Resume cannot bypass a general hold. Maintenance clears live holds so accepted encodes can finish and blocks further individual mutations.
+
+## Independent queue and RAM controls
+
+Local `set-admission-limit` carries `maxJobs` and persists a finish-active admission limit. Local `pause-encodes` / `resume-encodes` suspend or resume owned encoding processes immediately without changing the admission limit. Runtime status exposes `ramPaused` independently of `maxActiveJobs`; zero limit still identifies a stopped queue. Both holds gate new assignments/starts and releasing either preserves the other and individual job holds.
+
+The optional authenticated dashboard's existing `/api/worker/max-jobs` route now uses the explicit admission operation; `POST /api/worker/encodes/pause` and `/resume` use the RAM operation. The desktop bridge accepts the same RAM commands and saves `ramPaused` separately from its existing `paused` queue preference. Generated profile config carries `worker.ramPaused` and finish zero-limit policy. Both preferences are restored before accepting work, while maintenance temporarily releases live suspensions and preserves the saved preferences.

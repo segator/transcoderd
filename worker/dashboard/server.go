@@ -16,6 +16,8 @@ import (
 
 	"transcoder/version"
 	"transcoder/worker/control"
+
+	"github.com/google/uuid"
 )
 
 //go:embed wwwroot/*
@@ -63,12 +65,53 @@ func Start(address, token string, worker admissionController) (*Server, error) {
 			http.Error(w, `{"error":"maxJobs must be an integer between 0 and 1024"}`, http.StatusBadRequest)
 			return
 		}
-		if err := worker.PersistMaxActiveJobs(req.MaxJobs); err != nil {
+		setLimit := worker.PersistMaxActiveJobs
+		if controller, ok := worker.(interface{ PersistAdmissionLimit(int) error }); ok {
+			setLimit = controller.PersistAdmissionLimit
+		}
+		if err := setLimit(req.MaxJobs); err != nil {
 			http.Error(w, `{"error":"worker could not apply the admission limit"}`, http.StatusConflict)
 			return
 		}
 		writeJSON(w, statusResponse{Configured: true, Running: true, Version: version.Version, Worker: worker.AdmissionStatus()})
 	}))
+	for _, action := range []string{"pause", "resume"} {
+		mux.HandleFunc("POST /api/worker/encodes/"+action, authorize(token, func(w http.ResponseWriter, r *http.Request) {
+			controller, ok := worker.(interface{ SetRAMPaused(bool) error })
+			if !ok {
+				http.Error(w, `{"error":"RAM encoding control is unavailable"}`, http.StatusServiceUnavailable)
+				return
+			}
+			if err := controller.SetRAMPaused(action == "pause"); err != nil {
+				http.Error(w, `{"error":"cannot change RAM pause during maintenance"}`, http.StatusConflict)
+				return
+			}
+			writeJSON(w, statusResponse{Configured: true, Running: true, Version: version.Version, Worker: worker.AdmissionStatus()})
+		}))
+	}
+	for _, action := range []string{"pause", "resume"} {
+		mux.HandleFunc("POST /api/worker/jobs/{jobID}/"+action, authorize(token, func(w http.ResponseWriter, r *http.Request) {
+			id, err := uuid.Parse(r.PathValue("jobID"))
+			if err != nil {
+				http.Error(w, `{"error":"invalid encoding job ID"}`, http.StatusBadRequest)
+				return
+			}
+			controller, ok := worker.(interface{ SetJobPaused(string, bool) error })
+			if !ok {
+				http.Error(w, `{"error":"individual encoding control is unavailable"}`, http.StatusServiceUnavailable)
+				return
+			}
+			if err := controller.SetJobPaused(id.String(), action == "pause"); err != nil {
+				code := http.StatusConflict
+				if errors.Is(err, control.ErrJobNotPausable) {
+					code = http.StatusNotFound
+				}
+				http.Error(w, `{"error":"encoding is no longer active or cannot be controlled during maintenance"}`, code)
+				return
+			}
+			writeJSON(w, statusResponse{Configured: true, Running: true, Version: version.Version, Worker: worker.AdmissionStatus()})
+		}))
+	}
 	webroot, err := fs.Sub(assets, "wwwroot")
 	if err != nil {
 		_ = listener.Close()

@@ -19,6 +19,7 @@ var (
 )
 
 type Settings struct {
+	PauseMode        string `json:"pauseMode,omitempty"`
 	Domain           string `json:"domain"`
 	Token            string `json:"token,omitempty"`
 	Name             string `json:"name"`
@@ -34,6 +35,7 @@ type Settings struct {
 }
 
 type PublicSettings struct {
+	PauseMode        string   `json:"pauseMode"`
 	Domain           string   `json:"domain"`
 	TokenSet         bool     `json:"tokenSet"`
 	Name             string   `json:"name"`
@@ -47,10 +49,13 @@ type PublicSettings struct {
 
 func (s Settings) Public() PublicSettings {
 	s = s.Normalized()
-	return PublicSettings{Domain: s.Domain, TokenSet: s.Token != "", Name: s.Name, WorkingDirectory: s.WorkingDirectory, CPUCodec: s.CPUCodec, CPUJobs: s.CPUJobs, GPUCodec: s.GPUCodec, GPUJobs: s.GPUJobs, Schedule: s.Schedule}
+	return PublicSettings{PauseMode: s.PauseMode, Domain: s.Domain, TokenSet: s.Token != "", Name: s.Name, WorkingDirectory: s.WorkingDirectory, CPUCodec: s.CPUCodec, CPUJobs: s.CPUJobs, GPUCodec: s.GPUCodec, GPUJobs: s.GPUJobs, Schedule: s.Schedule}
 }
 
 func (s Settings) Normalized() Settings {
+	if s.PauseMode == "" || s.PauseMode == workerconfig.PauseFinish {
+		s.PauseMode = workerconfig.PauseRAM
+	}
 	if s.CPUCodec == "" && s.GPUCodec == "" && (s.Codec != "" || s.MaxJobs != 0) {
 		if s.Codec == workerconfig.AV1NVENC {
 			s.GPUCodec, s.GPUJobs = s.Codec, s.MaxJobs
@@ -111,7 +116,7 @@ func (s Settings) Validate() error {
 		return errors.New("CPU profile cannot use AV1 NVENC")
 	}
 	for _, profile := range s.Profiles() {
-		c := &workerconfig.Config{MaxActiveJobs: profile.Jobs, EncodeConfig: &workerconfig.FFMPEGConfig{VideoCodec: profile.Codec}, Schedule: &workerconfig.ScheduleConfig{TimeZone: "Local", Windows: s.Schedule}}
+		c := &workerconfig.Config{PauseMode: s.PauseMode, MaxActiveJobs: profile.Jobs, EncodeConfig: &workerconfig.FFMPEGConfig{VideoCodec: profile.Codec}, Schedule: &workerconfig.ScheduleConfig{TimeZone: "Local", Windows: s.Schedule}}
 		if err := c.Validate(); err != nil {
 			return fmt.Errorf("%s profile: %w", profile.Key, err)
 		}
@@ -120,6 +125,7 @@ func (s Settings) Validate() error {
 }
 
 type Persisted struct {
+	RAMPaused    bool      `json:"ramPaused,omitempty"`
 	Active       *Settings `json:"active,omitempty"`
 	Pending      *Settings `json:"pending,omitempty"`
 	PendingLimit bool      `json:"pendingLimit,omitempty"`
@@ -193,11 +199,12 @@ func writeAtomic(dir, filename string, data []byte) error {
 
 // WorkerConfig is JSON, which Viper accepts as YAML, and never puts the token in argv.
 func WorkerConfig(dir string, s Settings) error {
-	value := map[string]any{"web": map[string]any{"domain": s.Domain, "token": s.Token}, "worker": map[string]any{"name": s.Name, "maxActiveJobs": s.MaxJobs, "temporalPath": filepath.Join(dir, "work"), "ffmpegConfig": map[string]any{"videoCodec": s.Codec}, "schedule": map[string]any{"timeZone": "Local", "windows": s.Schedule}}}
+	value := map[string]any{"web": map[string]any{"domain": s.Domain, "token": s.Token}, "worker": map[string]any{"pauseMode": s.Normalized().PauseMode, "name": s.Name, "maxActiveJobs": s.MaxJobs, "temporalPath": filepath.Join(dir, "work"), "ffmpegConfig": map[string]any{"videoCodec": s.Codec}, "schedule": map[string]any{"timeZone": "Local", "windows": s.Schedule}}}
 	return writeWorkerConfig(filepath.Join(dir, "config.yaml"), value)
 }
 
-func WorkerConfigForProfile(dir string, s Settings, profile Profile, paused bool) error {
+func WorkerConfigForProfile(dir string, s Settings, profile Profile, paused bool, ramPaused ...bool) error {
+	ram := len(ramPaused) > 0 && ramPaused[0]
 	maxJobs := profile.Jobs
 	if paused {
 		maxJobs = 0
@@ -206,7 +213,7 @@ func WorkerConfigForProfile(dir string, s Settings, profile Profile, paused bool
 	if workingDirectory == "" {
 		workingDirectory = filepath.Join(dir, "work")
 	}
-	value := map[string]any{"web": map[string]any{"domain": s.Domain, "token": s.Token}, "worker": map[string]any{"name": profile.Name, "maxActiveJobs": maxJobs, "temporalPath": workingDirectory, "ffmpegConfig": map[string]any{"videoCodec": profile.Codec, "parallelJobs": max(1, profile.Jobs)}, "schedule": map[string]any{"timeZone": "Local", "windows": s.Schedule}}}
+	value := map[string]any{"web": map[string]any{"domain": s.Domain, "token": s.Token}, "worker": map[string]any{"pauseMode": workerconfig.PauseFinish, "ramPaused": ram, "name": profile.Name, "maxActiveJobs": maxJobs, "temporalPath": workingDirectory, "ffmpegConfig": map[string]any{"videoCodec": profile.Codec, "parallelJobs": max(1, profile.Jobs)}, "schedule": map[string]any{"timeZone": "Local", "windows": s.Schedule}}}
 	return writeWorkerConfig(filepath.Join(dir, "config-"+profile.Key+".yaml"), value)
 }
 

@@ -115,6 +115,14 @@ func (c *Config) Validate() error {
 	if c == nil {
 		return fmt.Errorf("worker configuration is required")
 	}
+	if c.RAMPaused {
+		if _, err := ResolvePauseMode(PauseRAM); err != nil {
+			return err
+		}
+	}
+	if _, err := ResolvePauseMode(c.PauseMode); err != nil {
+		return err
+	}
 	if c.MaxActiveJobs < 0 {
 		return fmt.Errorf("worker.maxActiveJobs must be non-negative, got %d", c.MaxActiveJobs)
 	}

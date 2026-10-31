@@ -28,7 +28,9 @@ func TestInitialMaximumDefaultsToTwo(t *testing.T) {
 
 func TestManagedAdmissionHoldSurvivesPersistedLimits(t *testing.T) {
 	worker := testAdmissionWorker(2)
-	worker.HoldAdmission()
+	if err := worker.HoldAdmission(); err != nil {
+		t.Fatal(err)
+	}
 	worker.RequireWorkerSettings()
 	if err := worker.SetMaxActiveJobs(4); err != nil {
 		t.Fatal(err)

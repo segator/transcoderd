@@ -64,7 +64,7 @@ func TestMaintenanceDrainsPausedAcceptedEncodes(t *testing.T) {
 		drain func(*JobExecutor) error
 	}{
 		{"configuration drain", (*JobExecutor).DrainAcceptedJobs},
-		{"mandatory update hold", func(w *JobExecutor) error { w.HoldAdmission(); return nil }},
+		{"mandatory update hold", (*JobExecutor).HoldAdmission},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -181,10 +181,11 @@ func TestStartRejectsActiveSocketAndRemovesStaleSocket(t *testing.T) {
 	_ = server.Close()
 }
 
-func (f *fakeController) HoldAdmission() {
+func (f *fakeController) HoldAdmission() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.status.Accepting = false
+	return nil
 }
 
 func TestMandatoryHoldPreservesLimitsAndAcceptedWork(t *testing.T) {
@@ -201,5 +202,104 @@ func TestMandatoryHoldPreservesLimitsAndAcceptedWork(t *testing.T) {
 	}
 	if got.Status.Accepting || got.Status.MaxActiveJobs != 4 || got.Status.ActiveJobs != 3 || got.Status.ReservedJobs != 1 || state.persisted != 0 {
 		t.Fatalf("mandatory hold changed accepted work/limits: %+v", got.Status)
+	}
+}
+
+func (f *fakeController) SetPauseMode(mode string) error {
+	if mode != "ram" && mode != "finish" {
+		return os.ErrInvalid
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status.PauseMode = mode
+	return nil
+}
+
+func TestControlChangesPauseMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pause.sock")
+	state := &fakeController{}
+	server, err := Start(path, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	var output bytes.Buffer
+	if err := runCLI([]string{"set-pause-mode", "ram"}, &output, path); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.AdmissionStatus().PauseMode; got != "ram" {
+		t.Fatalf("pause mode=%s,want ram", got)
+	}
+	if !strings.Contains(output.String(), "pause mode set to ram") {
+		t.Fatalf("mode output=%s", output.String())
+	}
+	if err := runCLI([]string{"set-pause-mode", "chunked"}, &output, path); err == nil {
+		t.Fatal("invalid mode accepted")
+	}
+}
+
+func (f *fakeController) SetJobPaused(jobID string, paused bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.status.Jobs {
+		j := &f.status.Jobs[i]
+		if j.JobID == jobID && j.CanPause {
+			j.IndividuallyPaused = paused
+			return nil
+		}
+	}
+	return ErrJobNotPausable
+}
+
+func TestIndividualEncodeLocalControls(t *testing.T) {
+	const first = "00000000-0000-4000-8000-000000000001"
+	const second = "00000000-0000-4000-8000-000000000002"
+	state := &fakeController{status: AdmissionStatus{MaxActiveJobs: 2, Jobs: []JobState{{JobID: first, CanPause: true}, {JobID: second, CanPause: true}}}}
+	path := filepath.Join(t.TempDir(), "individual.sock")
+	server, err := Start(path, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	if err := runCLI([]string{"pause-job", first}, &bytes.Buffer{}, path); err != nil {
+		t.Fatal(err)
+	}
+	status := state.AdmissionStatus()
+	if !status.Jobs[0].IndividuallyPaused || status.Jobs[1].IndividuallyPaused || status.MaxActiveJobs != 2 || state.persisted != 0 {
+		t.Fatalf("individual pause changed other work: %+v", status)
+	}
+	if err := runCLI([]string{"resume-job", first}, &bytes.Buffer{}, path); err != nil {
+		t.Fatal(err)
+	}
+	if state.AdmissionStatus().Jobs[0].IndividuallyPaused {
+		t.Fatal("individual Resume retained its hold")
+	}
+	if _, err := Call(path, Request{Command: "pause-job", JobID: "unknown"}); err == nil {
+		t.Fatal("stale job accepted")
+	}
+}
+
+func (f *fakeController) SetRAMPaused(paused bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status.RAMPaused = paused
+	return nil
+}
+func (f *fakeController) PersistAdmissionLimit(max int) error { return f.PersistMaxActiveJobs(max) }
+func TestSeparateRAMPauseCommandsDoNotChangeLimits(t *testing.T) {
+	state := &fakeController{status: AdmissionStatus{MaxActiveJobs: 4}}
+	path := filepath.Join(t.TempDir(), "ram-control.sock")
+	server, err := Start(path, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	for _, command := range []string{"pause-encodes", "resume-encodes"} {
+		if err := runCLI([]string{command}, &bytes.Buffer{}, path); err != nil {
+			t.Fatal(err)
+		}
+		if state.AdmissionStatus().RAMPaused != (command == "pause-encodes") || state.AdmissionStatus().MaxActiveJobs != 4 || state.persisted != 0 {
+			t.Fatal("RAM control changed admission limit")
+		}
 	}
 }

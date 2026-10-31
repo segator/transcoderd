@@ -13,30 +13,38 @@ import (
 	"time"
 )
 
+var ErrJobNotPausable = errors.New("job has no active controllable encoding")
+
 const controlRequestTimeout = 15 * time.Second
 
 type AdmissionStatus struct {
-	Accepting       bool           `json:"accepting"`
-	ActiveJobs      uint32         `json:"activeJobs"`
-	ReservedJobs    int            `json:"reservedJobs"`
-	MaxActiveJobs   int            `json:"maxActiveJobs"`
-	MaxAcceptedJobs int            `json:"maxAcceptedJobs"`
-	ActiveEncodes   int            `json:"activeEncodes"`
-	MaxEncodes      int            `json:"maxEncodes"`
-	WithinSchedule  bool           `json:"withinSchedule"`
-	Paused          bool           `json:"paused"`
-	Progress        []TaskProgress `json:"progress,omitempty"`
-	Jobs            []JobState     `json:"jobs,omitempty"`
+	RAMPaused        bool           `json:"ramPaused"`
+	PauseMode        string         `json:"pauseMode"`
+	SuspendedEncodes int            `json:"suspendedEncodes"`
+	Accepting        bool           `json:"accepting"`
+	ActiveJobs       uint32         `json:"activeJobs"`
+	ReservedJobs     int            `json:"reservedJobs"`
+	MaxActiveJobs    int            `json:"maxActiveJobs"`
+	MaxAcceptedJobs  int            `json:"maxAcceptedJobs"`
+	ActiveEncodes    int            `json:"activeEncodes"`
+	MaxEncodes       int            `json:"maxEncodes"`
+	WithinSchedule   bool           `json:"withinSchedule"`
+	Paused           bool           `json:"paused"`
+	Progress         []TaskProgress `json:"progress,omitempty"`
+	Jobs             []JobState     `json:"jobs,omitempty"`
 }
 
 type JobState struct {
-	JobID      string `json:"jobId"`
-	Name       string `json:"name,omitempty"`
-	Profile    string `json:"profile,omitempty"`
-	Codec      string `json:"codec,omitempty"`
-	Phase      string `json:"phase"`
-	State      string `json:"state"`
-	Downloaded bool   `json:"downloaded"`
+	PausedByWorker     bool   `json:"pausedByWorker"`
+	CanPause           bool   `json:"canPause"`
+	IndividuallyPaused bool   `json:"individuallyPaused"`
+	JobID              string `json:"jobId"`
+	Name               string `json:"name,omitempty"`
+	Profile            string `json:"profile,omitempty"`
+	Codec              string `json:"codec,omitempty"`
+	Phase              string `json:"phase"`
+	State              string `json:"state"`
+	Downloaded         bool   `json:"downloaded"`
 }
 
 type TaskProgress struct {
@@ -63,8 +71,10 @@ type AdmissionController interface {
 }
 
 type Request struct {
-	Command string `json:"command"`
-	MaxJobs int    `json:"maxJobs,omitempty"`
+	JobID     string `json:"jobId,omitempty"`
+	PauseMode string `json:"pauseMode,omitempty"`
+	Command   string `json:"command"`
+	MaxJobs   int    `json:"maxJobs,omitempty"`
 }
 
 type Response struct {
@@ -128,10 +138,44 @@ func (s *Server) handle(conn net.Conn) {
 	switch req.Command {
 	case "status":
 	case "hold-admission":
-		if h, ok := s.state.(interface{ HoldAdmission() }); ok {
-			h.HoldAdmission()
+		if h, ok := s.state.(interface{ HoldAdmission() error }); ok {
+			if err := h.HoldAdmission(); err != nil {
+				result.Error = err.Error()
+			}
 		} else {
 			result.Error = "mandatory admission hold is unavailable"
+		}
+	case "pause-job", "resume-job":
+		if p, ok := s.state.(interface{ SetJobPaused(string, bool) error }); ok {
+			if err := p.SetJobPaused(req.JobID, req.Command == "pause-job"); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "individual encoding control is unavailable"
+		}
+	case "set-pause-mode":
+		if p, ok := s.state.(interface{ SetPauseMode(string) error }); ok {
+			if err := p.SetPauseMode(req.PauseMode); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "pause mode control is unavailable"
+		}
+	case "pause-encodes", "resume-encodes":
+		if p, ok := s.state.(interface{ SetRAMPaused(bool) error }); ok {
+			if err := p.SetRAMPaused(req.Command == "pause-encodes"); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "RAM encoding control is unavailable"
+		}
+	case "set-admission-limit":
+		if p, ok := s.state.(interface{ PersistAdmissionLimit(int) error }); ok {
+			if err := p.PersistAdmissionLimit(req.MaxJobs); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "independent admission control is unavailable"
 		}
 	case "set-max-jobs":
 		if err := s.state.PersistMaxActiveJobs(req.MaxJobs); err != nil {
@@ -179,15 +223,25 @@ func ConfiguredPath() string {
 
 func runCLI(args []string, output io.Writer, socketPath string) error {
 	if len(args) == 0 {
-		return errors.New("usage: transcoderd-worker control status|set-max-jobs <N>")
+		return errors.New("usage: transcoderd-worker control status|set-max-jobs <N>|set-admission-limit <N>|pause-encodes|resume-encodes|set-pause-mode <finish|ram>|pause-job|resume-job <job UUID>")
 	}
 	req := Request{Command: args[0]}
 	switch req.Command {
-	case "status":
+	case "status", "pause-encodes", "resume-encodes":
 		if len(args) != 1 {
 			return fmt.Errorf("usage: transcoderd-worker control %s", req.Command)
 		}
-	case "set-max-jobs":
+	case "pause-job", "resume-job":
+		if len(args) != 2 || args[1] == "" {
+			return errors.New("usage: transcoderd-worker control pause-job|resume-job <job UUID>")
+		}
+		req.JobID = args[1]
+	case "set-pause-mode":
+		if len(args) != 2 || (args[1] != "finish" && args[1] != "ram") {
+			return errors.New("usage: transcoderd-worker control set-pause-mode <finish|ram>")
+		}
+		req.PauseMode = args[1]
+	case "set-max-jobs", "set-admission-limit":
 		if len(args) != 2 {
 			return errors.New("usage: transcoderd-worker control set-max-jobs <non-negative integer>")
 		}
@@ -204,7 +258,19 @@ func runCLI(args []string, output io.Writer, socketPath string) error {
 		return err
 	}
 	if req.Command == "status" {
-		_, err = fmt.Fprintf(output, "accepting=%t active=%d reserved=%d max_jobs=%d admitted_limit=%d encodes=%d/%d within_schedule=%t paused=%t\n", result.Status.Accepting, result.Status.ActiveJobs, result.Status.ReservedJobs, result.Status.MaxActiveJobs, result.Status.MaxAcceptedJobs, result.Status.ActiveEncodes, result.Status.MaxEncodes, result.Status.WithinSchedule, result.Status.Paused)
+		_, err = fmt.Fprintf(output, "accepting=%t active=%d reserved=%d max_jobs=%d admitted_limit=%d encodes=%d/%d within_schedule=%t paused=%t ram_paused=%t pause_mode=%s suspended_encodes=%d\n", result.Status.Accepting, result.Status.ActiveJobs, result.Status.ReservedJobs, result.Status.MaxActiveJobs, result.Status.MaxAcceptedJobs, result.Status.ActiveEncodes, result.Status.MaxEncodes, result.Status.WithinSchedule, result.Status.Paused, result.Status.RAMPaused, result.Status.PauseMode, result.Status.SuspendedEncodes)
+		return err
+	}
+	if req.Command == "pause-encodes" || req.Command == "resume-encodes" {
+		_, err = fmt.Fprintf(output, "ram_paused=%t; max_jobs=%d; suspended_encodes=%d\n", result.Status.RAMPaused, result.Status.MaxActiveJobs, result.Status.SuspendedEncodes)
+		return err
+	}
+	if req.Command == "pause-job" || req.Command == "resume-job" {
+		_, err = fmt.Fprintf(output, "%s applied to %s; suspended_encodes=%d\n", req.Command, req.JobID, result.Status.SuspendedEncodes)
+		return err
+	}
+	if req.Command == "set-pause-mode" {
+		_, err = fmt.Fprintf(output, "pause mode set to %s; suspended_encodes=%d\n", result.Status.PauseMode, result.Status.SuspendedEncodes)
 		return err
 	}
 	_, err = fmt.Fprintf(output, "max jobs set to %d; admitted_limit=%d; accepting=%t encodes=%d/%d\n", result.Status.MaxActiveJobs, result.Status.MaxAcceptedJobs, result.Status.Accepting, result.Status.ActiveEncodes, result.Status.MaxEncodes)

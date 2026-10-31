@@ -106,3 +106,101 @@ func TestDashboardRequiresTokenWhenEnabled(t *testing.T) {
 		t.Fatal("dashboard started without a token")
 	}
 }
+
+func (w *testWorker) SetJobPaused(jobID string, paused bool) error {
+	for i := range w.status.Jobs {
+		j := &w.status.Jobs[i]
+		if j.JobID == jobID && j.CanPause {
+			j.IndividuallyPaused = paused
+			j.State = "running"
+			if paused {
+				j.State = "paused"
+			}
+			return nil
+		}
+	}
+	return control.ErrJobNotPausable
+}
+
+func TestIndividualEncodingHTTPControls(t *testing.T) {
+	const id = "00000000-0000-4000-8000-000000000001"
+	worker := &testWorker{status: control.AdmissionStatus{MaxActiveJobs: 2, Jobs: []control.JobState{{JobID: id, Phase: "FFMPEG", State: "running", CanPause: true}}}}
+	server, err := Start("127.0.0.1:0", "secret", worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := server.Shutdown(); err != nil {
+			t.Error(err)
+		}
+	}()
+	go func() {
+		if err := server.Serve(); err != nil {
+			t.Error(err)
+		}
+	}()
+	for _, tt := range []struct {
+		suffix, token string
+		want          int
+		paused        bool
+	}{
+		{id + "/pause", "", 401, false}, {id + "/pause", "secret", 200, true}, {id + "/resume", "secret", 200, false},
+		{"00000000-0000-4000-8000-000000000002/pause", "secret", 404, false}, {"invalid/pause", "secret", 400, false},
+	} {
+		request, err := http.NewRequest(http.MethodPost, "http://"+server.listener.Addr().String()+"/api/worker/jobs/"+tt.suffix, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+tt.token)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != tt.want || worker.status.Jobs[0].IndividuallyPaused != tt.paused || worker.status.MaxActiveJobs != 2 {
+			t.Fatalf("%s=%d state=%+v,want %d paused %t", tt.suffix, response.StatusCode, worker.status, tt.want, tt.paused)
+		}
+	}
+}
+
+func (w *testWorker) SetRAMPaused(paused bool) error      { w.status.RAMPaused = paused; return nil }
+func (w *testWorker) PersistAdmissionLimit(max int) error { return w.PersistMaxActiveJobs(max) }
+
+func TestSeparateEncodingHTTPControlAuthAndLimits(t *testing.T) {
+	worker := &testWorker{status: control.AdmissionStatus{MaxActiveJobs: 3}}
+	server, err := Start("127.0.0.1:0", "secret", worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := server.Shutdown(); err != nil {
+			t.Error(err)
+		}
+	}()
+	go func() {
+		if err := server.Serve(); err != nil {
+			t.Error(err)
+		}
+	}()
+	for _, tt := range []struct {
+		action, token string
+		want          int
+		paused        bool
+	}{{"pause", "", 401, false}, {"pause", "secret", 200, true}, {"resume", "secret", 200, false}} {
+		req, err := http.NewRequest(http.MethodPost, "http://"+server.listener.Addr().String()+"/api/worker/encodes/"+tt.action, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+tt.token)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, res.Body)
+		_ = res.Body.Close()
+		if res.StatusCode != tt.want || worker.status.RAMPaused != tt.paused || worker.status.MaxActiveJobs != 3 {
+			t.Fatalf("%s status=%d worker=%+v", tt.action, res.StatusCode, worker.status)
+		}
+	}
+}

@@ -48,10 +48,11 @@ func (p *updateProfileState) AdmissionStatus() control.AdmissionStatus {
 func (p *updateProfileState) PersistMaxActiveJobs(int) error {
 	return errors.New("update must not persist job limits")
 }
-func (p *updateProfileState) HoldAdmission() {
+func (p *updateProfileState) HoldAdmission() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.status.Accepting = false
+	return nil
 }
 
 func TestUpdateDrainsBothProfilesAndRejectsUnreachableProfile(t *testing.T) {

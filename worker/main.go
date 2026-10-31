@@ -44,6 +44,8 @@ func init() {
 		defaultThreads = 16
 	}
 	pflag.Int("worker.threads", defaultThreads, "Worker Threads")
+	pflag.Bool("worker.ramPaused", false, "Start with encoding and admission held by the independent RAM pause control")
+	pflag.String("worker.pauseMode", config.PauseFinish, "Pause mode: finish lets active encodes finish; ram suspends encoders and retains RAM/VRAM until Resume (cannot survive exit or reboot)")
 	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum FFmpeg encode concurrency; the worker may accept one additional pipeline job; 0 pauses requests and queued encodes")
 	pflag.String("worker.dashboard.listenAddress", "", "Optional HTTP listen address for the local browser dashboard (requires worker.dashboard.token)")
 	pflag.String("worker.dashboard.token", "", "Bearer token required by the local browser dashboard API")
@@ -177,7 +179,9 @@ func applicationRunWithShutdown(wg *sync.WaitGroup, ctx context.Context, updater
 		encodeWorker.UseManagedLimits()
 	}
 	if os.Getenv("TRANSCODERD_ADMISSION_HOLD") == "1" {
-		encodeWorker.HoldAdmission()
+		if err := encodeWorker.HoldAdmission(); err != nil {
+			return err
+		}
 	}
 	encodeWorker.RequireWorkerSettings()
 	encodeWorker.Run(wg, ctx)

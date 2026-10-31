@@ -18,13 +18,15 @@ type Option struct {
 	AllowedCodes []int
 }
 type Command struct {
-	Command    string
-	Params     []string
-	Env        []string
-	WorkDir    string
-	stdoutFunc ReaderFunc
-	stderrFunc ReaderFunc
-	buffSize   int
+	Command         string
+	Params          []string
+	Env             []string
+	WorkDir         string
+	stdoutFunc      ReaderFunc
+	stderrFunc      ReaderFunc
+	buffSize        int
+	pauseController *PauseController
+	pauseKey        string
 }
 
 func NewAllowedCodesOption(codes ...int) Option {
@@ -79,6 +81,16 @@ func (c *Command) SetStderrFunc(stderrFunc ReaderFunc) *Command {
 	c.stderrFunc = stderrFunc
 	return c
 }
+
+// SetPauseController enables RAM pause for this command only.
+func (c *Command) SetPauseController(controller *PauseController, key ...string) *Command {
+	c.pauseController = controller
+	if len(key) > 0 {
+		c.pauseKey = key[0]
+	}
+	return c
+}
+
 func (c *Command) Run(opt ...Option) (exitCode int, err error) {
 	return c.RunWithContext(context.Background(), opt...)
 }
@@ -94,7 +106,7 @@ func (c *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode i
 	}
 	cmd.Env = c.Env
 	cmd.Dir = c.WorkDir
-	attachProcess, closeProcess, err := prepareProcess(cmd)
+	attachProcess, closeProcess, err := prepareProcess(cmd, c.pauseController != nil)
 	if err != nil {
 		return -1, err
 	}
@@ -103,17 +115,39 @@ func (c *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode i
 	if err != nil {
 		return
 	}
+	defer stdout.Close()
+	// StdoutPipe/StderrPipe create both ends before the paused start gate.
+	// A canceled gate never calls Start, so close the child ends on return too.
+	defer func() {
+		if closer, ok := cmd.Stdout.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return
 	}
-	if err = cmd.Start(); err != nil {
-		return -1, err
-	}
-	if err = attachProcess(); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return -1, err
+	defer stderr.Close()
+	defer func() {
+		if closer, ok := cmd.Stderr.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
+	unregister := func() {}
+	if c.pauseController != nil {
+		unregister, err = c.pauseController.start(ctx, cmd, attachProcess, c.pauseKey)
+		if err != nil {
+			return -1, err
+		}
+	} else {
+		if err = cmd.Start(); err != nil {
+			return -1, err
+		}
+		if err = attachProcess(); err != nil {
+			_ = cmd.Cancel()
+			_ = cmd.Wait()
+			return -1, err
+		}
 	}
 	if ctx.Err() != nil {
 		_ = cmd.Cancel()
@@ -128,6 +162,8 @@ func (c *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode i
 	// Wait before all reads from the pipe have completed" because Wait
 	// closes the pipe, which can discard unread data.
 	wg.Wait()
+	// Remove ownership before Wait can reap the PID.
+	unregister()
 	err = cmd.Wait()
 	if err != nil {
 		var msg *exec.ExitError
@@ -142,7 +178,7 @@ func (c *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode i
 			return exitCode, err
 		}
 	}
-	return 0, nil
+	return 0, err
 }
 
 func isPanicOpt(opts []Option) bool {

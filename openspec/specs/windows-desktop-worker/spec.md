@@ -117,7 +117,7 @@ The dashboard SHALL aggregate active jobs, progress, encode counts, and admissio
 
 #### Scenario: Pause and resume mixed profiles
 - **WHEN** the user pauses or resumes the worker
-- **THEN** new assignments and queued FFmpeg starts stop or resume for both profiles, while running encodes and downstream work finish
+- **THEN** new assignments and queued FFmpeg starts stop or resume for both profiles, while active encodes follow the configured pause mode and downstream work finishes
 
 #### Scenario: Configured limits govern startup
 - **WHEN** the desktop specifies one CPU and four GPU encodes and the server retains different old limits
@@ -143,7 +143,7 @@ The service SHALL restrict its control channel to the installing Windows user, S
 - **THEN** the service rejects the request and only accepts the project's authenticated release selection
 
 ### Requirement: Graceful desktop reconfiguration
-Configuration changes requiring worker restart SHALL first stop admission locally without changing the persisted server job limit, then wait for accepted jobs and in-flight requests to finish before restarting. User-requested pause SHALL use the existing persistent admission control.
+Configuration changes requiring worker restart SHALL first stop admission locally without changing the persisted server job limit, then wait for accepted jobs and in-flight requests to finish before restarting. User-requested admission pause SHALL use persistent admission limits; RAM pause SHALL preserve its independent local preference.
 
 #### Scenario: Change schedule while an encode runs
 - **WHEN** the user saves a different schedule while jobs are active
@@ -186,3 +186,56 @@ The service SHALL keep download and encoding workspaces outside the application 
 #### Scenario: Workspace points into the installation
 - **WHEN** configuration or bootstrap Setup encounters an installation or managed-update staging folder, or its descendant, as the download/encoding workspace
 - **THEN** it rejects the unsafe path with an English explanation before replacing files, allowing the user to choose a separate workspace using the installed version
+
+### Requirement: Desktop encoding pause mode
+Desktop settings SHALL persist a pause mode with `ram` displayed as "RAM pause"; legacy empty or finish desktop values SHALL migrate to ram. A keyboard-accessible tooltip SHALL explain that RAM pause retains RAM/VRAM, resumes without restarting encoding, and cannot survive process exit, shutdown or reboot. Mode-only edits SHALL apply without restarting encodes.
+
+#### Scenario: Choose RAM pause
+- **WHEN** the user presses Pause encodes
+- **THEN** both CPU and GPU profiles suspend active encoding processes and the dashboard identifies suspended jobs as paused in RAM
+
+#### Scenario: Restore saved settings
+- **WHEN** settings are loaded after a service restart
+- **THEN** the selected mode is retained, with missing or legacy finish desktop values interpreted as ram
+
+#### Scenario: Explain resource retention
+- **WHEN** the user hovers over or focuses the pause-mode help control
+- **THEN** the tooltip explains retained RAM and VRAM and the inability to preserve running encoding across process exit or reboot
+
+#### Scenario: Change mode during pause
+- **WHEN** the user changes only the pause mode while paused
+- **THEN** the strategy is saved without changing either general pause preference
+
+### Requirement: Per-encode pause controls
+The dashboard SHALL retain its general control and show an individual Pause/Resume button for each controllable active CPU/GPU encoding. It SHALL explain that individual controls pause in RAM, preserve individual holds across general Resume, and identify individual versus general holds. The service SHALL route job IDs to their owning profile and reject mutations during maintenance or pending reconfiguration.
+
+#### Scenario: Pause and resume a job row
+- **WHEN** the user pauses or resumes an active encoding from its row
+- **THEN** the action reaches that job's owning profile and updates that row's pause state without changing the other profile or its limits
+
+#### Scenario: General pause holds a row
+- **WHEN** the general RAM pause holds an encoding
+- **THEN** the row explains the general hold and disables its Resume button until the general pause is lifted
+
+#### Scenario: Queued or completed job
+- **WHEN** a job has no active encoding process
+- **THEN** no individual active-encode control is offered and a stale direct request is rejected
+
+#### Scenario: Mandatory update or pending configuration
+- **WHEN** maintenance or deferred reconfiguration is active and a UI or direct request attempts an individual pause
+- **THEN** the mutation is blocked so accepted work can drain
+
+### Requirement: Separate queue and encoding pause controls
+The dashboard SHALL show Stop after current / Resume queue and Pause encodes / Resume encodes as separate controls, with equivalent tray actions. The former SHALL allow running encodes to finish; the latter SHALL immediately suspend them in RAM. Controls SHALL preserve each other's state and individual holds, remain locked during maintenance, and persist both desktop preferences independently.
+
+#### Scenario: Both controls active
+- **WHEN** the user stops after current and then pauses encodes
+- **THEN** resuming encodes lets active work continue without reopening the queue; resuming the queue first leaves encoding suspended
+
+#### Scenario: Restart with saved controls
+- **WHEN** the service restarts with independently saved queue and RAM preferences
+- **THEN** both are applied before restored encodes or admission can start, without claiming that live encoder progress survives restart
+
+#### Scenario: Update draining
+- **WHEN** maintenance drains a worker with both controls active
+- **THEN** accepted work resumes and finishes, new assignments remain blocked and both saved preferences are preserved for the new installation

@@ -7,6 +7,7 @@ import (
 )
 
 type Request struct {
+	JobID    string    `json:"jobId,omitempty"`
 	ID       int64     `json:"id,omitempty"`
 	Command  string    `json:"command"`
 	Settings *Settings `json:"settings,omitempty"`

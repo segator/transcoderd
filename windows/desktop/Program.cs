@@ -76,6 +76,8 @@ internal sealed class MainForm : Form
     private int lastCPU = 0, lastGPU = 2;
     private readonly ToolStripMenuItem pauseItem;
     private readonly ToolStripMenuItem resumeItem;
+    private readonly ToolStripMenuItem pauseEncodesItem;
+    private readonly ToolStripMenuItem resumeEncodesItem;
     private bool configurationAllowed;
     private bool updateNotified;
 
@@ -91,9 +93,11 @@ internal sealed class MainForm : Form
         Controls.Add(browser);
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open TranscoderD", null, (_, _) => ShowWindow());
-        pauseItem = (ToolStripMenuItem)menu.Items.Add("Pause queued encodes", null, async (_, _) => await SetPaused(true));
-        resumeItem = (ToolStripMenuItem)menu.Items.Add("Resume", null, async (_, _) => await SetPaused(false));
-        pauseItem.Enabled = resumeItem.Enabled = false;
+        pauseItem = (ToolStripMenuItem)menu.Items.Add("Stop after current", null, async (_, _) => await SetPaused(true));
+        resumeItem = (ToolStripMenuItem)menu.Items.Add("Resume queue", null, async (_, _) => await SetPaused(false));
+        pauseEncodesItem = (ToolStripMenuItem)menu.Items.Add("Pause encodes now", null, async (_, _) => await SetEncodesPaused(true));
+        resumeEncodesItem = (ToolStripMenuItem)menu.Items.Add("Resume encodes", null, async (_, _) => await SetEncodesPaused(false));
+        pauseItem.Enabled = resumeItem.Enabled = pauseEncodesItem.Enabled = resumeEncodesItem.Enabled = false;
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit tray", null, (_, _) => { quitting = true; Close(); });
         tray = new NotifyIcon { Icon = appIcon, Text = "TranscoderD worker dashboard", ContextMenuStrip = menu, Visible = true };
@@ -123,7 +127,7 @@ internal sealed class MainForm : Form
                     bool ok = e.IsSuccess;
                     for (int i = 0; ok && i < 80; i++) {
                         string state = rejectSmoke ? "error" : "online";
-                        string condition = updateSmoke ? "Boolean(!document.getElementById('update-alert').hidden && document.getElementById('update-alert').getBoundingClientRect().height > 0 && document.getElementById('settings-controls').disabled && document.getElementById('save').disabled && document.getElementById('toggle-pause').disabled && document.getElementById('update-title').textContent.includes('99.1.0'))" : $"Boolean(document.getElementById('settings-form') && document.getElementById('job-list') && document.getElementById('connection').classList.contains('{state}'))";
+                        string condition = updateSmoke ? "Boolean(!document.getElementById('update-alert').hidden && document.getElementById('update-alert').getBoundingClientRect().height > 0 && document.getElementById('settings-controls').disabled && document.getElementById('save').disabled && document.getElementById('toggle-pause').disabled && document.getElementById('toggle-encodes').disabled && document.getElementById('update-title').textContent.includes('99.1.0'))" : $"Boolean(document.getElementById('settings-form') && document.getElementById('job-list') && document.getElementById('connection').classList.contains('{state}'))";
                         string result = await core.ExecuteScriptAsync(condition);
                         if (result == "true") { Environment.ExitCode = 0; Quit(); return; }
                         await Task.Delay(250);
@@ -151,21 +155,21 @@ internal sealed class MainForm : Form
             string command = root.GetProperty("command").GetString() ?? "";
             if (command == "show-window") { if (!smoke) ShowWindow(); Reply(id, true, "{}"); return; }
             if (command == "start-service") { StartService(); Reply(id, true, "{}"); return; }
-            if (command is not ("status" or "configure" or "set-max-jobs" or "check-update")) throw new InvalidOperationException("Command not allowed");
-            if (!configurationAllowed && (command is "configure" or "set-max-jobs")) throw new InvalidOperationException("Configuration is locked until the mandatory update completes or service status is confirmed.");
+            if (command is not ("status" or "configure" or "set-max-jobs" or "pause-job" or "resume-job" or "pause-encodes" or "resume-encodes" or "check-update")) throw new InvalidOperationException("Command not allowed");
+            if (!configurationAllowed && (command is "configure" or "set-max-jobs" or "pause-job" or "resume-job" or "pause-encodes" or "resume-encodes")) throw new InvalidOperationException("Configuration is locked until the mandatory update completes or service status is confirmed.");
             string response = await client.SendAsync(root.GetRawText());
             using var result = JsonDocument.Parse(response);
             if (command == "status" && result.RootElement.TryGetProperty("status", out var serviceStatus)) {
                 bool updating = serviceStatus.TryGetProperty("update", out var update) && update.TryGetProperty("pending", out var pending) && pending.GetBoolean();
                 configurationAllowed = !updating;
-                pauseItem.Enabled = resumeItem.Enabled = configurationAllowed;
+                pauseItem.Enabled = resumeItem.Enabled = pauseEncodesItem.Enabled = resumeEncodesItem.Enabled = configurationAllowed;
                 tray.Text = updating ? "TranscoderD — mandatory update pending" : "TranscoderD worker dashboard";
                 if (updating && !updateNotified) { tray.ShowBalloonTip(6000, "Mandatory update", "New jobs and configuration are blocked. Accepted jobs will finish before automatic installation.", ToolTipIcon.Info); }
                 updateNotified = updating;
             }
             if (command == "status" && result.RootElement.TryGetProperty("status", out var status) && status.TryGetProperty("settings", out var settings) && settings.ValueKind == JsonValueKind.Object) { lastCPU = settings.GetProperty("cpuJobs").GetInt32(); lastGPU = settings.GetProperty("gpuJobs").GetInt32(); }
             Reply(id, true, result.RootElement.GetRawText());
-        } catch (Exception ex) { configurationAllowed = false; pauseItem.Enabled = resumeItem.Enabled = false; Reply(id, false, JsonSerializer.Serialize(ex.Message)); }
+        } catch (Exception ex) { configurationAllowed = false; pauseItem.Enabled = resumeItem.Enabled = pauseEncodesItem.Enabled = resumeEncodesItem.Enabled = false; Reply(id, false, JsonSerializer.Serialize(ex.Message)); }
     }
     private void Reply(long id, bool ok, string payload)
     {
@@ -176,6 +180,12 @@ internal sealed class MainForm : Form
     {
         if (!configurationAllowed) { ShowWindow(); return; }
         try { var response = await client.SendAsync(JsonSerializer.Serialize(new { command = "set-max-jobs", cpuJobs = paused ? 0 : lastCPU, gpuJobs = paused ? 0 : lastGPU })); using var doc = JsonDocument.Parse(response); if (doc.RootElement.TryGetProperty("error", out var error) && error.GetString() is { Length: > 0 } text) throw new IOException(text); }
+        catch { ShowWindow(); }
+    }
+    private async Task SetEncodesPaused(bool paused)
+    {
+        if (!configurationAllowed) { ShowWindow(); return; }
+        try { var response = await client.SendAsync(JsonSerializer.Serialize(new { command = paused ? "pause-encodes" : "resume-encodes" })); using var doc = JsonDocument.Parse(response); if (doc.RootElement.TryGetProperty("error", out var error) && error.GetString() is { Length: > 0 } text) throw new IOException(text); }
         catch { ShowWindow(); }
     }
     private static void StartService()

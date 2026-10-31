@@ -29,6 +29,7 @@ import (
 	"transcoder/worker/desktop"
 
 	"github.com/Microsoft/go-winio"
+	"github.com/google/uuid"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -297,6 +298,9 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 		status.Settings = &settings
 	}
 	combined := control.AdmissionStatus{WithinSchedule: true, Paused: true}
+	if s.state.Active != nil {
+		combined.PauseMode = s.state.Active.Normalized().PauseMode
+	}
 	enabled := map[string]bool{}
 	if s.state.Active != nil {
 		for _, profile := range s.state.Active.Profiles() {
@@ -326,6 +330,8 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 		combined.MaxActiveJobs += profileStatus.MaxActiveJobs
 		combined.MaxAcceptedJobs += profileStatus.MaxAcceptedJobs
 		combined.ActiveEncodes += profileStatus.ActiveEncodes
+		combined.RAMPaused = combined.RAMPaused || profileStatus.RAMPaused
+		combined.SuspendedEncodes += profileStatus.SuspendedEncodes
 		combined.Paused = combined.Paused && profileStatus.Paused
 		if enabled[profile] {
 			combined.MaxEncodes += profileStatus.MaxEncodes
@@ -343,6 +349,7 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 func sameExceptLimit(a, b desktop.Settings) bool {
 	a = a.Normalized()
 	b = b.Normalized()
+	a.PauseMode, b.PauseMode = "", ""
 	a.CPUJobs, a.GPUJobs = 0, 0
 	b.CPUJobs, b.GPUJobs = 0, 0
 	a.MaxJobs, b.MaxJobs = 0, 0
@@ -360,7 +367,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := desktop.Response{}
-	if (s.maintenance || s.updatePending()) && (req.Command == "configure" || req.Command == "set-max-jobs") {
+	if (s.maintenance || s.updatePending()) && (req.Command == "configure" || req.Command == "set-max-jobs" || req.Command == "pause-job" || req.Command == "resume-job" || req.Command == "pause-encodes" || req.Command == "resume-encodes") {
 		result.Error = managed.LockedMessage
 		result.Status = s.snapshotLocked()
 		return result
@@ -420,6 +427,49 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 			break
 		}
 		s.state = next
+	case "pause-job", "resume-job":
+		id, err := uuid.Parse(req.JobID)
+		if err != nil {
+			result.Error = "Invalid encoding job ID"
+			break
+		}
+		if s.state.Pending != nil || s.state.PendingLimit {
+			result.Error = "Wait for pending configuration to finish"
+			break
+		}
+		profile, err := encodeOwner(s.snapshotLocked().Profiles, id.String())
+		if err != nil {
+			result.Error = err.Error()
+			break
+		}
+		if _, err := control.Call(workerPipe(profile), control.Request{Command: req.Command, JobID: id.String()}); err != nil {
+			result.Error = err.Error()
+		}
+	case "pause-encodes", "resume-encodes":
+		if s.state.Active == nil || s.state.Pending != nil || s.state.PendingLimit {
+			result.Error = "Wait for worker configuration to finish"
+			break
+		}
+		for _, profile := range []string{"cpu", "gpu"} {
+			if s.children[profile] == nil {
+				result.Error = "The " + profile + " worker is reconnecting"
+				break
+			}
+			if _, err := control.Call(workerPipe(profile), control.Request{Command: req.Command}); err != nil {
+				result.Error = "Could not change " + profile + " RAM pause: " + err.Error()
+				break
+			}
+		}
+		if result.Error != "" {
+			break
+		}
+		next := s.state
+		next.RAMPaused = req.Command == "pause-encodes"
+		if err := desktop.Save(s.dir, next); err != nil {
+			result.Error = "RAM pause changed but could not be saved"
+			break
+		}
+		s.state = next
 	case "set-max-jobs":
 		if s.state.Active == nil {
 			result.Error = "Configure the server first"
@@ -472,7 +522,11 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 				result.Error = "The " + target.key + " worker is reconnecting; try again shortly"
 				break
 			}
-			if _, err := control.Call(workerPipe(target.key), control.Request{Command: "set-max-jobs", MaxJobs: target.jobs}); err != nil {
+			if _, err := control.Call(workerPipe(target.key), control.Request{Command: "set-pause-mode", PauseMode: "finish"}); err != nil {
+				result.Error = "Could not change the " + target.key + " worker pause mode: " + err.Error()
+				break
+			}
+			if _, err := control.Call(workerPipe(target.key), control.Request{Command: "set-admission-limit", MaxJobs: target.jobs}); err != nil {
 				result.Error = "Could not change the " + target.key + " worker limit"
 				break
 			}
@@ -629,7 +683,12 @@ func (s *supervisor) run(ctx context.Context) {
 						profile.Jobs = 0
 					}
 					if s.children[profile.Key] != nil {
-						if _, err := control.Call(workerPipe(profile.Key), control.Request{Command: "set-max-jobs", MaxJobs: profile.Jobs}); err != nil {
+						if _, err := control.Call(workerPipe(profile.Key), control.Request{Command: "set-pause-mode", PauseMode: "finish"}); err != nil {
+							ok = false
+							s.message = "Could not apply " + profile.Key + " pause mode: " + err.Error()
+							continue
+						}
+						if _, err := control.Call(workerPipe(profile.Key), control.Request{Command: "set-admission-limit", MaxJobs: profile.Jobs}); err != nil {
 							ok = false
 						}
 					}
@@ -652,7 +711,7 @@ func (s *supervisor) run(ctx context.Context) {
 					if s.children[profile.Key] != nil {
 						continue
 					}
-					if err := desktop.WorkerConfigForProfile(s.dir, *s.state.Active, profile, s.state.Paused); err != nil {
+					if err := desktop.WorkerConfigForProfile(s.dir, *s.state.Active, profile, s.state.Paused, s.state.RAMPaused); err != nil {
 						s.message = "Could not prepare the worker configuration"
 						break
 					}
@@ -989,4 +1048,23 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// Resolve ownership from live worker snapshots, never a caller-supplied profile.
+func encodeOwner(profiles map[string]control.AdmissionStatus, jobID string) (string, error) {
+	owner := ""
+	for profile, status := range profiles {
+		for _, job := range status.Jobs {
+			if job.JobID == jobID && job.Phase == "FFMPEG" && job.CanPause {
+				if owner != "" && owner != profile {
+					return "", errors.New("encoding ownership is ambiguous; refresh and retry")
+				}
+				owner = profile
+			}
+		}
+	}
+	if owner == "" {
+		return "", control.ErrJobNotPausable
+	}
+	return owner, nil
 }

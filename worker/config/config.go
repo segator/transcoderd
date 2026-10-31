@@ -33,6 +33,8 @@ type FFMPEGConfig struct {
 }
 
 type Config struct {
+	RAMPaused       bool             `mapstructure:"ramPaused"`
+	PauseMode       string           `mapstructure:"pauseMode"`
 	TemporalPath    string           `mapstructure:"temporalPath" envconfig:"WORKER_TMP_PATH"`
 	Name            string           `mapstructure:"name" envconfig:"WORKER_NAME"`
 	StartAfter      *time.Duration   `mapstructure:"startAfter" envconfig:"WORKER_START_AFTER"`

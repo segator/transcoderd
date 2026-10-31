@@ -11,7 +11,7 @@ import (
 
 // A job closes the entire descendant tree when the command finishes or its
 // context is canceled, including the application started by the updater.
-func prepareProcess(cmd *exec.Cmd) (func() error, func(), error) {
+func prepareProcess(cmd *exec.Cmd, _ bool) (func() error, func(), error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create process job: %w", err)

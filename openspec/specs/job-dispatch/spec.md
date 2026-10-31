@@ -36,7 +36,7 @@ An active worker SHALL send a presence event approximately every five seconds an
 - **THEN** the worker sends a presence event and evaluates whether to request work
 
 ### Requirement: Local job admission limit
-A worker SHALL admit at most its effective FFmpeg encode target plus one pipeline job, counting accepted jobs and in-flight reservations. Admission SHALL require a positive maximum and an open schedule. The default encode target SHALL remain two. Zero SHALL stop requests and new encodes; running encodes and downstream work SHALL finish. Lowering a positive target SHALL not interrupt active encodes.
+A worker SHALL admit at most its effective FFmpeg encode target plus one pipeline job, counting accepted jobs and in-flight reservations. Admission SHALL require a positive maximum and an open schedule. The default encode target SHALL remain two. Zero SHALL stop requests and new encodes; active encodes SHALL follow the configured pause mode and downstream work SHALL finish. Lowering a positive target SHALL not interrupt active encodes.
 
 #### Scenario: Ordinary active-job limit
 - **WHEN** no time window is configured and three jobs are active or reserved at the default target
@@ -48,7 +48,7 @@ A worker SHALL admit at most its effective FFmpeg encode target plus one pipelin
 
 #### Scenario: Zero active-job limit
 - **WHEN** the active-job maximum is set to zero at startup or runtime
-- **THEN** the worker requests no new jobs and finishes running encodes and downstream work while retaining queued encodes
+- **THEN** the worker requests no new jobs and applies the selected pause mode to active encodes and finishes downstream work while retaining queued encodes
 
 #### Scenario: Lower maximum while jobs are active
 - **WHEN** an operator lowers the maximum below the number of active jobs
@@ -67,7 +67,7 @@ A worker SHALL admit at most its effective FFmpeg encode target plus one pipelin
 - **THEN** the worker does not request a job
 
 ### Requirement: Runtime worker admission controls
-Local controls SHALL persist operator limits before reporting success. Positive maxima SHALL set FFmpeg concurrency and resume queued encodes. Zero SHALL retain the positive target but stop requests and new encodes; running encodes and downstream work SHALL finish. Startup SHALL use server overrides for standalone workers and service-owned Windows limits. Maintenance draining SHALL finish accepted work without changing saved preferences. Controls SHALL remain local.
+Local controls SHALL persist operator limits before reporting success. Positive maxima SHALL set FFmpeg concurrency and resume queued encodes. Zero SHALL retain the positive target but stop requests and new encodes; active encodes SHALL use pauseMode and downstream work SHALL finish. Startup SHALL use server overrides for standalone workers and service-owned Windows limits. Maintenance draining SHALL finish accepted work without changing saved preferences. Controls SHALL remain local.
 
 #### Scenario: Read runtime admission status
 - **WHEN** an operator runs the local status command
@@ -75,7 +75,7 @@ Local controls SHALL persist operator limits before reporting success. Positive 
 
 #### Scenario: Disable new job requests
 - **WHEN** an operator sets the maximum to zero
-- **THEN** the worker stops new requests and lets active encodes, verification and uploads finish, and holds waiting FFmpeg jobs until a positive maximum resumes them
+- **THEN** the worker stops new requests and applies the configured pause mode to active encodes and lets verification and uploads finish, and holds waiting FFmpeg jobs until a positive maximum resumes them
 
 #### Scenario: A request is already in flight
 - **WHEN** an operator sets the maximum to zero while a reserved request is waiting for the server
@@ -227,3 +227,80 @@ The server SHALL provide an authenticated read-only queue view containing the to
 #### Scenario: Unauthorized request
 - **WHEN** the queue view is requested without the correct bearer token
 - **THEN** the server returns HTTP 401
+
+### Requirement: Selectable encoding pause mode
+The worker SHALL accept `worker.pauseMode` as `finish` (default) or `ram`. A zero runtime maximum SHALL hold new assignments and queued encodes. In `ram` mode on Windows and Linux it SHALL also suspend owned active FFmpeg encoding processes, retaining RAM and GPU memory; a positive maximum SHALL release its legacy RAM hold without clearing other holds. Other modes SHALL be rejected.
+
+#### Scenario: Suspend and resume CPU or GPU encoding
+- **WHEN** a worker using RAM pause receives a zero maximum while CPU or GPU encodes run
+- **THEN** it suspends those processes and reports suspended encodes without discarding progress; a positive maximum releases its legacy hold while explicit RAM and individual holds remain effective
+
+#### Scenario: Default finish behavior
+- **WHEN** pause mode is omitted or `finish` and the maximum becomes zero
+- **THEN** active encodes without other holds finish while queued encodes remain held
+
+#### Scenario: Start and exit races
+- **WHEN** pause races an encoder start or completion
+- **THEN** the worker holds new starts during RAM pause and never suspends an unrelated process
+
+#### Scenario: Suspension failure
+- **WHEN** the OS refuses to suspend or resume an owned encoding process
+- **THEN** control reports an error instead of claiming a successful transition
+
+#### Scenario: Maintenance drain
+- **WHEN** maintenance drains a RAM-paused worker
+- **THEN** suspended and queued accepted encodes may finish while admission stays blocked and the saved user pause remains intact
+
+#### Scenario: Shutdown while paused
+- **WHEN** the worker shuts down while an encoding process is suspended
+- **THEN** normal cancellation terminates the owned process without requiring Resume
+
+#### Scenario: Live mode change
+- **WHEN** the mode changes while the worker is paused
+- **THEN** switching to RAM suspends active encodes and switching to finish releases its legacy hold without clearing explicit RAM or individual holds, or starting queued encodes
+
+### Requirement: Individual active encode pause
+Local controls SHALL pause or resume one owned active encoding by job ID on Windows/Linux without changing other encodes, job limits or admission. Individual pause SHALL retain RAM/VRAM and occupied encode slots, use the same process on resume and remain independent of the configured general pause mode. Unknown or completed encodes SHALL be rejected.
+
+#### Scenario: Pause one CPU or GPU encode
+- **WHEN** an operator pauses one active encoding while another is running
+- **THEN** only the chosen encoding stops progressing and the other continues with unchanged limits
+
+#### Scenario: General pause composes with individual pause
+- **WHEN** an individually paused encode is followed by general RAM pause and general Resume
+- **THEN** the individually paused encode remains stopped and encodes held only by the general pause resume
+
+#### Scenario: Individual resume during general RAM pause
+- **WHEN** an individual resume is requested while general RAM pause remains active
+- **THEN** the individual hold is cleared but the process remains suspended until the general pause is resumed
+
+#### Scenario: Target has finished
+- **WHEN** a control targets an unknown job or an encode that completed before the request was applied
+- **THEN** it returns an error and affects no other process
+
+#### Scenario: Maintenance drains individual holds
+- **WHEN** configuration or update maintenance drains a worker with individually paused encodes
+- **THEN** all suspended encodes resume, admission remains blocked and further individual pause requests are rejected during the drain
+
+### Requirement: Independent admission and RAM holds
+Explicit admission controls SHALL stop requests and queued encode starts while allowing active encodes to finish, without applying the legacy zero-limit RAM policy. Explicit RAM controls SHALL suspend active encodes and hold requests and encode starts without changing the job limit. Releasing either control SHALL preserve the other and individual holds. Maintenance SHALL temporarily release RAM holds while keeping admission closed.
+
+#### Scenario: Stop after current
+- **WHEN** an operator stops the queue through the explicit admission control
+- **THEN** running encodes continue and no new requests or queued encodes start, even if legacy pauseMode was ram
+
+#### Scenario: Pause encodes immediately
+- **WHEN** the operator activates RAM pause while work is running
+- **THEN** owned active encodes suspend immediately and requests and queued encodes are held without changing the configured job limit
+
+#### Scenario: Resume RAM while queue is stopped
+- **WHEN** both controls are active and the operator resumes RAM-paused encodes
+- **THEN** active encodes without individual holds resume, while requests and queued encodes remain held
+
+#### Scenario: Resume queue while RAM is paused
+- **WHEN** both controls are active and the operator resumes the queue
+- **THEN** configured limits are restored but requests and encode starts remain held until RAM pause is released
+
+#### Scenario: Startup RAM preference
+- **WHEN** worker.ramPaused is true at startup
+- **THEN** restored encodes and new assignments remain held until the explicit RAM control resumes; the default is false

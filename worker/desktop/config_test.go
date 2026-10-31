@@ -6,6 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	workerconfig "transcoder/worker/config"
+
+	"github.com/spf13/viper"
 )
 
 func TestSettingsValidationAndSecretRedaction(t *testing.T) {
@@ -123,6 +127,109 @@ func TestLegacyProfileSettingsMigrateToMatchingEncoder(t *testing.T) {
 		}
 		if state.Active.CPUJobs != tt.cpuJobs || state.Active.GPUJobs != tt.gpuJobs || !state.PendingLimit {
 			t.Errorf("Load() migrated profile to CPU=%d GPU=%d pending=%t; want CPU=%d GPU=%d pending=true", state.Active.CPUJobs, state.Active.GPUJobs, state.PendingLimit, tt.cpuJobs, tt.gpuJobs)
+		}
+	}
+}
+
+func TestPauseModePersistsAndReachesBothProfiles(t *testing.T) {
+	dir := t.TempDir()
+	settings := Settings{Domain: "https://server.test", Token: "secret", Name: "node", CPUJobs: 1, GPUJobs: 2, PauseMode: "ram"}.Normalized()
+	if err := Save(dir, Persisted{Active: &settings, Paused: true, RAMPaused: true}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Active.PauseMode != "ram" || saved.Active.Public().PauseMode != "ram" || !saved.Paused {
+		t.Fatalf("saved pause = %+v", saved)
+	}
+	for _, profile := range saved.Active.Profiles() {
+		if err := WorkerConfigForProfile(dir, *saved.Active, profile, true, saved.RAMPaused); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "config-"+profile.Key+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value struct {
+			Worker struct {
+				PauseMode     string
+				RAMPaused     bool
+				MaxActiveJobs int
+			}
+		}
+		if err := json.Unmarshal(data, &value); err != nil {
+			t.Fatal(err)
+		}
+		if value.Worker.PauseMode != "finish" || value.Worker.MaxActiveJobs != 0 || !value.Worker.RAMPaused {
+			t.Fatalf("%s config = %s", profile.Key, data)
+		}
+	}
+	if got := (Settings{}).Normalized().PauseMode; got != "ram" {
+		t.Fatalf("legacy desktop pause strategy = %s, want ram", got)
+	}
+	settings.PauseMode = "chunked"
+	if err := settings.Validate(); err == nil {
+		t.Fatal("Validate() accepted unimplemented pause mode")
+	}
+}
+
+func TestIndependentSavedPausePreferences(t *testing.T) {
+	for _, queue := range []bool{false, true} {
+		for _, ram := range []bool{false, true} {
+			dir := t.TempDir()
+			settings := Settings{Domain: "https://server.test", Token: "secret", Name: "matrix", CPUJobs: 1, GPUJobs: 2}
+			if err := Save(dir, Persisted{Active: &settings, Paused: queue, RAMPaused: ram}); err != nil {
+				t.Fatal(err)
+			}
+			saved, err := Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if saved.Paused != queue || saved.RAMPaused != ram || saved.Active.PauseMode != "ram" {
+				t.Fatalf("queue=%t RAM=%t saved=%+v", queue, ram, saved)
+			}
+			for _, profile := range saved.Active.Profiles() {
+				if err := WorkerConfigForProfile(dir, *saved.Active, profile, saved.Paused, saved.RAMPaused); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(filepath.Join(dir, "config-"+profile.Key+".yaml"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var result struct {
+					Worker struct {
+						MaxActiveJobs int
+						RAMPaused     bool
+						PauseMode     string
+					}
+				}
+				if err := json.Unmarshal(data, &result); err != nil {
+					t.Fatal(err)
+				}
+				parser := viper.New()
+				parser.SetConfigType("json")
+				if err := parser.ReadConfig(strings.NewReader(string(data))); err != nil {
+					t.Fatal(err)
+				}
+				var actual struct {
+					Worker *workerconfig.Config `mapstructure:"worker"`
+				}
+				if err := parser.Unmarshal(&actual); err != nil {
+					t.Fatal(err)
+				}
+				if actual.Worker == nil || actual.Worker.RAMPaused != ram {
+					t.Fatalf("worker startup lost RAM preference: %s", data)
+				}
+				want := profile.Jobs
+				if queue {
+					want = 0
+				}
+				if result.Worker.MaxActiveJobs != want || result.Worker.RAMPaused != ram || result.Worker.PauseMode != "finish" {
+					t.Fatalf("independent startup flags=%s", data)
+				}
+			}
 		}
 	}
 }

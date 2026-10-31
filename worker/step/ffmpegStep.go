@@ -24,7 +24,8 @@ import (
 )
 
 type FFMPEGStepExecutor struct {
-	ffmpegConfig *config.FFMPEGConfig
+	ffmpegConfig    *config.FFMPEGConfig
+	pauseController *command.PauseController
 }
 
 type ffmpegProgress struct {
@@ -35,10 +36,10 @@ type ffmpegProgress struct {
 }
 
 func NewFFMPEGStepExecutor(ffmpegConfig *config.FFMPEGConfig, options ...ExecutorOption) *Executor {
-	ffmpegStep := &FFMPEGStepExecutor{
-		ffmpegConfig,
-	}
-	return NewStepExecutor(model.FFMPEGSNotification, ffmpegStep.actions, options...)
+	ffmpegStep := &FFMPEGStepExecutor{ffmpegConfig: ffmpegConfig}
+	executor := NewStepExecutor(model.FFMPEGSNotification, ffmpegStep.actions, options...)
+	ffmpegStep.pauseController = executor.pauseController
+	return executor
 }
 
 func (f *FFMPEGStepExecutor) actions(jobContext *job.Context) []Action {
@@ -136,7 +137,7 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 	targetPath := filepath.Join(jobContext.WorkingDir, encodedFilePath)
 
 	ffmpegArguments := ffmpegGenerator.buildArguments(uint8(f.ffmpegConfig.Threads), f.ffmpegConfig.ExtraArgs, targetPath)
-	ffmpegCommand := command.NewCommand(helper.GetFFmpegPath(), ffmpegArguments...)
+	ffmpegCommand := command.NewCommand(helper.GetFFmpegPath(), ffmpegArguments...).SetPauseController(f.pauseController, jobContext.JobId.String())
 	logger.Cmdf("FFMPEG Command: %s", ffmpegCommand.GetFullCommand())
 	ffmpegCommand = ffmpegCommand.
 		SetWorkDir(jobContext.WorkingDir).

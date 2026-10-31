@@ -2,6 +2,7 @@ package step
 
 import (
 	"context"
+	"transcoder/helper/command"
 	"transcoder/model"
 	"transcoder/worker/console"
 	"transcoder/worker/job"
@@ -20,6 +21,7 @@ type ActionJobContextFunc func(jobContext *job.Context)
 type ActionOnErrorFunc func(jobContext *job.Context, notificationType model.NotificationType, err error)
 type ExecutorOption func(stepExecutor *Executor)
 type Executor struct {
+	pauseController  *command.PauseController
 	stepChan         chan *job.Context
 	notificationType model.NotificationType
 	OnJob            ActionJobContextFunc
@@ -104,4 +106,9 @@ func WithOnJob(onJob ActionJobContextFunc) ExecutorOption {
 	return func(stepExecutor *Executor) {
 		stepExecutor.OnJob = onJob
 	}
+}
+
+// WithPauseController applies process suspension only to the encoding command.
+func WithPauseController(controller *command.PauseController) ExecutorOption {
+	return func(executor *Executor) { executor.pauseController = controller }
 }

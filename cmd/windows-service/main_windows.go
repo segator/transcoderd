@@ -190,7 +190,7 @@ func uninstall() error {
 	return s.Delete()
 }
 
-func prepareUpgrade() error {
+func prepareUpgrade(wait bool) error {
 	m, err := mgr.Connect()
 	if err != nil {
 		return err
@@ -219,24 +219,41 @@ func prepareUpgrade() error {
 	if owner == "" {
 		return errors.New("cannot identify the service owner")
 	}
-	timeout := 3 * time.Second
-	conn, err := winio.DialPipe(pipePrefix+owner, &timeout)
-	if err != nil {
-		return fmt.Errorf("cannot contact the service: %w", err)
+	ctx := context.Background()
+	if wait {
+		var cancel context.CancelFunc
+		ctx, cancel, err = installerWaitContext()
+		if err != nil {
+			return err
+		}
+		defer cancel()
+		// Preserve the service's maintenance/shutdown cancellation semantics.
+		// Old services return this specific busy response after holding CPU only;
+		// the new helper still holds and checks BOTH profiles before proceeding.
+		response, err := upgradeServiceStatus(owner, desktop.Request{Command: "prepare-upgrade"})
+		if err != nil && response.Error != manualUpgradeBusyMessage {
+			return err
+		}
+		if err := waitForManualUpgrade(ctx, func() (int, int, error) {
+			response, err := upgradeServiceStatus(owner, desktop.Request{Command: "status"})
+			if err != nil {
+				return 0, 0, err
+			}
+			return holdProfilesForManualUpgrade(response.Status, func(profile string, request control.Request) (control.Response, error) {
+				return control.Call(workerPipe(profile), request)
+			})
+		}, 2*time.Second, os.Stdout); err != nil {
+			return err
+		}
 	}
-	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
-	if err = json.NewEncoder(conn).Encode(desktop.Request{Command: "prepare-upgrade"}); err != nil {
-		conn.Close()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("setup ended before service replacement: %w", err)
+	}
+	if _, err := upgradeServiceStatus(owner, desktop.Request{Command: "prepare-upgrade"}); err != nil {
 		return err
 	}
-	var reply desktop.Response
-	err = json.NewDecoder(conn).Decode(&reply)
-	conn.Close()
-	if err != nil {
-		return err
-	}
-	if reply.Error != "" {
-		return errors.New(reply.Error)
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("setup ended before service replacement: %w", err)
 	}
 	if _, err = s.Control(svc.Stop); err != nil {
 		return err
@@ -573,22 +590,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		}
 		s.state = next
 	case "prepare-upgrade":
-		s.shutdownPending = false
-		if s.updatePending() {
-			result.Error = managed.LockedMessage
-			break
-		}
-		s.maintenance = true
-		for _, profile := range []string{"cpu", "gpu"} {
-			if s.children[profile] != nil {
-				r, err := control.Call(workerPipe(profile), control.Request{Command: "drain"})
-				if err != nil || r.Status.ActiveJobs != 0 || r.Status.ReservedJobs != 0 {
-					result.Error = "Jobs are still running. Wait for them to finish and try again."
-					s.maintenance = false
-					break
-				}
-			}
-		}
+		result.Error = s.prepareUpgradeLocked()
 	default:
 		result.Error = "Unknown command"
 	}
@@ -1039,8 +1041,11 @@ func main() {
 		}
 		return
 	}
-	if len(os.Args) > 1 && os.Args[1] == "--prepare-upgrade" {
-		if err := prepareUpgrade(); err != nil {
+	if len(os.Args) > 1 && (os.Args[1] == "--prepare-upgrade" || os.Args[1] == "--prepare-upgrade-wait") {
+		if err := prepareUpgrade(os.Args[1] == "--prepare-upgrade-wait"); err != nil {
+			if os.Args[1] == "--prepare-upgrade-wait" {
+				fmt.Fprintln(os.Stdout, "Setup did not replace files. Accepted work can finish. Admission may remain held; retry Setup when idle, or restart the service after all jobs finish to resume normal work.")
+			}
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

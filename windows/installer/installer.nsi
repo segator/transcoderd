@@ -61,11 +61,11 @@ Section "TranscoderD" Main
   ${EndIf}
   IfFileExists "$INSTDIR\transcoderd-desktop-service.exe" 0 fresh
   StrCpy $R9 "1"
-  nsExec::ExecToStack '"$INSTDIR\transcoderd-desktop-service.exe" --prepare-upgrade'
+  DetailPrint "Waiting for all accepted CPU/GPU work to finish before upgrading..."
+  nsExec::ExecToLog '"$PLUGINSDIR\service-helper.exe" --prepare-upgrade-wait'
   Pop $0
-  Pop $1
   ${If} $0 != 0
-    Push "Cannot upgrade yet. $1"
+    Push "Could not prepare a safe upgrade. See the details above. The service and accepted work have not been force-stopped."
     Call FailInstall
   ${EndIf}
   nsExec::ExecToStack '"$INSTDIR\transcoderd-desktop-service.exe" --uninstall'

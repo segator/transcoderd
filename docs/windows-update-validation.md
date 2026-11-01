@@ -77,3 +77,22 @@ pause. CI's early `windows-unit` job now includes `worker/worker` so these regre
 run before packaging. Shared UI checks and the Dagger-built tray also pass locally.
 These queue tests simulate encode completion; the complete service/media E2E still
 runs in the ordinary native workflow.
+
+## Consecutive update regression — 2026-11-01
+
+An installed v2.10.0 service downloaded v2.11.0 and drained work, then reported
+success for v2.10.0 without installing v2.11.0. A retained completed transaction
+from the previous update was being used to clear the newer pending target.
+Completed-commit recovery now requires the same pending version and signed
+candidate identity; older evidence is retained without clearing a newer barrier.
+The regression fixture downloads a second signed release with accepted work,
+then finishes that work and verifies installation, pending-state retention and
+retention of the staged installer, both uninterrupted and after manager restart.
+The existing interrupted-commit recovery and Linux race checks pass. The native
+Windows test executable compiles and Windows lint passes. Local execution under
+the unprivileged desktop user fails at the existing SYSTEM-owner protection
+setup, before exercising the coordinator; elevated CI must execute that coverage.
+
+An already installed affected coordinator can require a manual bootstrap upgrade
+with the complete official installer after accepted jobs finish. Do not delete
+update journals or force-stop active encodes to work around this issue.

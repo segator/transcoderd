@@ -420,3 +420,62 @@ func TestWorkspaceCannotOverlapStagingCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCompletedOldTransactionDoesNotClearNewPendingUpdate(t *testing.T) {
+	for _, restart := range []bool{false, true} {
+		t.Run(fmt.Sprintf("restart=%t", restart), func(t *testing.T) { completedOldTransactionDoesNotClearNewPendingUpdate(t, restart) })
+	}
+}
+
+func completedOldTransactionDoesNotClearNewPendingUpdate(t *testing.T, restart bool) {
+	t.Helper()
+	newer, pub, key, _ := fixtureManifest(t)
+	older := newer
+	older.Version = "v99.0.0"
+	older.Installer.Name = "transcoderd-worker-v99.0.0-windows-amd64-setup.exe"
+	olderClient := fixtureRelease(t, older, pub, key, nil)
+	oldCandidate, _, err := olderClient.Check(context.Background(), "v98.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := fixtureRelease(t, newer, pub, key, nil)
+	dir := t.TempDir()
+	if err := SaveJSON(TransactionPath(dir), &Transaction{Phase: "completed", Candidate: *oldCandidate}); err != nil {
+		t.Fatal(err)
+	}
+	active, installs := 1, 0
+	manager := NewManager(dir, older.Version, client, Hooks{
+		Drain: func() (int, int, error) { return active, 0, nil },
+		Install: func(_ *Candidate, m *Manifest, _ string) error {
+			if m.Version != newer.Version {
+				t.Fatal("wrong target")
+			}
+			installs++
+			return nil
+		},
+	})
+	now := time.Now()
+	if err := manager.Step(context.Background(), now, true); err != nil {
+		t.Fatal(err)
+	}
+	if !manager.Snapshot().Pending || manager.Snapshot().Phase != "draining" {
+		t.Fatal("new update did not download and drain")
+	}
+	active = 0
+	if restart {
+		manager = NewManager(dir, older.Version, client, manager.hooks)
+	}
+	if err := manager.Step(context.Background(), now.Add(time.Second), false); err != nil {
+		t.Fatal(err)
+	}
+	state, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyFile(filepath.Join(StageDir(dir, &newer), newer.Installer.Name), newer.Installer); err != nil {
+		t.Fatalf("new staged installer was removed: %v", err)
+	}
+	if installs != 1 || !state.Pending || state.TargetVersion != newer.Version {
+		t.Fatalf("installs=%d state=%+v", installs, state.Status)
+	}
+}

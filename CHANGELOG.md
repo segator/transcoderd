@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.2](https://github.com/segator/transcoderd/compare/v2.11.1...v2.11.2) (2026-11-01)
+
+
+### 🐛 Bug Fixes
+
+* **windows:** wait for accepted work during manual upgrades ([#200](https://github.com/segator/transcoderd/issues/200)) ([884c371](https://github.com/segator/transcoderd/commit/884c371c0b5b120574e910070a3d64942c4fbe01))
+
 ## [2.11.1](https://github.com/segator/transcoderd/compare/v2.11.0...v2.11.1) (2026-11-01)
 
 

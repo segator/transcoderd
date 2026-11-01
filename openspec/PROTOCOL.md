@@ -144,3 +144,15 @@ this is not a service command. No HTTP power-management endpoint is exposed.
 The worker's local `finish-accepted` command closes admission and runs accepted
 queued work; the next explicit admission-limit change releases this operator
 hold. Maintenance admission holds remain independent.
+
+### Manual Setup preparation
+
+The installer's extracted service helper accepts `--prepare-upgrade-wait`. It
+polls the restricted desktop status channel and existing worker `hold-admission`
+controls until both profiles report no accepted jobs, queued work, active encodes
+or reserved requests. It then invokes `prepare-upgrade` and stops the service.
+The immediate `--prepare-upgrade` path remains available for uninstall. Service
+preparation drains all connected profiles before returning busy and rejects
+missing configured profiles. Setup logs remaining jobs/requests while waiting;
+the wait is bounded to 24 hours and ends if its Setup parent process exits.
+Neither path force-stops accepted work or arms PC shutdown.

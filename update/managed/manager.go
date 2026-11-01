@@ -1,6 +1,7 @@
 package managed
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math/rand/v2"
@@ -116,7 +117,11 @@ func (m *Manager) Step(ctx context.Context, now time.Time, force bool) error {
 			return m.failure(s, e, now)
 		}
 		target, _ := Version(manifest.Version)
-		if installed.EQ(target) {
+		samePending := s.TargetVersion == manifest.Version
+		if s.Candidate != nil {
+			samePending = samePending && bytes.Equal(s.Candidate.Data, t.Candidate.Data) && bytes.Equal(s.Candidate.Signature, t.Candidate.Signature)
+		}
+		if installed.EQ(target) && samePending {
 			return ClearCompleted(m.dir, m.version)
 		}
 	}

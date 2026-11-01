@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.1](https://github.com/segator/transcoderd/compare/v2.11.0...v2.11.1) (2026-11-01)
+
+
+### 🐛 Bug Fixes
+
+* **update:** keep newer targets pending after previous completion ([#198](https://github.com/segator/transcoderd/issues/198)) ([ca86f6d](https://github.com/segator/transcoderd/commit/ca86f6dbc55faaa00d29cb2ecb8437e8be76c336))
+
 ## [2.11.0](https://github.com/segator/transcoderd/compare/v2.10.0...v2.11.0) (2026-10-31)
 
 

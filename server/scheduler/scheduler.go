@@ -144,19 +144,23 @@ func (r *RuntimeScheduler) GetWorkerSettings(ctx context.Context, name string) (
 }
 
 func (r *RuntimeScheduler) SetWorkerSettings(ctx context.Context, name string, settings model.WorkerSettings) error {
-	if settings.Independent() {
-		if err := settings.ValidateWrite(); err != nil {
-			return fmt.Errorf("%w: %v", ErrInvalidWorkerSettings, err)
+	if err := settings.ValidateWrite(); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidWorkerSettings, err)
+	}
+	worker, err := r.repo.GetWorker(ctx, name)
+	if err != nil && !errors.Is(err, repository.ErrElementNotFound) {
+		return err
+	}
+	if worker != nil && worker.Runtime != nil && worker.Runtime.ManagedProfile {
+		total := 0
+		if settings.Independent() {
+			total, _ = settings.Total()
+		} else {
+			total = *settings.MaxActiveJobs
 		}
-		worker, err := r.repo.GetWorker(ctx, name)
-		if err != nil && !errors.Is(err, repository.ErrElementNotFound) {
-			return err
-		}
-		if worker != nil && worker.Runtime != nil && worker.Runtime.ManagedProfile {
-			rt := worker.Runtime
-			if *settings.CPUJobs+*settings.GPUJobs > 64 || (rt.Encoder == "av1_nvenc" && *settings.CPUJobs > 0) || (rt.Encoder != "av1_nvenc" && *settings.GPUJobs > 0) {
-				return fmt.Errorf("%w: Windows profiles keep their configured encoder class and support up to 64 jobs", ErrInvalidWorkerSettings)
-			}
+		incompatible := settings.Independent() && ((worker.Runtime.Encoder == "av1_nvenc" && *settings.CPUJobs > 0) || (worker.Runtime.Encoder != "av1_nvenc" && *settings.GPUJobs > 0))
+		if total > 64 || incompatible {
+			return fmt.Errorf("%w: Windows profiles keep their configured encoder class and support up to 64 jobs", ErrInvalidWorkerSettings)
 		}
 	}
 	return r.repo.SetWorkerSettings(ctx, name, settings)

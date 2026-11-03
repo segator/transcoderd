@@ -7,7 +7,7 @@ The fleet dashboard must stay synchronized with the current cross-platform worke
 - Integrate the latest worker dashboards, Windows service and queue/RAM pause behavior without losing independent encoders or media functionality.
 - Add atomic CPU/GPU local web/CLI controls backed by server persistence; poll server settings while paused and retain holds during limit changes.
 - Publish queue, RAM, individual job and maintenance hold states; display them distinctly in the server dashboard.
-- Bootstrap managed settings only when absent; show observed Windows profile limits instead of stale saved form values.
+- Use managed defaults only when server settings are absent; show observed Windows profile limits instead of stale saved form values.
 - Preserve the current one-extra-pipeline-job policy and queued-encode pause contract from main.
 
 ## Capabilities

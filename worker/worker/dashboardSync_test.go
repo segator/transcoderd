@@ -170,6 +170,7 @@ func TestWorkerUIAndFleetDashboardSynchronizeBothDirections(t *testing.T) {
 	publish()
 	call("PUT", fleet.URL+"/dashboard/api/workers/synced-node/settings", "encoding123", `{"cpuJobs":1,"gpuJobs":1}`, 400)
 	call("PUT", fleet.URL+"/dashboard/api/workers/synced-node/settings", "encoding123", `{"cpuJobs":65,"gpuJobs":0}`, 400)
+	call("PUT", fleet.URL+"/dashboard/api/workers/synced-node/settings", "encoding123", `{"maxActiveJobs":65}`, 400)
 	call("PUT", fleet.URL+"/dashboard/api/workers/synced-node/settings", "encoding123", `{"cpuJobs":4,"gpuJobs":0}`, 204)
 }
 
@@ -192,7 +193,7 @@ func TestLocalPairWriteFailurePreservesRuntimeAndRAMHold(t *testing.T) {
 	}
 }
 
-func TestFinishHoldAndManagedEmptyBootstrap(t *testing.T) {
+func TestFinishHoldAndManagedDefaultsWithoutOverrideWrites(t *testing.T) {
 	executor := testAdmissionWorker(2)
 	executor.UseManagedLimits()
 	executor.RequireWorkerSettings()
@@ -209,13 +210,13 @@ func TestFinishHoldAndManagedEmptyBootstrap(t *testing.T) {
 	client := serverclient.NewServerClient(&web.Config{Domain: server.URL}, "node")
 	executor.client = client
 	coordinator := NewServerCoordinator(client, executor, nil, testConsoleLogger{})
-	if !coordinator.loadPersistedWorkerSettings(t.Context()) || writes != 1 {
-		t.Fatalf("empty managed bootstrap writes = %d", writes)
+	if !coordinator.loadPersistedWorkerSettings(t.Context()) || writes != 0 {
+		t.Fatalf("unexpected managed bootstrap writes = %d", writes)
 	}
 	if err := coordinator.syncWorkerSettings(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if writes != 1 {
+	if writes != 0 {
 		t.Fatal("normal poll overwrote settings")
 	}
 	if err := executor.FinishAcceptedJobs(); err != nil {

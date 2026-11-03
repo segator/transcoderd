@@ -454,8 +454,8 @@ func (e *JobExecutor) DrainAcceptedJobs() error {
 	return nil
 }
 
-// UseManagedLimits marks a supervised profile whose local default seeds an absent
-// server override. Existing operator changes remain authoritative across restart.
+// UseManagedLimits identifies a supervised, fixed-class profile. Startup reads
+// existing server overrides and keeps its local default if no override exists.
 func (e *JobExecutor) UseManagedLimits() {
 	e.managedLimits = true
 }

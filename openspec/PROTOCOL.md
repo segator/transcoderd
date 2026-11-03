@@ -139,7 +139,7 @@ held. Operator `set-max-jobs 0` persists zero, stops new requests and queued
 encodes, and applies the configured `pauseMode` to active encodes while verification and uploads finish. Positive
 values resume at that encode target. The admission ceiling is the effective
 encode target plus one accepted pipeline job per profile, including reservations.
-Windows service workers restore persisted per-name settings before admission and seed their service-owned defaults only when no override exists. Paused Windows startup holds restored
+Windows service workers restore persisted per-name settings before admission and keep their service-owned defaults only when no override exists. Paused Windows startup holds restored
 encodes too. Internal `drain` and `hold-admission` permit accepted queued work to
 finish, resuming any RAM-suspended encoder first, without persisting a change to the user's pause preference. The mandatory
 update/configuration lifecycle owns those temporary maintenance transitions.
@@ -189,6 +189,6 @@ Neither path force-stops accepted work or arms PC shutdown.
 
 ### Worker UI synchronization
 
-Local HTTP `POST /api/worker/max-jobs` accepts either legacy `maxJobs` or the atomic `cpuJobs`/`gpuJobs` pair (total at most 1024); missing, mixed or incomplete settings are rejected. Local CLI `control set-encoder-jobs CPU GPU` shares the same server persistence. Settings writes complete before local runtime changes. Managed startup restores server overrides and bootstraps service defaults only when absent. Last committed writes win; worker polls and heartbeats run approximately every five seconds, fleet refresh every five seconds, local browser refresh every two seconds.
+Local HTTP `POST /api/worker/max-jobs` accepts either legacy `maxJobs` or the atomic `cpuJobs`/`gpuJobs` pair (total at most 1024); missing, mixed or incomplete settings are rejected. Local CLI `control set-encoder-jobs CPU GPU` shares the same server persistence. Settings writes complete before local runtime changes. Managed startup restores server overrides and keeps local service defaults when absent. Last committed writes win; worker polls and heartbeats run approximately every five seconds, fleet refresh every five seconds, local browser refresh every two seconds.
 
 Runtime heartbeat data adds `paused`, `ramPaused`, `pauseMode`, `suspendedEncodes`, `finishing`, `draining`, `managedProfile` and bounded `jobs` entries (`id`, `phase`, `state`, `individuallyPaused`, `pausedByWorker`). These observations do not overwrite desired limits. RAM and individual holds survive capacity changes. Queue stop holds pending encodes; maintenance/finish allows accepted work to drain without reopening admission. Windows supervised profiles retain their encoder class and support up to 64 slots each; incompatible fleet pair writes return 400. See `docs/dashboard.md`.

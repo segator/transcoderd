@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Bidirectional operator capacity synchronization
-Local web and CLI controls SHALL persist atomic CPU/GPU pairs before applying them. Local and fleet controls SHALL share per-name desired settings with last committed writes winning. Polling SHALL converge approximately every five seconds, including while paused. Failed writes SHALL leave runtime limits unchanged. Managed startup SHALL honor stored overrides and seed local defaults only when absent.
+Local web and CLI controls SHALL persist atomic CPU/GPU pairs before applying them. Local and fleet controls SHALL share per-name desired settings with last committed writes winning. Polling SHALL converge approximately every five seconds, including while paused. Failed writes SHALL leave runtime limits unchanged. Managed startup SHALL honor stored overrides and use local defaults only when absent.
 
 #### Scenario: Local change reaches fleet
 - **WHEN** an operator saves CPU 2 and GPU 3 from the worker UI
@@ -36,7 +36,7 @@ Windows service profile workers SHALL retain their configured CPU or GPU class a
 ## MODIFIED Requirements
 
 ### Requirement: Runtime worker admission controls
-Local controls SHALL persist operator limits before reporting success. Positive maxima SHALL update concurrency and resume queued encodes. Zero SHALL stop requests and new encodes while preserving targets; active encodes SHALL use pauseMode and downstream work SHALL finish. Startup SHALL honor persisted overrides or initialize absent settings from managed defaults. Maintenance draining SHALL finish accepted work without changing preferences. Controls SHALL remain local.
+Local controls SHALL persist operator limits before reporting success. Positive maxima SHALL update concurrency and resume queued encodes. Zero SHALL stop requests and new encodes while preserving targets; active encodes SHALL use pauseMode and downstream work SHALL finish. Startup SHALL honor persisted overrides or keep local defaults when no override exists. Maintenance draining SHALL finish accepted work without changing preferences. Controls SHALL remain local.
 
 #### Scenario: Read runtime admission status
 - **WHEN** an operator runs the local status command
@@ -103,7 +103,7 @@ The worker SHALL bound FFmpeg jobs by target and preserve per-job workspace, pro
 
 #### Scenario: Desktop startup has stale server limits
 - **WHEN** a Windows service worker starts with four configured GPU slots and a different persisted server maximum
-- **THEN** the persisted maximum is applied before new admission, while the service default seeds the server only if no override exists
+- **THEN** the persisted maximum is applied before new admission, while the local service default applies only if no override exists
 
 #### Scenario: Paused Windows startup
 - **WHEN** the Windows service restarts with its saved pause preference and no newer desired resume has been saved

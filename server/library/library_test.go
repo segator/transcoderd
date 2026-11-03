@@ -276,6 +276,7 @@ func TestRealMetadataCachePreviewSeekAndCancellation(t *testing.T) {
 		t.Fatalf("real metadata = %+v", info.Metadata)
 	}
 	// Cache must work with ffprobe removed from PATH, and invalidate on mtime.
+	processPath := os.Getenv("PATH")
 	t.Setenv("PATH", t.TempDir())
 	if _, err := l.Info(context.Background(), id); err != nil {
 		t.Fatalf("cached metadata = %v", err)
@@ -287,7 +288,7 @@ func TestRealMetadataCachePreviewSeekAndCancellation(t *testing.T) {
 		t.Fatal("changed fingerprint incorrectly reused cached probe")
 	}
 	// Restore process PATH for the genuine preview and independently decode it.
-	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("PATH", processPath)
 	var out bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()

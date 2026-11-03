@@ -1,7 +1,7 @@
 # Design
 
 ## Decisions
-The server persists desired limits by worker name. Both local controls and the fleet UI write the same settings, with last committed writes winning; worker polling converges every five seconds. Local controls serialize with polling and apply only after successful persistence. Heartbeats report observed state without writing desired settings. Managed profiles read persisted settings on startup and seed their service defaults only when no override exists.
+The server persists desired limits by worker name. Both local controls and the fleet UI write the same settings, with last committed writes winning; worker polling converges every five seconds. Local controls serialize with polling and apply only after successful persistence. Heartbeats report observed state without writing desired settings. Managed profiles read persisted settings on startup and use their service defaults locally only when no override exists.
 
 Retain current main's queue stop: zero stops assignment and new FFmpeg starts while running/downstream work finishes. RAM and individual holds remain independent and survive capacity changes. Maintenance/finish holds cannot be reopened by the next poll. Dual encoders retain per-class targets, with one extra pipeline job. Windows continues to supervise separate CPU/GPU-named profiles; live profile limits drive its displayed settings.
 

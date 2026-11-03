@@ -247,4 +247,14 @@ func TestDashboardPostgres(t *testing.T) {
 	if d.Jobs[0].ID != job.Id.String() || len(d.Jobs[0].Progress) != 1 || d.Jobs[0].Progress[0].Percent != 25 || d.Jobs[0].Progress[0].Stale {
 		t.Errorf("SQL current progress = %+v", d.Jobs[0])
 	}
+	// Pause observations persist in JSON and survive a fresh SQL repository reader.
+	runtime := &model.WorkerRuntime{CapacityVersion: 2, Paused: true, RAMPaused: true, SuspendedEncodes: 1, ManagedProfile: true, Encoder: "av1_nvenc", Jobs: []model.WorkerJobRuntime{{ID: job.Id.String(), Phase: "FFMPEG", State: "paused", IndividuallyPaused: true}}}
+	if err := repo.PingServerUpdate(ctx, "127.0.0.3", model.PingEventType{Event: model.Event{WorkerName: "gpu"}, Runtime: runtime}); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := fresh.GetWorker(ctx, "gpu")
+	if err != nil || !reflect.DeepEqual(observed.Runtime, runtime) {
+		t.Fatalf("SQL persisted pause telemetry = %+v, %v", observed, err)
+	}
+
 }

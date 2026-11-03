@@ -149,11 +149,7 @@ func (q *ServerCoordinator) syncWorkerSettings(ctx context.Context) error {
 		return err
 	}
 	current := q.worker.AdmissionStatus()
-	if settings.MaxActiveJobs == nil && !settings.Independent() && q.worker.managedLimits && q.worker.settingsUnresolved() {
-		if err := q.serverClient.SetWorkerMaxActiveJobs(settingsCtx, current.MaxActiveJobs); err != nil {
-			return err
-		}
-	}
+
 	// Service/maintenance holds must not be undone by periodic convergence.
 	if current.Finishing || current.Draining {
 		q.worker.MarkWorkerSettingsResolved()
@@ -234,10 +230,4 @@ func waitForActiveJobs(ctx context.Context, activeJobs func() uint32, interval t
 		}
 	}
 	return true
-}
-
-func (e *JobExecutor) settingsUnresolved() bool {
-	e.admissionMu.Lock()
-	defer e.admissionMu.Unlock()
-	return e.settingsPending
 }

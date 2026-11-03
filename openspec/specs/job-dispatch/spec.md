@@ -375,4 +375,3 @@ Windows service profile workers SHALL retain their configured CPU or GPU class a
 #### Scenario: CPU Windows profile limits
 - **WHEN** fleet controls save GPU slots on a supervised CPU profile
 - **THEN** the request is rejected without changing persisted limits and the GPU input is disabled in that profile's card
-

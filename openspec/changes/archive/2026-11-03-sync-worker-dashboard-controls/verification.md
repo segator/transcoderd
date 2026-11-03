@@ -14,3 +14,5 @@ Verified 2026-11-03 against main 884c371 after integrating the current shared wo
 - Strict OpenSpec validation passed after syncing current capability paths; archive validation is recorded in the final change.
 
 Browser fixtures use synthetic local media and in-memory repositories. No production deployment, production queue changes, GPU hardware validation or native Windows runtime validation was performed. The PR includes earlier fleet dashboard, independent encoder and media-library changes. Rollout requires the additive server migrations 007–009, then updated workers. RAM and individual holds remain runtime observations; configured desired limits persist by worker name.
+
+PR: https://github.com/segator/transcoderd/pull/202

@@ -7,4 +7,4 @@
 
 ## 2. Verify and publish
 - [x] 2.1 Update docs and main specs, run race tests, PostgreSQL, lint, browser checks and cross-platform builds, verify the delivered scenarios.
-- [ ] 2.2 Commit and push the complete change branch and create a reviewable PR against current main.
+- [x] 2.2 Commit and push the complete change branch and create a reviewable PR against current main.

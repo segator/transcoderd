@@ -75,4 +75,3 @@ Worker heartbeats SHALL include observed queue/RAM holds, suspended encode count
 #### Scenario: Remote change reaches local worker UI
 - **WHEN** the fleet dashboard saves new limits and the worker synchronizes them
 - **THEN** local worker controls and Windows profile status show the observed limits without restarting
-

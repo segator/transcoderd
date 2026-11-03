@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"transcoder/helper/command"
 	"transcoder/model"
 	"transcoder/server/repository"
@@ -20,6 +19,8 @@ import (
 	"transcoder/worker/control"
 	localdashboard "transcoder/worker/dashboard"
 	"transcoder/worker/serverclient"
+
+	"github.com/google/uuid"
 )
 
 func TestWorkerUIAndFleetDashboardSynchronizeBothDirections(t *testing.T) {

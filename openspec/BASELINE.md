@@ -17,6 +17,7 @@ The specs state observable behavior and the configuration values that affect it.
 | `persistence` | `server/repository/repository.go`, `server/repository/resources/database/` |
 | `maintenance-and-recovery` | `server/scheduler/scheduler.go`, `worker/job/job.go`, `worker/worker/executor.go` |
 | `self-update` | `update/update.go`, `server/web/web.go`, `worker/worker/coordinator.go` |
+| `operations-dashboard` | `server/web/dashboard*`, `server/repository/dashboard.go`, `model/dashboard.go`, `worker/worker/coordinator.go` |
 
 ## Known implementation gaps
 
@@ -30,7 +31,17 @@ These observations are not normative requirements. They need separate fixes or e
 - Several entries in the accepted-extension list include trailing spaces, so ordinary `.mov`, `.ogx`, `.asf`, and `.vob` files fail the extension check; matching is also case-sensitive.
 - Job intake joins the submitted `sourcePath` with the media root but does not reject traversal segments or verify that the resolved path remains inside the root.
 - Viper enables a `TR_` environment prefix, but does not configure a nested-key replacer. The `envconfig` struct tags are not read by the Viper setup, so nested environment-variable spellings are not a verified interface.
+- Historical notification/presence columns are naive SQL timestamps. Before the dashboard change, notification and presence writes used server local time while progress used database session time. The dashboard change normalizes new monitoring writes and timeout comparisons to UTC, but cannot infer or rewrite the timezone of old rows. Historical dashboards on previously non-UTC deployments may require an explicit operator-led timestamp correction.
 
 ## Verification boundary
 
+Dashboard investigation identified two pre-existing contract discrepancies: main job-dispatch specs still described the prefetch-free admission ceiling and local-only persisted controls even though completed active deltas `keep-encoder-prefetched` and `persist-worker-job-limit` describe shipped code. Those deltas remain separate changes; dashboard capacity displays follow the implemented encode-target-plus-two ceiling. The dashboard change explicitly supersedes the local-only operator restriction while keeping the worker listener local. It also fixes the worker lookup's obsolete `queue_name` scan, which disagreed with migration 003 and would break reads after the additive telemetry migration; PostgreSQL regression coverage verifies that lookup.
+
 `openspec validate --all --strict` checks document structure. Go unit tests cover parts of scheduling, media inspection, context persistence, and steps. PostgreSQL integration tests and Docker end-to-end tests use the `integration` build tag. Structural validation does not prove behavior; each future code change needs tests for the scenarios it affects.
+
+
+### Media library and reviewed intake (2026-11-03)
+
+`server/library/` implements rooted discovery, metadata caching, bounded scan/load operations and compatible/original playback; `server/web/media.go` exposes authenticated dashboard routes. Migration 009 persists fingerprinted probes. The source root is queueable and optional `web.mediaRoots` are read-only. See `docs/media-library.md` for inspected Unraid script provenance and mount examples. Legacy Plex-only metadata type selection is intentionally replaced by filesystem discovery within operator-selected folders.
+
+Investigation found `SQLRepository.WithTransaction` previously committed callback failures and could hide commit errors because its deferred closure observed an unchanged local error. The media-library change fixes rollback/commit propagation and includes real PostgreSQL callback-rollback and deferred-constraint commit-failure tests. Per-file intake is serialized across dashboard and legacy requests to prevent duplicate creation within one scheduler process; trusted reviewed probes avoid a second unrooted probe. Existing legacy recursive job intake has its own extension/filter semantics; the new rooted library does not silently rewrite those contracts.

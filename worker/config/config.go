@@ -40,6 +40,8 @@ type Config struct {
 	MaxActiveJobs   int             `mapstructure:"maxActiveJobs" envconfig:"WORKER_MAX_ACTIVE_JOBS"`
 	PGSConfig       *PGSConfig      `mapstructure:"pgsConfig"`
 	EncodeConfig    *FFMPEGConfig   `mapstructure:"ffmpegConfig"`
+	CPUEncodeConfig *FFMPEGConfig   `mapstructure:"cpuFFmpegConfig"`
+	GPUEncodeConfig *FFMPEGConfig   `mapstructure:"gpuFFmpegConfig"`
 	VerifyDeltaTime float64         `mapstructure:"verifyDeltaTime" envconfig:"WORKER_VERIFY_DELTA_TIME"`
 }
 

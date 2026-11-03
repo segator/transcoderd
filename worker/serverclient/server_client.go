@@ -104,9 +104,7 @@ func (s *ServerClient) RequestJob() (*model.RequestJobResponse, error) {
 	return job, nil
 }
 
-type WorkerSettings struct {
-	MaxActiveJobs *int `json:"maxActiveJobs"`
-}
+type WorkerSettings = model.WorkerSettings
 
 func (s *ServerClient) GetWorkerSettings(ctx context.Context) (*WorkerSettings, error) {
 	req, err := s.requestWithContext(ctx, http.MethodGet, "/api/v1/worker/settings", nil)
@@ -114,6 +112,7 @@ func (s *ServerClient) GetWorkerSettings(ctx context.Context) (*WorkerSettings, 
 		return nil, err
 	}
 	req.Header.Set("workerName", s.workerName)
+	req.Header.Set("workerCapabilities", model.IndependentEncoderCapability)
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -128,6 +127,11 @@ func (s *ServerClient) GetWorkerSettings(ctx context.Context) (*WorkerSettings, 
 	}
 	if settings.MaxActiveJobs != nil && *settings.MaxActiveJobs < 0 {
 		return nil, fmt.Errorf("server returned invalid max active jobs %d", *settings.MaxActiveJobs)
+	}
+	if settings.CPUJobs != nil || settings.GPUJobs != nil {
+		if _, err := settings.Total(); err != nil {
+			return nil, fmt.Errorf("invalid server encoder limits: %w", err)
+		}
 	}
 	return &settings, nil
 }
@@ -182,12 +186,15 @@ func (s *ServerClient) requestWithContext(ctx context.Context, method string, ur
 	return req, nil
 }
 
-func (s *ServerClient) PublishPingEvent() error {
+func (s *ServerClient) PublishPingEvent(runtime ...*model.WorkerRuntime) error {
 	pingEvent := model.PingEventType{
 		Event: model.Event{
 			EventTime:  time.Now(),
 			WorkerName: s.workerName,
 		},
+	}
+	if len(runtime) > 0 {
+		pingEvent.Runtime = runtime[0]
 	}
 	event, err := envelopEvent(model.PingEvent, pingEvent)
 	if err != nil {

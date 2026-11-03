@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="Progreso, compresión y control de workers de TranscoderD"
+    />
+    <title>Operaciones · TranscoderD</title>
+    <link rel="icon" href="/dashboard/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+    <link rel="stylesheet" href="/dashboard/media.css" />
+    <script src="/dashboard/app.js" defer></script>
+    <script src="/dashboard/media.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <aside class="sidebar">
+      <a class="brand" href="#overview"
+        ><span class="brand-mark" aria-hidden="true">t<span>d</span></span
+        ><span
+          >transcoder<span class="brand-d">D</span
+          ><small>OPERATIONS</small></span
+        ></a
+      >
+      <span class="nav-caption">WORKSPACE</span>
+      <nav aria-label="Navegación principal">
+        <a href="#overview" data-view="overview" class="nav-link active"
+          ><span aria-hidden="true">◫</span>Resumen<span class="nav-key"
+            >01</span
+          ></a
+        ><a href="#workers" data-view="workers" class="nav-link"
+          ><span aria-hidden="true">▤</span>Workers<span
+            id="nav-worker-count"
+            class="nav-count"
+            >—</span
+          ></a
+        ><a href="#jobs" data-view="jobs" class="nav-link"
+          ><span aria-hidden="true">▥</span>Trabajos<span
+            id="nav-job-count"
+            class="nav-count"
+            >—</span
+          ></a
+        >
+        <a href="#library" data-view="library" class="nav-link"
+          ><span aria-hidden="true">▷</span>Biblioteca</a
+        >
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="fleet-mini">
+          <span class="eyebrow">ESTADO DE LA FLOTA</span
+          ><strong id="fleet-note">Conectando…</strong
+          ><span id="fleet-detail" class="muted"
+            >Esperando datos del servidor</span
+          >
+          <div class="fleet-lights" id="fleet-lights" aria-hidden="true"></div>
+        </div>
+        <div class="sidebar-footer">
+          <span class="avatar">OP</span>
+          <div><strong>Operador</strong><small>Sesión privada</small></div>
+          <button
+            class="icon-button"
+            id="logout"
+            aria-label="Cerrar sesión"
+            title="Cerrar sesión"
+          >
+            ↪
+          </button>
+        </div>
+      </div>
+    </aside>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="breadcrumb">
+          Workspace <span>/</span> <strong id="breadcrumb-view">Resumen</strong>
+        </div>
+        <div class="topbar-right">
+          <span class="live-status" id="connection"
+            ><span class="status-dot"></span>En directo</span
+          ><span class="topbar-divider"></span
+          ><span class="muted" id="last-sync">Sincronizando…</span
+          ><button
+            class="icon-button"
+            id="refresh"
+            aria-label="Actualizar datos"
+            title="Actualizar datos"
+          >
+            ↻
+          </button>
+        </div>
+      </header>
+      <main id="main" tabindex="-1">
+        <div class="page-heading">
+          <div>
+            <span class="eyebrow">TRANSCODING CONTROL CENTER</span>
+            <h1 id="page-title">
+              Tu flota, en movimiento<span class="accent">.</span>
+            </h1>
+            <p id="page-description">
+              Cada trabajo, cada worker y cada byte que recuperas.
+            </p>
+          </div>
+          <div class="period-control">
+            <label for="period">Periodo de análisis</label
+            ><select id="period">
+              <option value="24">Últimas 24 horas</option>
+              <option value="168" selected>Últimos 7 días</option>
+              <option value="720">Últimos 30 días</option>
+            </select>
+          </div>
+        </div>
+        <div id="error-banner" class="error-banner" role="alert" hidden></div>
+        <div id="loading" class="loading-state">
+          <span class="spinner"></span>Cargando el pulso de tu flota…
+        </div>
+        <div id="dashboard-content" hidden>
+          <section
+            id="overview-view"
+            class="view"
+            aria-label="Resumen de operaciones"
+          >
+            <div id="metrics" class="metric-grid"></div>
+            <div class="primary-grid">
+              <section class="panel throughput-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">RENDIMIENTO</span>
+                    <h2>El ritmo de tu flota</h2>
+                    <p>Trabajos finalizados a lo largo del periodo</p>
+                  </div>
+                  <span class="panel-tag" id="throughput-total">—</span>
+                </div>
+                <div class="chart-legend">
+                  <span><i class="legend-dot green"></i>Completados</span
+                  ><span><i class="legend-dot red"></i>Fallidos</span>
+                </div>
+                <div id="throughput-chart" class="chart-frame"></div>
+              </section>
+              <section class="panel savings-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">IMPACTO ACUMULADO</span>
+                    <h2>Más sitio para lo que viene</h2>
+                  </div>
+                  <span class="panel-icon" aria-hidden="true">↙</span>
+                </div>
+                <div id="storage-impact"></div>
+                <p class="panel-footnote">
+                  Solo tamaños finales verificados. El ahorro no implica una
+                  medición de calidad visual.
+                </p>
+              </section>
+            </div>
+            <div class="analytics-grid">
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">AHORA MISMO</span>
+                    <h2>La cola, de un vistazo</h2>
+                  </div>
+                </div>
+                <div id="queue-chart"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">ESPACIO RECUPERADO</span>
+                    <h2>Ahorro en el tiempo</h2>
+                    <p>Bytes reales por intervalo · periodo seleccionado</p>
+                  </div>
+                </div>
+                <div id="savings-chart" class="chart-frame compact"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">COMPRESIÓN POR CÓDEC</span>
+                    <h2>De origen a destino</h2>
+                    <p>Reducción ponderada · periodo seleccionado</p>
+                  </div>
+                </div>
+                <div id="codec-chart"></div>
+              </section>
+            </div>
+            <div class="detail-grid">
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">TRABAJO EN EQUIPO</span>
+                    <h2>Rendimiento por worker</h2>
+                    <p>Completados y fallidos · periodo seleccionado</p>
+                  </div>
+                  <a href="#workers" class="text-link">Gestionar ↗</a>
+                </div>
+                <div id="worker-chart"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">ACTIVIDAD RECIENTE</span>
+                    <h2>Lo que está pasando</h2>
+                  </div>
+                  <span class="small muted">Eventos reales</span>
+                </div>
+                <div id="activity-feed"></div>
+              </section>
+            </div>
+            <section class="panel jobs-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="eyebrow muted">EN MARCHA</span>
+                  <h2>Un vistazo a los trabajos</h2>
+                  <p>
+                    Progreso de la fase actual · actualizaciones del worker cada
+                    ~15 s
+                  </p>
+                </div>
+                <a href="#jobs" class="text-link">Ver trabajos ↗</a>
+              </div>
+              <div id="overview-jobs" class="table-wrap"></div>
+            </section>
+          </section>
+          <section
+            id="workers-view"
+            class="view"
+            aria-label="Gestión de workers"
+            hidden
+          >
+            <div class="info-strip">
+              <span aria-hidden="true">ⓘ</span>
+              <p>
+                Cada worker puede codificar en CPU y GPU a la vez. Los dos
+                límites se guardan juntos y se aplican sin reiniciar.
+                <strong
+                  >0 desactiva ese grupo; ambos a 0 pausan la admisión.</strong
+                >
+                Los trabajos aceptados continúan.
+              </p>
+            </div>
+            <div id="worker-cards" class="worker-grid"></div>
+          </section>
+          <section
+            id="jobs-view"
+            class="view"
+            aria-label="Explorador de trabajos"
+            hidden
+          >
+            <section class="panel jobs-panel">
+              <div class="job-filters">
+                <div
+                  class="filter-tabs"
+                  role="group"
+                  aria-label="Filtrar por estado"
+                >
+                  <button data-filter="all" class="filter-tab active">
+                    Todos</button
+                  ><button data-filter="active" class="filter-tab">
+                    Activos</button
+                  ><button data-filter="queued" class="filter-tab">
+                    En cola</button
+                  ><button data-filter="completed" class="filter-tab">
+                    Completados</button
+                  ><button data-filter="failed" class="filter-tab">
+                    Fallidos
+                  </button>
+                </div>
+                <label class="search-field"
+                  ><span aria-hidden="true">⌕</span
+                  ><input
+                    type="search"
+                    id="job-search"
+                    placeholder="Buscar archivo o worker…"
+                    aria-label="Buscar archivo, UUID o worker"
+                /></label>
+              </div>
+              <p class="table-note">
+                Hasta 100 trabajos: primero activos, después cola y resultados
+                recientes. Los contadores y gráficos resumen toda la base de
+                datos.
+              </p>
+              <div id="job-list" class="table-wrap"></div>
+            </section>
+          </section>
+          <section
+            id="library-view"
+            class="view"
+            aria-label="Biblioteca de vídeos"
+            hidden
+          >
+            <div class="media-layout">
+              <section class="panel media-filter-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">DEL ARCHIVO A LA COLA</span>
+                    <h2>Encuentra tu próxima tanda</h2>
+                    <p>Revisa los resultados antes de cargar jobs.</p>
+                  </div>
+                </div>
+                <form id="media-filters">
+                  <label for="media-root">Biblioteca</label
+                  ><select id="media-root">
+                    <option value="source">Origen</option>
+                  </select>
+                  <label for="media-folder">Carpeta de origen</label>
+                  <div class="media-folder-input">
+                    <input
+                      id="media-folder"
+                      value="."
+                      placeholder="Carpeta relativa"
+                    /><button
+                      type="button"
+                      id="media-open-folder"
+                      class="button"
+                      aria-label="Abrir carpeta"
+                    >
+                      ↗
+                    </button>
+                  </div>
+                  <label for="media-preset">Preajuste</label
+                  ><select id="media-preset">
+                    <option value="all">Todos los vídeos</option>
+                    <option value="movies">Películas · alto bitrate</option>
+                    <option value="series">Series · alto bitrate</option>
+                  </select>
+                  <p class="media-help">
+                    Preajustes basados en los scripts de Unraid. Todos los
+                    criterios son editables.
+                  </p>
+                  <label for="media-contains">Ruta contiene</label
+                  ><input
+                    id="media-contains"
+                    placeholder="Peliculas, Series o parte del nombre"
+                  />
+                  <label for="media-exclude">Excluir rutas que contengan</label
+                  ><input
+                    id="media-exclude"
+                    placeholder="Por ejemplo: extras"
+                  />
+                  <div class="media-field-pair">
+                    <div>
+                      <label for="media-width">Ancho mayor de</label
+                      ><input
+                        id="media-width"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value="0"
+                      /><small>píxeles · 0 sin filtro</small>
+                    </div>
+                    <div>
+                      <label for="media-bitrate">Bitrate mayor de</label
+                      ><input
+                        id="media-bitrate"
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value="0"
+                      /><small>Mb/s · total estimado</small>
+                    </div>
+                  </div>
+                  <div class="media-field-pair">
+                    <div>
+                      <label for="media-min-size">Tamaño mínimo</label
+                      ><input
+                        id="media-min-size"
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value="0"
+                      /><small>GiB</small>
+                    </div>
+                    <div>
+                      <label for="media-max-size">Tamaño máximo</label
+                      ><input
+                        id="media-max-size"
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value="0"
+                      /><small>GiB · 0 sin límite</small>
+                    </div>
+                  </div>
+                  <label for="media-include-codecs">Solo estos códecs</label
+                  ><input
+                    id="media-include-codecs"
+                    placeholder="Todos · o h264, hevc, av1…"
+                  />
+                  <label for="media-exclude-codecs">Excluir códecs</label
+                  ><input
+                    id="media-exclude-codecs"
+                    placeholder="Por ejemplo: hevc, av1"
+                  />
+                  <label class="media-check"
+                    ><input
+                      id="media-recursive"
+                      type="checkbox"
+                      checked
+                    />Incluir subcarpetas</label
+                  >
+                  <label class="media-check"
+                    ><input
+                      id="media-eligible-only"
+                      type="checkbox"
+                      checked
+                    />Solo archivos aptos para cargar</label
+                  >
+                  <details class="media-advanced">
+                    <summary>Reintentos y límites</summary>
+                    <label class="media-check"
+                      ><input
+                        id="media-retry-failed"
+                        type="checkbox"
+                      />Reintentar jobs fallidos</label
+                    ><label class="media-check"
+                      ><input
+                        id="media-retry-canceled"
+                        type="checkbox"
+                      />Reintentar cancelados</label
+                    ><label for="media-candidate-limit"
+                      >Máximo de candidatos a analizar</label
+                    ><input
+                      id="media-candidate-limit"
+                      type="number"
+                      min="1"
+                      max="5000"
+                      value="1000"
+                    />
+                    <p class="media-help">
+                      Se priorizan los archivos de mayor tamaño. Se omiten los
+                      jobs existentes salvo los reintentos que marques.
+                    </p>
+                  </details>
+                  <button
+                    id="media-scan"
+                    class="button primary media-scan-button"
+                    type="submit"
+                  >
+                    Preparar vista previa <span aria-hidden="true">↗</span>
+                  </button>
+                </form>
+              </section>
+              <div class="media-main">
+                <div
+                  id="media-error"
+                  class="error-banner"
+                  role="alert"
+                  hidden
+                ></div>
+                <section class="panel media-browser-panel">
+                  <div class="panel-header">
+                    <div>
+                      <span class="eyebrow muted">EXPLORA ANTES DE ELEGIR</span>
+                      <h2>Tus vídeos, a un clic</h2>
+                    </div>
+                    <span class="panel-tag" id="media-file-count"
+                      >Cargando…</span
+                    >
+                  </div>
+                  <div id="media-breadcrumb" class="media-breadcrumb"></div>
+                  <div id="media-files" class="table-wrap"></div>
+                  <div id="media-pagination" class="media-pagination"></div>
+                </section>
+                <section id="media-operation-panel" class="panel" hidden>
+                  <div class="panel-header">
+                    <div>
+                      <span class="eyebrow muted" id="media-operation-kind"
+                        >VISTA PREVIA</span
+                      >
+                      <h2 id="media-operation-title">Analizando vídeos…</h2>
+                      <p id="media-operation-detail"></p>
+                    </div>
+                    <button
+                      id="media-cancel"
+                      class="button subtle"
+                      type="button"
+                    >
+                      Detener
+                    </button>
+                  </div>
+                  <div class="progress-track">
+                    <span id="media-progress"></span>
+                  </div>
+                  <p id="media-truncated" class="media-notice" hidden></p>
+                  <div id="media-operation-results"></div>
+                </section>
+                <section id="media-review-panel" class="panel" hidden>
+                  <div class="panel-header">
+                    <div>
+                      <span class="eyebrow muted">REVISA TU SELECCIÓN</span>
+                      <h2>Estos son los candidatos</h2>
+                      <p id="media-review-count"></p>
+                    </div>
+                    <button id="media-select-all" class="button" type="button">
+                      Seleccionar aptos
+                    </button>
+                  </div>
+                  <p id="media-dirty" class="media-notice" hidden>
+                    Has cambiado los filtros. Prepara otra vista previa antes de
+                    cargar jobs.
+                  </p>
+                  <div id="media-selection" class="table-wrap"></div>
+                  <div class="media-queue-bar">
+                    <div>
+                      <strong id="media-selected-count">0 seleccionados</strong>
+                      <p id="media-selected-size" class="muted small"></p>
+                    </div>
+                    <label for="media-target"
+                      >Objetivo máximo<input
+                        id="media-target"
+                        type="number"
+                        min="1"
+                        max="5000"
+                        value="500" /></label
+                    ><button
+                      id="media-queue"
+                      class="button primary"
+                      disabled
+                      type="button"
+                    >
+                      Cargar selección
+                    </button>
+                  </div>
+                  <p class="media-help">
+                    Solo se cuentan los jobs cargados con éxito. Los archivos
+                    cambiados, ya en cola o no disponibles se muestran en el
+                    resultado.
+                  </p>
+                </section>
+              </div>
+            </div>
+          </section>
+          <footer class="page-footer">
+            <span
+              ><span class="footer-mark" aria-hidden="true">◈</span> TranscoderD
+              <span class="muted">/ Operations</span></span
+            ><span
+              >Datos reales. Decisiones claras.
+              <span class="muted">· Actualización cada 5 s</span></span
+            >
+          </footer>
+        </div>
+      </main>
+    </div>
+    <dialog id="media-player" class="media-player">
+      <div class="media-player-heading">
+        <div>
+          <span class="eyebrow muted">REPRODUCTOR</span>
+          <h2 id="media-player-title">Vídeo</h2>
+        </div>
+        <button
+          id="media-player-close"
+          type="button"
+          class="icon-button"
+          aria-label="Cerrar reproductor"
+        >
+          ×
+        </button>
+      </div>
+      <div
+        id="media-player-error"
+        class="error-banner"
+        role="alert"
+        hidden
+      ></div>
+      <video id="media-video" controls playsinline preload="none"></video>
+      <div class="media-timeline">
+        <span id="media-player-current">00:00</span
+        ><input
+          id="media-player-seek"
+          type="range"
+          min="0"
+          max="1"
+          step="1"
+          value="0"
+          disabled
+          aria-label="Posición del vídeo completo"
+        /><span id="media-player-duration">—</span>
+      </div>
+      <div class="media-player-controls">
+        <button id="media-player-toggle" class="button primary" type="button">
+          Reproducir</button
+        ><label
+          >Archivo<select
+            id="media-player-asset"
+            aria-label="Origen o salida"
+          ></select></label
+        ><label
+          >Modo<select id="media-player-mode">
+            <option value="compatible">Compatible · hasta 720p</option>
+            <option value="original">Original · sin conversión</option>
+          </select></label
+        >
+      </div>
+      <p id="media-player-info" class="media-help">
+        Cargando información del vídeo…
+      </p>
+      <p class="media-help">
+        La vista compatible convierte vídeo y audio para reproducirlos en el
+        navegador. El archivo original no cambia. La comparación visual a
+        calidad original requiere un formato compatible con tu navegador.
+      </p>
+    </dialog>
+    <div id="toast" class="toast" role="status" hidden></div>
+  </body>
+</html>

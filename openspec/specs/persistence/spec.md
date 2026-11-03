@@ -64,3 +64,36 @@ The server SHALL update a worker's address and last-seen time by worker name. It
 #### Scenario: Active phase progress
 - **WHEN** a progressing event arrives
 - **THEN** its current value is available in progress storage
+
+### Requirement: Optional worker runtime telemetry
+Worker presence SHALL retain optional runtime telemetry from Ping events, including encoder, CPU/GPU kind, admission and schedule state, active jobs, active encodes, and encode target. Presence freshness SHALL use server receipt time. Pings without telemetry SHALL remain accepted and indicate that runtime measurements are unavailable.
+
+#### Scenario: Modern worker heartbeat
+- **WHEN** a worker sends Ping with runtime status
+- **THEN** the server updates presence and exposes that status to authenticated dashboard readers
+
+#### Scenario: Legacy worker heartbeat
+- **WHEN** a worker sends Ping without runtime status
+- **THEN** presence still updates and the dashboard reports runtime measurements as unavailable
+
+### Requirement: UTC server monitoring timestamps
+New server-received job notifications, worker presence, and progress updates SHALL record UTC timestamps independent of the server or database session timezone. Dashboard time buckets and freshness SHALL use UTC instants. Existing naive historical timestamps SHALL remain unchanged because their original timezone cannot be inferred reliably.
+
+#### Scenario: Server uses a non-UTC timezone
+- **WHEN** a server configured with a non-UTC local timezone receives a job notification or presence update
+- **THEN** a dashboard refresh reports the event at its actual receipt instant rather than shifting it by the local UTC offset
+
+### Requirement: Atomic per-worker encoder limit pairs
+The server SHALL persist optional non-negative `cpuJobs` and `gpuJobs` together by stable worker name. Incomplete pairs, negative values, mixed single/pair inputs, and integer-overflowing sums SHALL be rejected without mutation. Legacy writes SHALL clear the pair. Legacy clients without independent-encoder capability SHALL read aggregate zero when a pair exists.
+
+#### Scenario: Pair survives server restart
+- **WHEN** CPU 2 and GPU 3 are saved for a worker and read through a fresh repository
+- **THEN** both values are restored together and another worker remains unchanged
+
+#### Scenario: Invalid pair
+- **WHEN** a request contains only one class limit, a negative value, or an overflowing sum
+- **THEN** the server returns an input error and keeps the previously stored settings
+
+#### Scenario: Old worker reads a dual override
+- **WHEN** a client without the independent-encoder capability reads a stored pair
+- **THEN** it receives aggregate zero and drains accepted work instead of assigning all slots to its only encoder

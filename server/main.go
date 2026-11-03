@@ -26,6 +26,9 @@ var (
 
 func init() {
 	cmd.CommonFlags()
+	pflag.String("web.dashboardToken", "encoding123", "Token for dashboard access and worker capacity controls")
+	pflag.StringToString("web.mediaRoots", nil, "Additional read-only media libraries, e.g. encoded=/target")
+	pflag.Int("web.previewMaxStreams", 2, "Maximum simultaneous compatible video previews")
 
 	pflag.Duration("server.scheduler.scheduleTime", time.Minute*5, "Execute the scheduling loop every X seconds")
 	pflag.Duration("server.scheduler.jobTimeout", time.Hour*24, "Requeue jobs that are running for more than X minutes")

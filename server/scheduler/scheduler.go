@@ -35,9 +35,12 @@ type Scheduler interface {
 	RequestJob(ctx context.Context, workerName string) (*model.RequestJobResponse, error)
 	GetWorkerMaxActiveJobs(ctx context.Context, workerName string) (*int, error)
 	SetWorkerMaxActiveJobs(ctx context.Context, workerName string, max int) error
+	GetWorkerSettings(ctx context.Context, name string) (*model.WorkerSettings, error)
+	SetWorkerSettings(ctx context.Context, name string, settings model.WorkerSettings) error
 	HandleWorkerEvent(ctx context.Context, taskEvent *model.EnvelopEvent) error
 	CancelJob(ctx context.Context, id string) error
 	GetJob(ctx context.Context, id string) (*model.Job, error)
+	GetDashboard(ctx context.Context, hours int) (*model.Dashboard, error)
 }
 
 type Config struct {
@@ -54,6 +57,7 @@ type RuntimeScheduler struct {
 	checksumChan    chan PathChecksum
 	pathChecksumMap map[string]string
 	jobRequestMu    sync.Mutex
+	jobIntakeMu     sync.Mutex
 	handleEventMu   sync.Mutex
 }
 
@@ -127,6 +131,18 @@ func (r *RuntimeScheduler) GetJob(ctx context.Context, id string) (*model.Job, e
 
 func (r *RuntimeScheduler) GetWorkerMaxActiveJobs(ctx context.Context, workerName string) (*int, error) {
 	return r.repo.GetWorkerMaxActiveJobs(ctx, workerName)
+}
+
+func (r *RuntimeScheduler) GetWorkerSettings(ctx context.Context, name string) (*model.WorkerSettings, error) {
+	return r.repo.GetWorkerSettings(ctx, name)
+}
+
+func (r *RuntimeScheduler) SetWorkerSettings(ctx context.Context, name string, settings model.WorkerSettings) error {
+	return r.repo.SetWorkerSettings(ctx, name, settings)
+}
+
+func (r *RuntimeScheduler) GetDashboard(ctx context.Context, hours int) (*model.Dashboard, error) {
+	return r.repo.GetDashboard(ctx, hours, time.Now().UTC())
 }
 
 func (r *RuntimeScheduler) SetWorkerMaxActiveJobs(ctx context.Context, workerName string, max int) error {
@@ -425,6 +441,17 @@ type ScheduleJobRequestResult struct {
 }
 
 func (r *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *model.JobRequest) (job *model.Job, err error) {
+	r.jobIntakeMu.Lock()
+	defer r.jobIntakeMu.Unlock()
+	return r.scheduleJobRequestLocked(ctx, jobRequest)
+}
+
+// scheduleJobRequestLocked requires jobIntakeMu so reviewed and legacy intake
+// share the same duplicate check and atomic per-file persistence.
+func (r *RuntimeScheduler) scheduleJobRequestLocked(ctx context.Context, jobRequest *model.JobRequest) (job *model.Job, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	l := log.WithFields(log.Fields{
 		"source_path": jobRequest.SourcePath,
 	})
@@ -446,6 +473,13 @@ func (r *RuntimeScheduler) scheduleJobRequest(ctx context.Context, jobRequest *m
 			eventsToAdd, err = r.updateJobByRequest(job, jobRequest)
 			if err != nil {
 				return err
+			}
+			if jobRequest.SourceProbe != nil {
+				job.SourceSize, job.SourceProbe = jobRequest.SourceSize, jobRequest.SourceProbe
+				job.TargetSize, job.TargetProbe = 0, nil
+				if err := tx.UpdateJob(ctx, job); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -475,15 +509,18 @@ func (r *RuntimeScheduler) newJob(ctx context.Context, tx repository.Repository,
 	}
 
 	sourcePath := filepath.Join(r.config.SourcePath, jobRequest.SourcePath)
-	probeData, err := ffmpeg.ExtractFFProbeData(ctx, sourcePath)
-	if err != nil {
-		l.Warnf("failed to ffprobe source file: %v", err)
-	} else {
-		job.SourceProbe = ffmpeg.ProbeDataToMediaProbe(probeData)
+	job.SourceProbe = jobRequest.SourceProbe
+	if job.SourceProbe == nil {
+		probeData, err := ffmpeg.ExtractFFProbeData(ctx, sourcePath)
+		if err != nil {
+			l.Warnf("failed to ffprobe source file: %v", err)
+		} else {
+			job.SourceProbe = ffmpeg.ProbeDataToMediaProbe(probeData)
+		}
 	}
 
 	l.WithField("job_id", job.Id.String()).Info("Creating new job")
-	err = tx.AddJob(ctx, job)
+	err := tx.AddJob(ctx, job)
 	if err != nil {
 		return nil, err
 	}
@@ -759,6 +796,9 @@ func (r *RuntimeScheduler) assignedJobMaintenance(ctx context.Context) error {
 func (r *RuntimeScheduler) updateJobByRequest(job *model.Job, jobRequest *model.JobRequest) ([]*model.TaskEventType, error) {
 	var eventsToAdd []*model.TaskEventType
 	lastEvent := job.Events.GetLatestPerNotificationType(model.JobNotification)
+	if lastEvent == nil {
+		return nil, fmt.Errorf("job %s has no recorded job status", job.Id)
+	}
 	status := lastEvent.Status
 
 	switch {

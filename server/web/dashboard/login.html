@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="description" content="Centro de operaciones de TranscoderD" />
+    <title>Acceder · TranscoderD</title>
+    <link rel="icon" href="/dashboard/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+    <script src="/dashboard/login.js" defer></script>
+  </head>
+  <body class="login-body">
+    <main class="login-layout">
+      <section class="login-story" aria-label="TranscoderD">
+        <a class="brand" href="/dashboard/"
+          ><span class="brand-mark" aria-hidden="true">t<span>d</span></span
+          ><span
+            >transcoder<span class="brand-d">D</span
+            ><small>OPERATIONS</small></span
+          ></a
+        >
+        <div class="login-copy">
+          <span class="eyebrow"
+            ><span class="status-dot"></span> DISTRIBUTED ENCODING</span
+          >
+          <h1>Más historias.<br />Menos espacio.</h1>
+          <p>
+            El pulso de tu flota, la evolución de cada trabajo y el espacio que
+            recuperas. Todo, en un mismo lugar.
+          </p>
+          <div class="signal-art" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span
+            ><span></span><span></span><span></span><span></span><span></span
+            ><span></span><span></span><span></span><span></span><span></span
+            ><span></span><span></span><span></span><span></span><span></span
+            ><span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+        <p class="login-foot">
+          TRANSCODERD <span>CONTROL. CLARIDAD. CADA FRAME.</span>
+        </p>
+      </section>
+      <section class="login-panel">
+        <div class="login-box">
+          <span class="lock-icon" aria-hidden="true">⌁</span
+          ><span class="eyebrow muted">ACCESO PRIVADO</span>
+          <h2>Bienvenido a bordo.</h2>
+          <p>Introduce tu token para abrir el centro de operaciones.</p>
+          <form id="login-form">
+            <label for="token">Token de acceso</label>
+            <div class="token-field">
+              <input
+                id="token"
+                name="token"
+                type="password"
+                autocomplete="current-password"
+                required
+                maxlength="4096"
+                placeholder="Tu token de acceso"
+              /><button
+                id="toggle-token"
+                type="button"
+                aria-label="Mostrar token"
+                aria-pressed="false"
+              >
+                Ver
+              </button>
+            </div>
+            <p id="login-error" class="form-error" role="alert"></p>
+            <button class="button primary login-submit" type="submit">
+              Entrar al dashboard <span aria-hidden="true">↗</span>
+            </button>
+          </form>
+          <p class="session-note">
+            Sesión privada de 12 horas. El token no se guarda en el navegador.
+          </p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

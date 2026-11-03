@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"transcoder/model"
 	"transcoder/server/web"
 	"transcoder/worker/config"
 	"transcoder/worker/serverclient"
@@ -63,6 +65,125 @@ func TestLoadPersistedWorkerSettingsBeforeAdmission(t *testing.T) {
 				t.Errorf("maximum after settings load = %d, want %d", got, tt.wantMax)
 			}
 		})
+	}
+}
+
+func TestSynchronizeRemoteCapacityWhileRunningAndPaused(t *testing.T) {
+	var maximum atomic.Int64
+	maximum.Store(3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		max := int(maximum.Load())
+		_ = json.NewEncoder(w).Encode(serverclient.WorkerSettings{MaxActiveJobs: &max})
+	}))
+	defer server.Close()
+	executor := testAdmissionWorker(2)
+	executor.activeJobs = 4
+	client := serverclient.NewServerClient(&web.Config{Domain: server.URL}, "gpu")
+	coordinator := NewServerCoordinator(client, executor, nil, testConsoleLogger{})
+	for _, max := range []int{3, 1, 0, 4} {
+		maximum.Store(int64(max))
+		if err := coordinator.syncWorkerSettings(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		status := executor.AdmissionStatus()
+		if status.MaxActiveJobs != max || status.ActiveJobs != 4 {
+			t.Fatalf("sync capacity %d = %+v, want limit and uninterrupted accepted jobs", max, status)
+		}
+		wantEncode := max
+		if max == 0 {
+			wantEncode = 1
+		}
+		if status.MaxEncodes != wantEncode {
+			t.Errorf("encode target = %d, want %d", status.MaxEncodes, wantEncode)
+		}
+	}
+}
+
+func TestWorkerTelemetryAndPing(t *testing.T) {
+	var ping model.PingEventType
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var envelope model.EnvelopEvent
+		if err := json.NewDecoder(r.Body).Decode(&envelope); err != nil {
+			t.Error(err)
+		}
+		ping = model.PingEventType{}
+		if err := json.Unmarshal(envelope.EventData, &ping); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	executor := testAdmissionWorker(2)
+	executor.workerConfig.EncodeConfig = &config.FFMPEGConfig{VideoCodec: config.AV1NVENC}
+	client := serverclient.NewServerClient(&web.Config{Domain: server.URL}, "gpu")
+	if err := client.PublishPingEvent(executor.RuntimeTelemetry()); err != nil {
+		t.Fatal(err)
+	}
+	if ping.Runtime == nil || ping.Runtime.Kind != "gpu" || ping.Runtime.Encoder != config.AV1NVENC || ping.Runtime.MaxEncodes != 2 {
+		t.Errorf("Ping runtime = %+v", ping.Runtime)
+	}
+	if err := client.PublishPingEvent(); err != nil {
+		t.Fatal(err)
+	}
+	if ping.Runtime != nil {
+		t.Error("legacy Ping unexpectedly includes runtime")
+	}
+}
+
+func TestRemoteSettingsFailureLeavesAcceptedWorkAndLimitsUnchanged(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
+	defer server.Close()
+	executor := testAdmissionWorker(2)
+	executor.activeJobs = 3
+	coordinator := NewServerCoordinator(serverclient.NewServerClient(&web.Config{Domain: server.URL}, "gpu"), executor, nil, testConsoleLogger{})
+	if err := coordinator.syncWorkerSettings(t.Context()); err == nil {
+		t.Fatal("syncWorkerSettings() succeeded while unavailable")
+	}
+	status := executor.AdmissionStatus()
+	if status.MaxActiveJobs != 2 || status.MaxEncodes != 2 || status.ActiveJobs != 3 {
+		t.Errorf("status after failed synchronization = %+v, want unchanged limits and jobs", status)
+	}
+}
+
+func TestRemoteSynchronizationSerializesWithLocalControl(t *testing.T) {
+	var remote atomic.Int64
+	remote.Store(3)
+	started, release := make(chan struct{}), make(chan struct{})
+	var first sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			var input serverclient.WorkerSettings
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				t.Error(err)
+				return
+			}
+			remote.Store(int64(*input.MaxActiveJobs))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		max := int(remote.Load())
+		first.Do(func() { close(started); <-release })
+		_ = json.NewEncoder(w).Encode(serverclient.WorkerSettings{MaxActiveJobs: &max})
+	}))
+	defer server.Close()
+	executor := testAdmissionWorker(2)
+	executor.client = serverclient.NewServerClient(&web.Config{Domain: server.URL}, "gpu")
+	coordinator := NewServerCoordinator(executor.client, executor, nil, testConsoleLogger{})
+	polled, saved := make(chan error, 1), make(chan error, 1)
+	go func() { polled <- coordinator.syncWorkerSettings(t.Context()) }()
+	<-started
+	go func() { saved <- executor.PersistMaxActiveJobs(7) }()
+	close(release)
+	if err := <-polled; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-saved; err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.syncWorkerSettings(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if status := executor.AdmissionStatus(); status.MaxActiveJobs != 7 || status.MaxEncodes != 7 || remote.Load() != 7 {
+		t.Errorf("serialized local/remote control = %+v, persisted %d; want 7", status, remote.Load())
 	}
 }
 

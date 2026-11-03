@@ -35,8 +35,14 @@ type Repository interface {
 	GetWorker(ctx context.Context, name string) (*model.Worker, error)
 	GetWorkerMaxActiveJobs(ctx context.Context, name string) (*int, error)
 	SetWorkerMaxActiveJobs(ctx context.Context, name string, max int) error
+	GetWorkerSettings(ctx context.Context, name string) (*model.WorkerSettings, error)
+	SetWorkerSettings(ctx context.Context, name string, settings model.WorkerSettings) error
 	RetrieveQueuedJob(ctx context.Context) (*model.Job, error)
 	GetAllProgressJobs(ctx context.Context) ([]model.TaskProgressType, error)
+	GetDashboard(ctx context.Context, hours int, now time.Time) (*model.Dashboard, error)
+	GetMediaProbe(ctx context.Context, root, path string, size, modified int64) (*model.MediaProbe, error)
+	PutMediaProbe(ctx context.Context, root, path string, size, modified int64, probe *model.MediaProbe) error
+	GetMediaJobStates(ctx context.Context, paths []string) (map[string]model.MediaJobState, error)
 }
 
 type SQLDBOperations interface {
@@ -303,12 +309,12 @@ func (s *SQLRepository) SetWorkerMaxActiveJobs(ctx context.Context, name string,
 	}
 	_, err = db.ExecContext(ctx, `INSERT INTO worker_settings (worker_name, max_active_jobs, updated_at)
 		VALUES ($1, $2, CURRENT_TIMESTAMP)
-		ON CONFLICT (worker_name) DO UPDATE SET max_active_jobs=$2, updated_at=CURRENT_TIMESTAMP`, name, max)
+		ON CONFLICT (worker_name) DO UPDATE SET max_active_jobs=$2, cpu_jobs=NULL, gpu_jobs=NULL, updated_at=CURRENT_TIMESTAMP`, name, max)
 	return err
 }
 
 func (s *SQLRepository) getWorker(ctx context.Context, db SQLDBOperations, name string) (*model.Worker, error) {
-	rows, err := db.QueryContext(ctx, "select * from workers where name=$1", name)
+	rows, err := db.QueryContext(ctx, "select name, ip, last_seen from workers where name=$1", name)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +322,7 @@ func (s *SQLRepository) getWorker(ctx context.Context, db SQLDBOperations, name 
 	worker := model.Worker{}
 	found := false
 	if rows.Next() {
-		err := rows.Scan(&worker.Name, &worker.Ip, &worker.QueueName, &worker.LastSeen)
+		err := rows.Scan(&worker.Name, &worker.Ip, &worker.LastSeen)
 		if err != nil {
 			return nil, err
 		}
@@ -565,7 +571,14 @@ func (s *SQLRepository) PingServerUpdate(ctx context.Context, remoteAddr string,
 	if err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, "INSERT INTO workers (name, ip,last_seen ) VALUES ($1,$2,$3) ON CONFLICT (name) DO UPDATE SET ip = $2, last_seen=$3;", pingEventType.WorkerName, remoteAddr, time.Now())
+	var runtimeJSON []byte
+	if pingEventType.Runtime != nil {
+		runtimeJSON, err = json.Marshal(pingEventType.Runtime)
+		if err != nil {
+			return fmt.Errorf("marshal worker runtime: %w", err)
+		}
+	}
+	_, err = conn.ExecContext(ctx, "INSERT INTO workers (name, ip,last_seen,runtime) VALUES ($1,$2,$3,$4) ON CONFLICT (name) DO UPDATE SET ip=$2, last_seen=$3, runtime=$4;", pingEventType.WorkerName, remoteAddr, time.Now().UTC(), runtimeJSON)
 	return err
 }
 
@@ -621,7 +634,7 @@ func (s *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations,
 	}
 
 	_, err = tx.ExecContext(ctx, "INSERT INTO job_events (job_id, job_event_id,worker_name,event_time,notification_type,status,message)"+
-		" VALUES ($1,$2,$3,$4,$5,$6,$7)", event.JobId.String(), event.EventID, event.WorkerName, time.Now(), event.NotificationType, event.Status, event.Message)
+		" VALUES ($1,$2,$3,$4,$5,$6,$7)", event.JobId.String(), event.EventID, event.WorkerName, time.Now().UTC(), event.NotificationType, event.Status, event.Message)
 	return err
 }
 func (s *SQLRepository) AddJob(ctx context.Context, job *model.Job) error {
@@ -669,11 +682,11 @@ func (s *SQLRepository) updateJob(ctx context.Context, tx SQLDBOperations, job *
 }
 
 func (s *SQLRepository) getTimeoutJobs(ctx context.Context, tx SQLDBOperations, timeout time.Duration) ([]*model.TaskEventType, error) {
-	timeoutDate := time.Now().Add(-timeout)
+	timeoutDate := time.Now().UTC().Add(-timeout)
 
 	rows, err := tx.QueryContext(ctx, "select v.* from job_events v right join "+
 		"(select job_id,max(job_event_id) as job_event_id  from job_events where notification_type='Job'  group by job_id) as m "+
-		"on m.job_id=v.job_id and m.job_event_id=v.job_event_id where status in ('assigned','started') and v.event_time < $1::timestamptz", timeoutDate)
+		"on m.job_id=v.job_id and m.job_event_id=v.job_event_id where status in ('assigned','started') and v.event_time < $1::timestamp", timeoutDate)
 	if err != nil {
 		return nil, err
 	}
@@ -696,28 +709,15 @@ func (s *SQLRepository) WithTransaction(ctx context.Context, transactionFunc fun
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if p := recover(); p != nil {
-			err := sqlTx.Rollback()
-			if err != nil {
-				log.Error(p)
-			}
-			log.Panic(p)
-		} else if err != nil {
-			log.Debugf("Rollback SQLDBOperations %v", sqlTx)
-			err = sqlTx.Rollback()
-			if err != nil {
-				log.Error(err)
-			}
-		} else {
-			if err = sqlTx.Commit(); err != nil {
-				log.Error(err)
-			}
-		}
-	}()
-
+	defer func() { _ = sqlTx.Rollback() }()
 	txRepository := SQLRepository{tx: &SQLTransaction{sqlTx}}
-	return transactionFunc(ctx, &txRepository)
+	if err := transactionFunc(ctx, &txRepository); err != nil {
+		return err
+	}
+	if err := sqlTx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLRepository) queuedJob(ctx context.Context, tx SQLDBOperations) (*model.Job, error) {
@@ -741,13 +741,13 @@ func (s *SQLRepository) queuedJob(ctx context.Context, tx SQLDBOperations) (*mod
 func (s *SQLRepository) insertOrUpdateProgressJob(ctx context.Context, conn SQLDBOperations, jp *model.TaskProgressType) error {
 	query := `
         INSERT INTO job_progress
-        (progress_id, notification_type,job_id,worker_name, percent, eta)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        (progress_id, notification_type,job_id,worker_name, percent, eta, last_update)
+        VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
         ON CONFLICT (progress_id,notification_type)
         DO UPDATE SET
             percent = $5,            
             eta = $6,
-            last_update = now()`
+            last_update = CURRENT_TIMESTAMP AT TIME ZONE 'UTC'`
 
 	_, err := conn.ExecContext(ctx, query, jp.ProgressID, jp.NotificationType, jp.JobId, jp.WorkerName, jp.Percent, jp.ETA.Seconds())
 	if err != nil {

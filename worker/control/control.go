@@ -17,14 +17,21 @@ import (
 const SocketPath = "/run/transcoderd-worker/control.sock"
 
 type AdmissionStatus struct {
-	Accepting       bool   `json:"accepting"`
-	ActiveJobs      uint32 `json:"activeJobs"`
-	ReservedJobs    int    `json:"reservedJobs"`
-	MaxActiveJobs   int    `json:"maxActiveJobs"`
-	MaxAcceptedJobs int    `json:"maxAcceptedJobs"`
-	ActiveEncodes   int    `json:"activeEncodes"`
-	MaxEncodes      int    `json:"maxEncodes"`
-	WithinSchedule  bool   `json:"withinSchedule"`
+	Accepting           bool   `json:"accepting"`
+	ActiveJobs          uint32 `json:"activeJobs"`
+	ReservedJobs        int    `json:"reservedJobs"`
+	MaxActiveJobs       int    `json:"maxActiveJobs"`
+	MaxAcceptedJobs     int    `json:"maxAcceptedJobs"`
+	ActiveEncodes       int    `json:"activeEncodes"`
+	MaxEncodes          int    `json:"maxEncodes"`
+	WithinSchedule      bool   `json:"withinSchedule"`
+	CPUJobs             int    `json:"cpuJobs"`
+	GPUJobs             int    `json:"gpuJobs"`
+	ActiveCPUEncodes    int    `json:"activeCPUEncodes"`
+	ActiveGPUEncodes    int    `json:"activeGPUEncodes"`
+	CPUMaxEncodes       int    `json:"cpuMaxEncodes"`
+	GPUMaxEncodes       int    `json:"gpuMaxEncodes"`
+	IndependentEncoders bool   `json:"independentEncoders"`
 }
 
 type AdmissionController interface {

@@ -62,6 +62,10 @@ func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerCli
 	}
 	stepExecutors := setupStepExecutors(jobExecutor)
 	jobExecutor.stepExecutors = stepExecutors
+	jobExecutor.encodePool.setPrimary(config.EncoderKind(workerConfig.EncodeConfig.VideoCodec))
+	if workerConfig.MaxActiveJobs == 0 {
+		jobExecutor.encodePool.pause()
+	}
 
 	if err := os.MkdirAll(tempPath, os.ModePerm); err != nil {
 		log.Fatal(err)
@@ -257,6 +261,14 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 	if e.encodePool != nil {
 		activeEncodes, maxEncodes = e.encodePool.Status()
 	}
+	var cpuJobs, gpuJobs, cpuActive, gpuActive, cpuTarget, gpuTarget int
+	independent := false
+	if e.encodePool != nil {
+		cpuJobs, gpuJobs, cpuActive, gpuActive, cpuTarget, gpuTarget = e.encodePool.encoderStatus()
+	}
+	if e.encodePool != nil {
+		independent = e.encodePool.hasIndependentLimits()
+	}
 	maxAccepted := 0
 	if e.maxActiveJobs > 0 {
 		maxAccepted = maxAcceptedJobs(maxEncodes)
@@ -270,6 +282,9 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 		ActiveEncodes:   activeEncodes,
 		MaxEncodes:      maxEncodes,
 		WithinSchedule:  withinSchedule,
+		CPUJobs:         cpuJobs, GPUJobs: gpuJobs, ActiveCPUEncodes: cpuActive, ActiveGPUEncodes: gpuActive,
+		CPUMaxEncodes: cpuTarget, GPUMaxEncodes: gpuTarget,
+		IndependentEncoders: independent,
 	}
 }
 
@@ -283,6 +298,28 @@ func (e *JobExecutor) SetMaxActiveJobs(max int) error {
 	if max > 0 && e.encodePool != nil {
 		e.encodePool.SetTarget(max)
 	}
+	if max == 0 && e.encodePool != nil {
+		e.encodePool.pause()
+	}
+	return nil
+}
+
+func (e *JobExecutor) SetEncoderLimits(cpu, gpu int) error {
+	settings := model.WorkerSettings{CPUJobs: &cpu, GPUJobs: &gpu}
+	total, err := settings.Total()
+	if err != nil {
+		return err
+	}
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	if e.encodePool == nil {
+		e.encodePool = newEncodeConcurrency(e.workerConfig.EncodeParallelJobs())
+		if e.workerConfig.EncodeConfig != nil {
+			e.encodePool.setPrimary(config.EncoderKind(e.workerConfig.EncodeConfig.VideoCodec))
+		}
+	}
+	e.encodePool.setLimits(cpu, gpu)
+	e.maxActiveJobs = total
 	return nil
 }
 
@@ -379,6 +416,10 @@ func (e *JobExecutor) ExecuteReservedJob(jobId uuid.UUID, lastEvent int) error {
 		e.ReleaseJobSlot()
 		return err
 	}
+	if err := e.pinAdmissionProfile(jobContext); err != nil {
+		e.ReleaseJobSlot()
+		return err
+	}
 
 	e.publishTaskEvent(jobContext, model.JobNotification, model.StartedNotificationStatus, "")
 
@@ -396,6 +437,11 @@ func (e *JobExecutor) publishTaskEvent(jobContext *job.Context, notificationType
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	l := e.jobLogger(jobContext)
+	if notificationType == model.FFMPEGSNotification && message == "" && jobContext.EncodeConfig != nil {
+		if video, err := jobContext.EncodeConfig.ResolveVideoSettings(); err == nil {
+			message = fmt.Sprintf("%s · %s", jobContext.EncodeKind, video.Codec)
+		}
+	}
 	jobContext.UpdateEvent(notificationType, status, message)
 	event := &model.TaskEventType{
 		Event: model.Event{
@@ -432,9 +478,48 @@ func (e *JobExecutor) stepQueueRoutine(ctx context.Context, stepExecutor *step.E
 }
 
 func (e *JobExecutor) encodeQueueRoutine(ctx context.Context, stepExecutor *step.Executor) {
-	runDynamicStepQueue(ctx, stepExecutor, e.encodePool, func(jobCtx *job.Context) {
+	runEncoderQueue(ctx, stepExecutor.GetJobChan(), e.encodePool, func(jobCtx *job.Context, kind string) {
+		if err := e.pinEncoderProfile(jobCtx, kind); err != nil {
+			stepExecutor.OnError(jobCtx, model.FFMPEGSNotification, err)
+			return
+		}
 		e.processStep(ctx, stepExecutor, jobCtx)
 	})
+}
+
+func (e *JobExecutor) pinEncoderProfile(j *job.Context, kind string) error {
+	if j.EncodeConfig != nil {
+		video, err := j.EncodeConfig.ResolveVideoSettings()
+		if err != nil {
+			return fmt.Errorf("restore encoder profile: %w", err)
+		}
+		if config.EncoderKind(video.Codec) != kind {
+			return fmt.Errorf("saved encoder profile does not match %s slot", kind)
+		}
+		j.EncodeKind = kind
+		return nil
+	}
+	cpu, gpu, err := e.workerConfig.EncoderProfiles()
+	if err != nil {
+		return err
+	}
+	profile := gpu
+	if kind == config.CPUEncoderKind {
+		profile = cpu
+	}
+	copy := *profile
+	j.EncodeKind, j.EncodeConfig = kind, &copy
+	return nil
+}
+
+func (e *JobExecutor) pinAdmissionProfile(j *job.Context) error {
+	if e.encodePool == nil {
+		return nil
+	}
+	if kind := e.encodePool.admissionKind(); kind != "" {
+		return e.pinEncoderProfile(j, kind)
+	}
+	return nil
 }
 
 func (e *JobExecutor) processStep(ctx context.Context, stepExecutor *step.Executor, jobCtx *job.Context) {

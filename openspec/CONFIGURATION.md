@@ -16,6 +16,7 @@ Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDelta
 | --- | --- | --- |
 | `web.port` | `8080` | Server HTTP listen port. |
 | `web.token` | `admin` | Bearer token for job and event control routes. |
+| `web.dashboardToken` | `encoding123` | Server-only static token for dashboard login, statistics and worker capacity controls. Separate from worker API credentials. |
 | `web.domain` | `http://localhost:8080` | Base URL used by workers for requests and media transfer. |
 | `updateCheckInterval` | `15m` | Minimum interval between release queries. |
 | `noUpdates` | `false` | Disable executable replacement. |
@@ -32,7 +33,7 @@ Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDelta
 | `server.database.password` | `postgres` | PostgreSQL password. |
 | `server.database.scheme` | `server` | PostgreSQL database name. |
 
-The four control routes (`POST /api/v1/job/`, `DELETE /api/v1/job/{jobid}`, `GET /api/v1/job/request`, and `POST /api/v1/event`) check `Authorization: Bearer <web.token>`. The media routes do not use that middleware; see `BASELINE.md`.
+Job, event, and worker-settings control routes check `Authorization: Bearer <web.token>`. The media routes do not use that middleware; see `BASELINE.md`. The embedded dashboard lives at `/dashboard/` and uses `web.dashboardToken`, not `web.token`. Its browser session lasts 12 hours; logout or a server restart revokes it. See [dashboard operations](../docs/dashboard.md) for configuration, metric definitions, and worker rollout.
 
 ### Example server YAML
 
@@ -171,6 +172,31 @@ worker:
 
 For a CPU worker set `videoCodec: libsvtav1`; the default is preset `4` / CRF `25`. Set `parallelJobs: 1` if a single SVT encode should have the CPU to itself. For x265 rollback set `videoCodec: libx265`, `videoPreset: medium`, `videoProfile: main10`, and `videoCRF: 21`. Remove NVENC-only `videoCQ` and `videoQMax` from either alternative profile. The separate `worker.threads` flag does not drive FFmpeg. The worker image supplies FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract assets.
 
+### Independent CPU and GPU limits per worker
+
+The server stores an optional atomic `cpuJobs`/`gpuJobs` pair under each stable worker name. A pair overrides single-limit admission: CPU 2 and GPU 3 allow two CPU and three GPU encodes concurrently in one worker process, plus two bounded preparation/verification pipeline jobs. Each class drains on decrease; zero disables new unassigned work for that class, and both zero pause admission while accepted work continues. Pinned restored jobs retain their class/profile and can use bounded drain capacity on a disabled class. Workers synchronize about every five seconds, including while paused. Legacy clients without the independent-encoder capability read aggregate zero when a pair exists, preventing them from assigning the sum to their only encoder.
+
+The preferred startup profile remains `worker.ffmpegConfig`. The other class defaults to SVT-AV1 preset 4/CRF25 or NVENC p7/CQ38, retaining shared audio/thread settings and omitting the other class's quality flags and extraArgs. Optional YAML-only `worker.cpuFFmpegConfig` and `worker.gpuFFmpegConfig` override the corresponding profiles; a CPU profile accepts libsvtav1/libx265 and a GPU profile accepts av1_nvenc. Empty profile videoCodec selects that class's default. Invalid combinations fail startup. The server's dashboard controls concurrency, not profile quality.
+
+```yaml
+worker:
+  name: mixed-5080
+  ffmpegConfig:
+    videoCodec: av1_nvenc
+    audioCodec: libfdk_aac
+    audioVBR: 5
+  cpuFFmpegConfig:
+    videoCodec: libsvtav1
+    videoPreset: "4"
+    videoCRF: 25
+  gpuFFmpegConfig:
+    videoCodec: av1_nvenc
+    videoPreset: p7
+    videoCQ: 38
+```
+
+Save `{"cpuJobs":2,"gpuJobs":3}` from the dashboard settings API or its Workers form. A missing pair preserves legacy startup settings. A positive local `control set-max-jobs N` clears a pair and returns to N slots on the preferred startup encoder. GPU slots require the NVIDIA runtime; no automatic backend fallback is performed. Per-job profile snapshots preserve encoder choice after restart.
+
 ### Separate CPU and GPU workers
 
 Run two worker instances using the same server URL, credential, and schedule.
@@ -226,3 +252,10 @@ explain each FFmpeg parameter, including audio and the CPU preset alternatives.
 | `worker.pgsConfig.libleptVersion` | `6` | Leptonica version passed to PgsToSrt. |
 
 The OCR language is derived from each subtitle stream's language metadata. The worker maps common two- and three-letter codes for several languages and otherwise passes through the source code; an empty language falls back to English.
+
+
+### Dashboard media libraries and previews
+
+The server source library is `server.scheduler.sourcePath` and remains the only queueable root. `web.mediaRoots` is an optional map of named read-only absolute roots; it defaults to empty. Example `web.mediaRoots.encoded: /target` or `--web.mediaRoots encoded=/target` exposes an existing output mount. IDs use lowercase ASCII letters/digits/underscore/hyphen, up to 32 characters; `source` is reserved. Invalid entries are ignored. Missing roots are labeled unavailable. `web.previewMaxStreams` defaults to 2; values below 1 use 2. Compatible playback uses bounded H.264/AAC conversion up to 720p, independently of worker encode slots. Original streaming supports byte ranges. Every media endpoint uses dashboard auth.
+
+Scans default to 1000 probe candidates (allowed 1–5000), two probe slots with 15-second timeouts, and a 100000-video discovery ceiling. Batches require completed reviewed selections and a 1–5000 successful-job target. At most two operations run, at most eight are retained, completed handles expire after 30 minutes, and operations time out after two hours. Metadata persists in migration 009. See `docs/media-library.md` for all filter semantics, defaults, rooted playback and jvdivx mount examples.

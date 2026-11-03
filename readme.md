@@ -10,6 +10,7 @@ TranscoderD have a server and a worker application. The server will manage and s
 You can have as many workers you want, locally or remote in multiple machines.
 
 ## Features
+- Built-in authenticated dashboard with live progress, compression/storage charts, worker health, and independent CPU/GPU limits inside every worker
 - Encode AV1 with NVIDIA NVENC or CPU SVT-AV1; retain x265 HEVC as an explicit alternative
 - Convert audio to AAC for better compatibility.
 - Remove unwanted/duplicated audio tracks
@@ -40,6 +41,7 @@ server:
       minFileSize: 100 # minimum file size to be considered for encoding
 web:
   token: my_secret_token # replace it by your own secret
+  dashboardToken: encoding123 # dashboard login; independent from worker API token
 ```
 
 ### Run
@@ -52,6 +54,17 @@ docker run -d \
       -v ./transcoderd.yml:/etc/transcoderd/config.yml \
       ghcr.io/segator/transcoderd:server-v2.7.3 # x-release-please-version
 ```
+
+### Operations dashboard
+
+Open `http://<server>:8080/dashboard/` and enter the configured dashboard token
+(initial default: `encoding123`). The embedded dashboard shows live jobs,
+verified space savings, throughput, failures, and CPU/GPU worker status. Its
+**Workers** view saves separate CPU and GPU limits for every worker without
+restart, allowing both encoders concurrently in one process. Zero disables that
+class; both zero pause new assignments while accepted work finishes. Upgrade the server
+before workers to enable runtime synchronization and telemetry. See the
+[dashboard guide](docs/dashboard.md) for configuration, metrics, and rollout.
 
 ### Grafana Statistics
 - Add postgres as datasource for grafana.
@@ -232,3 +245,6 @@ worker/         # Worker application
   worker/       # Worker coordination loop
 integration/    # Integration tests (build tag: integration)
 ```
+
+
+The authenticated dashboard also includes a media library and embedded player for queued sources, encoded outputs and server videos. Preview folder/name, size, resolution, total bitrate and codec filters before loading a reviewed selection into jobs. Editable movie/series presets reproduce the existing Unraid script criteria. See [Media library and visual job loading](docs/media-library.md) for configuration and playback modes.

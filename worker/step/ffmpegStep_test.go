@@ -1,9 +1,11 @@
 package step
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +49,49 @@ func TestFFMPEGGeneratorVideoProfiles(t *testing.T) {
 			}
 			if slices.Contains(generator.VideoFilter, "-hwaccel") {
 				t.Error("CPU scale profile unexpectedly enabled hardware decode")
+			}
+		})
+	}
+}
+
+func TestFFMPEGExecutionUsesPinnedProfileForEveryOption(t *testing.T) {
+	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "arguments")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ENCODER_TEST_ARGS\"\nexit 23\n"
+	if err := os.WriteFile(filepath.Join(dir, "ffmpeg"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("ENCODER_TEST_ARGS", argsPath)
+	tests := []struct {
+		name             string
+		fallback, pinned config.FFMPEGConfig
+		want, absent     []string
+	}{
+		{name: "CPU snapshot on GPU primary", fallback: config.FFMPEGConfig{VideoCodec: config.AV1NVENC, Threads: 11, ExtraArgs: "-gpu_only enabled"}, pinned: config.FFMPEGConfig{VideoCodec: config.AV1SVT, VideoCRF: 27, Threads: 3, ExtraArgs: "-cpu_only enabled"}, want: []string{"-c:v", "libsvtav1", "-threads", "3", "-crf", "27", "-cpu_only", "enabled"}, absent: []string{"-cq", "-gpu_only", "av1_nvenc"}},
+		{name: "GPU snapshot on CPU primary", fallback: config.FFMPEGConfig{VideoCodec: config.HEVCX265, Threads: 12, ExtraArgs: "-cpu_only enabled"}, pinned: config.FFMPEGConfig{VideoCodec: config.AV1NVENC, VideoCQ: 42, Threads: 5, ExtraArgs: "-gpu_only enabled"}, want: []string{"-c:v", "av1_nvenc", "-threads", "5", "-cq", "42", "-gpu_only", "enabled"}, absent: []string{"-crf", "-cpu_only", "libx265"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := &job.Context{WorkingDir: dir, EncodeConfig: &tt.pinned, Source: &job.VideoData{FilePath: filepath.Join(dir, "source.mkv"), FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{Id: 0, Duration: time.Minute, FrameRate: 24}}}}
+			executor := &FFMPEGStepExecutor{ffmpegConfig: &tt.fallback}
+			if err := executor.ffmpeg(t.Context(), &mockLogger{}, j, make(chan int64, 1)); err == nil {
+				t.Fatal("capture fixture did not terminate FFmpeg as expected")
+			}
+			raw, err := os.ReadFile(argsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+			for _, want := range tt.want {
+				if !slices.Contains(args, want) {
+					t.Errorf("pinned invocation missing %q: %v", want, args)
+				}
+			}
+			for _, absent := range tt.absent {
+				if slices.Contains(args, absent) {
+					t.Errorf("pinned invocation leaked %q: %v", absent, args)
+				}
 			}
 		})
 	}

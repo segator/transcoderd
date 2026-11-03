@@ -67,7 +67,7 @@ A worker SHALL request a new job only when its active-job count plus in-flight r
 - **THEN** the worker does not request a job
 
 ### Requirement: Runtime worker admission controls
-A running worker SHALL provide local controls to report admission, job, and encode counts and set the job maximum to any non-negative integer without restart. A positive value SHALL update admission and the FFmpeg encode target. Zero SHALL stop requests and preserve the previous positive encode target. Lowering the target SHALL let active encodes finish before admitting another. Controls SHALL remain local and SHALL NOT expose a remotely reachable management endpoint.
+A worker SHALL offer local controls to report admission, job and encode counts and set non-negative job limits without restart. Positive limits SHALL update admission and FFmpeg concurrency. Zero SHALL stop requests and preserve the previous positive encode target. Lower limits SHALL let active encodes finish before another starts. The worker listener SHALL remain local. Authenticated dashboard controls SHALL persist desired limits per worker.
 
 #### Scenario: Read runtime admission status
 - **WHEN** an operator runs the local status command
@@ -184,3 +184,45 @@ A worker receiving an assignment SHALL create a per-job temporary directory, pub
 #### Scenario: Assignment received
 - **WHEN** the worker receives a job `id` and `eventID`
 - **THEN** it initializes the workspace, reports `Job/started`, and queues download
+
+### Requirement: Synchronize server-desired worker capacity
+A worker SHALL resolve its persisted per-name job limit before initial admission and before subsequent admission evaluations, including while paused. An absent override SHALL preserve startup or current local configuration. Failed synchronization SHALL prevent new job requests for that cycle while accepted work continues. The normal synchronization interval SHALL be approximately five seconds.
+
+#### Scenario: Remote positive change
+- **WHEN** an operator changes a worker's persisted limit to a positive value
+- **THEN** its next successful synchronization applies the admission and encode target without restarting or interrupting active encodes
+
+#### Scenario: Resume a paused worker
+- **WHEN** the worker is paused at zero and its persisted limit becomes positive
+- **THEN** it continues polling and resumes admission after synchronization if its schedule permits
+
+#### Scenario: Server unavailable
+- **WHEN** settings synchronization fails
+- **THEN** the worker skips new requests, keeps accepted work running, and retries on a later coordination cycle
+
+#### Scenario: Automatic update drain
+- **WHEN** an update causes the worker to drain active jobs
+- **THEN** the temporary zero remains local and synchronization does not reopen admission during that drain
+
+### Requirement: Independent CPU and GPU worker slots
+A persisted CPU/GPU pair SHALL override the single-limit policy for that worker. The worker SHALL bound each encoder class independently and admit at most their positive sum plus two pipeline jobs. One disabled class SHALL not accept new unassigned encodes. Disabling both SHALL stop new admission while accepted work drains. Lower positive limits SHALL not interrupt running work.
+
+#### Scenario: Both encoder classes are enabled
+- **WHEN** one worker has CPU limit 2 and GPU limit 3 and ready encoding jobs
+- **THEN** up to two CPU and three GPU encodes run concurrently within that process
+
+#### Scenario: Disable CPU while GPU remains enabled
+- **WHEN** an operator changes CPU to zero while leaving GPU positive
+- **THEN** active CPU encodes finish, new unassigned encodes use GPU slots, and GPU admission continues
+
+#### Scenario: Pause both classes
+- **WHEN** both desired limits become zero
+- **THEN** new admission stops and accepted jobs continue through retained per-class drain capacity
+
+#### Scenario: Restore pinned work on a disabled class
+- **WHEN** a saved CPU or GPU encode is restored while that class has desired zero
+- **THEN** it resumes with its pinned profile using bounded drain capacity while no new job is assigned to that class
+
+#### Scenario: Legacy startup or local control
+- **WHEN** no pair is stored or a positive legacy single-limit control replaces the pair
+- **THEN** the startup selected encoder and existing single-limit behavior apply

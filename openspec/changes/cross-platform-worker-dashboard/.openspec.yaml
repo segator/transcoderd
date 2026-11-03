@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-27
+goal: Provide one responsive worker dashboard that works in the Windows tray
+  WebView and in a browser when hosted by a Linux/Docker worker.

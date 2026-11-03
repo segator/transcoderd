@@ -89,7 +89,7 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 				}
 				if requireUpdate {
 					q.worker.ReleaseJobSlot()
-					if err := q.worker.SetMaxActiveJobs(0); err != nil {
+					if err := q.worker.DrainAcceptedJobs(); err != nil {
 						q.logger.Errorf("Error stopping job admission for update: %v", err)
 						continue
 					}
@@ -114,7 +114,7 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 					continue
 				}
 
-				if err := q.worker.ExecuteReservedJob(requestJobResponse.Id, requestJobResponse.EventID); err != nil {
+				if err := q.worker.ExecuteReservedJob(requestJobResponse.Id, requestJobResponse.EventID, requestJobResponse.Name); err != nil {
 					q.logger.Errorf("Error Preparing Job Execution: %v", err)
 				}
 			}
@@ -147,6 +147,17 @@ func (q *ServerCoordinator) syncWorkerSettings(ctx context.Context) error {
 	settings, err := q.serverClient.GetWorkerSettings(settingsCtx)
 	if err != nil {
 		return err
+	}
+	current := q.worker.AdmissionStatus()
+	if settings.MaxActiveJobs == nil && !settings.Independent() && q.worker.managedLimits && q.worker.settingsUnresolved() {
+		if err := q.serverClient.SetWorkerMaxActiveJobs(settingsCtx, current.MaxActiveJobs); err != nil {
+			return err
+		}
+	}
+	// Service/maintenance holds must not be undone by periodic convergence.
+	if current.Finishing || current.Draining {
+		q.worker.MarkWorkerSettingsResolved()
+		return nil
 	}
 	// Avoid resetting an explicit startup parallelJobs override when no remote
 	// change occurred. Local controls use this same mutex and persist first.
@@ -195,7 +206,12 @@ func (e *JobExecutor) RuntimeTelemetry() *model.WorkerRuntime {
 		MaxActiveJobs: status.MaxActiveJobs, ActiveEncodes: status.ActiveEncodes, MaxEncodes: status.MaxEncodes,
 		CapacityVersion: 2, CPUJobs: status.CPUJobs, GPUJobs: status.GPUJobs,
 		ActiveCPUEncodes: status.ActiveCPUEncodes, ActiveGPUEncodes: status.ActiveGPUEncodes,
-		CPUMaxEncodes: status.CPUMaxEncodes, GPUMaxEncodes: status.GPUMaxEncodes}
+		CPUMaxEncodes: status.CPUMaxEncodes, GPUMaxEncodes: status.GPUMaxEncodes,
+		Paused: status.Paused, RAMPaused: status.RAMPaused, PauseMode: status.PauseMode, SuspendedEncodes: status.SuspendedEncodes,
+		Finishing: status.Finishing, Draining: status.Draining, ManagedProfile: e.managedLimits}
+	for _, j := range status.Jobs {
+		runtime.Jobs = append(runtime.Jobs, model.WorkerJobRuntime{ID: j.JobID, Phase: j.Phase, State: j.State, IndividuallyPaused: j.IndividuallyPaused, PausedByWorker: j.PausedByWorker})
+	}
 	if cpu, gpu, err := e.workerConfig.EncoderProfiles(); err == nil {
 		if video, err := cpu.ResolveVideoSettings(); err == nil {
 			runtime.CPUEncoder = video.Codec
@@ -218,4 +234,10 @@ func waitForActiveJobs(ctx context.Context, activeJobs func() uint32, interval t
 		}
 	}
 	return true
+}
+
+func (e *JobExecutor) settingsUnresolved() bool {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	return e.settingsPending
 }

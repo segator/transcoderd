@@ -9,6 +9,7 @@ import (
 	"fmt"
 	_ "github.com/lib/pq"
 	log "github.com/sirupsen/logrus"
+	"path/filepath"
 	"time"
 	"transcoder/model"
 )
@@ -38,6 +39,7 @@ type Repository interface {
 	GetWorkerSettings(ctx context.Context, name string) (*model.WorkerSettings, error)
 	SetWorkerSettings(ctx context.Context, name string, settings model.WorkerSettings) error
 	RetrieveQueuedJob(ctx context.Context) (*model.Job, error)
+	ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error)
 	GetAllProgressJobs(ctx context.Context) ([]model.TaskProgressType, error)
 	GetDashboard(ctx context.Context, hours int, now time.Time) (*model.Dashboard, error)
 	GetMediaProbe(ctx context.Context, root, path string, size, modified int64) (*model.MediaProbe, error)
@@ -314,7 +316,7 @@ func (s *SQLRepository) SetWorkerMaxActiveJobs(ctx context.Context, name string,
 }
 
 func (s *SQLRepository) getWorker(ctx context.Context, db SQLDBOperations, name string) (*model.Worker, error) {
-	rows, err := db.QueryContext(ctx, "select name, ip, last_seen from workers where name=$1", name)
+	rows, err := db.QueryContext(ctx, "select name, ip, last_seen, runtime from workers where name=$1", name)
 	if err != nil {
 		return nil, err
 	}
@@ -322,9 +324,15 @@ func (s *SQLRepository) getWorker(ctx context.Context, db SQLDBOperations, name 
 	worker := model.Worker{}
 	found := false
 	if rows.Next() {
-		err := rows.Scan(&worker.Name, &worker.Ip, &worker.LastSeen)
+		var runtimeJSON []byte
+		err := rows.Scan(&worker.Name, &worker.Ip, &worker.LastSeen, &runtimeJSON)
 		if err != nil {
 			return nil, err
+		}
+		if len(runtimeJSON) > 0 {
+			if err := json.Unmarshal(runtimeJSON, &worker.Runtime); err != nil {
+				return nil, err
+			}
 		}
 		found = true
 	}
@@ -350,6 +358,29 @@ func (s *SQLRepository) RetrieveQueuedJob(ctx context.Context) (video *model.Job
 		return nil, err
 	}
 	return s.queuedJob(ctx, conn)
+}
+
+func (s *SQLRepository) ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error) {
+	result := model.QueueSnapshot{Jobs: []model.QueuedJob{}}
+	conn, err := s.getConnection()
+	if err != nil {
+		return result, err
+	}
+	rows, err := conn.QueryContext(ctx, `SELECT v.id, v.source_path, v.source_size, vs.event_time, count(*) OVER() FROM jobs v JOIN job_status vs ON v.id = vs.job_id WHERE vs.notification_type = 'Job' AND vs.status = 'queued' ORDER BY vs.event_time ASC, v.id ASC LIMIT 100`)
+	if err != nil {
+		return result, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var j model.QueuedJob
+		var path string
+		if err := rows.Scan(&j.ID, &path, &j.Size, &j.QueuedAt, &result.Total); err != nil {
+			return result, err
+		}
+		j.Name = filepath.Base(path)
+		result.Jobs = append(result.Jobs, j)
+	}
+	return result, rows.Err()
 }
 
 func (s *SQLRepository) GetJobsByStatus(ctx context.Context, notificationType model.NotificationType, status model.NotificationStatus) (jobs []*model.Job, returnError error) {

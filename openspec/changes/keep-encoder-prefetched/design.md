@@ -18,17 +18,19 @@ The worker currently uses one active-job count for admission across download, su
 
 ## Decisions
 
-- Use a fixed buffer of two accepted jobs beyond the configured maximum. This provides room for preparation and a job in verification/upload while encodes continue. A fixed bound avoids unbounded disk, memory, and transfer queues; a configurable buffer is deferred until operational evidence requires it.
-- Keep `maxActiveJobs` as the configured limit and encode target. Admission checks compare active plus reserved jobs to `maxActiveJobs + 2`; zero remains a special case that disallows all new reservations.
+- Use a fixed buffer of one accepted job beyond the configured maximum. This provides bounded overlap with preparation or verification/upload while encodes continue. A fixed bound avoids unbounded disk, memory, and transfer queues; a configurable buffer is deferred until operational evidence requires it.
+- Keep `maxActiveJobs` as the configured limit and encode target. Admission checks compare active plus reserved jobs to `maxActiveJobs + 1`; zero remains a special case that disallows all new reservations.
 - Extend local control status with the computed accepted-job ceiling and label the configured maximum as the encode target in CLI output. Existing JSON fields remain for compatibility.
-- Preserve the current per-stage queue ordering and single-consumer behavior. The existing dynamic FFmpeg queue starts the next prepared job as soon as an encode slot opens.
+- Preserve the current per-stage queue ordering and single-consumer behavior. The FFmpeg queue starts the next prepared job when a slot opens unless operator pause holds queued encodes. Maintenance drain allows accepted work to finish.
 
 ## Risks / Trade-offs
 
-- [Extra accepted jobs increase temporary disk use and can overlap subtitle work with encoding] → Keep the buffer fixed at two and retain serial non-FFmpeg stage consumers.
+- [Extra accepted jobs increase temporary disk use and can overlap subtitle work with encoding] → Keep the buffer fixed at one and retain serial non-FFmpeg stage consumers.
 - [A slow upload can still become the throughput bottleneck] → The buffer absorbs bounded overlap but does not increase upload concurrency or promise that encoding can never wait.
 - [Large integer limits could overflow when adding the buffer] → Saturate the computed ceiling at the largest representable integer.
 
 ## Migration Plan
 
 No server or database migration is needed. Existing worker settings retain their meaning as encode targets. On restart, the worker computes the admission ceiling from the effective persisted or startup maximum. Rollback consists of reverting the worker version; already accepted jobs continue under the existing persisted job state.
+
+The `pause-queued-encodes` follow-up reduces the original two-job design and separates operator pause from maintenance draining.

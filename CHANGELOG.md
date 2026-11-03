@@ -1,5 +1,55 @@
 # Changelog
 
+## [2.11.1](https://github.com/segator/transcoderd/compare/v2.11.0...v2.11.1) (2026-11-01)
+
+
+### 🐛 Bug Fixes
+
+* **update:** keep newer targets pending after previous completion ([#198](https://github.com/segator/transcoderd/issues/198)) ([ca86f6d](https://github.com/segator/transcoderd/commit/ca86f6dbc55faaa00d29cb2ecb8437e8be76c336))
+
+## [2.11.0](https://github.com/segator/transcoderd/compare/v2.10.0...v2.11.0) (2026-10-31)
+
+
+### 🎉 Features
+
+* **windows:** offer explicit shutdown after accepted work ([#196](https://github.com/segator/transcoderd/issues/196)) ([ce73e86](https://github.com/segator/transcoderd/commit/ce73e86a2fe7715c54cecc47a74a975872b7a84e))
+
+## [2.10.0](https://github.com/segator/transcoderd/compare/v2.9.0...v2.10.0) (2026-10-31)
+
+
+### 🎉 Features
+
+* **worker:** add independent queue and RAM pause controls ([#194](https://github.com/segator/transcoderd/issues/194)) ([7ad0300](https://github.com/segator/transcoderd/commit/7ad030089cd93b9ef7142ca502f1bb8c780e1926))
+
+## [2.9.0](https://github.com/segator/transcoderd/compare/v2.8.1...v2.9.0) (2026-10-28)
+
+
+### 🎉 Features
+
+* **dashboard:** share worker UI across platforms ([#191](https://github.com/segator/transcoderd/issues/191)) ([148b945](https://github.com/segator/transcoderd/commit/148b94552f2d26d372dddb2fccfc0686a1c8dbc6))
+* **windows:** enforce signed unattended installation updates ([#193](https://github.com/segator/transcoderd/issues/193)) ([0fdef3f](https://github.com/segator/transcoderd/commit/0fdef3f677bf2f3e4e0bc23896fe6e97ea54c5da))
+
+## [2.8.1](https://github.com/segator/transcoderd/compare/v2.8.0...v2.8.1) (2026-10-27)
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/Microsoft/go-winio from 0.6.2 to 0.6.4 ([#189](https://github.com/segator/transcoderd/issues/189)) ([c3fb3fc](https://github.com/segator/transcoderd/commit/c3fb3fc872587ec36c004f74223f63c4c25ea347))
+
+## [2.8.0](https://github.com/segator/transcoderd/compare/v2.7.3...v2.8.0) (2026-10-26)
+
+
+### 🎉 Features
+
+* **worker:** add native Windows bundle and CPU E2E CI ([#187](https://github.com/segator/transcoderd/issues/187)) ([12dbf82](https://github.com/segator/transcoderd/commit/12dbf821b6e5755905680ebb354a3479c4b0f8d6))
+* **worker:** persist runtime job limits ([#185](https://github.com/segator/transcoderd/issues/185)) ([9af8c94](https://github.com/segator/transcoderd/commit/9af8c9480b3ed81775c129c5adbe3f0b0fdd96e7))
+* **worker:** prefetch pipeline jobs for encoders ([#186](https://github.com/segator/transcoderd/issues/186)) ([4dd0706](https://github.com/segator/transcoderd/commit/4dd070678054bc941be1858f12aea14299445586))
+
+
+### 📝 Documentation
+
+* sync upload staging cleanup spec ([#183](https://github.com/segator/transcoderd/issues/183)) ([ae6f4ef](https://github.com/segator/transcoderd/commit/ae6f4efdc4b1ba22e414ad19278b7284518f32b6))
+
 ## [2.7.3](https://github.com/segator/transcoderd/compare/v2.7.2...v2.7.3) (2026-10-25)
 
 

@@ -20,4 +20,4 @@ jobs:
         with:
           version: 0.20.6
       - uses: ./.github/actions/setup-mage
-      - run: mage lint:check
+      - run: mage lint:check lint:windows

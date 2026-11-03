@@ -3,25 +3,41 @@ package model
 import "time"
 
 // WorkerRuntime is optional so older workers can continue publishing presence.
+type WorkerJobRuntime struct {
+	ID                 string `json:"id"`
+	Phase              string `json:"phase"`
+	State              string `json:"state"`
+	IndividuallyPaused bool   `json:"individuallyPaused"`
+	PausedByWorker     bool   `json:"pausedByWorker"`
+}
+
 type WorkerRuntime struct {
-	CapacityVersion  int    `json:"capacityVersion,omitempty"`
-	CPUJobs          int    `json:"cpuJobs"`
-	GPUJobs          int    `json:"gpuJobs"`
-	ActiveCPUEncodes int    `json:"activeCPUEncodes"`
-	ActiveGPUEncodes int    `json:"activeGPUEncodes"`
-	CPUMaxEncodes    int    `json:"cpuMaxEncodes"`
-	GPUMaxEncodes    int    `json:"gpuMaxEncodes"`
-	CPUEncoder       string `json:"cpuEncoder,omitempty"`
-	GPUEncoder       string `json:"gpuEncoder,omitempty"`
-	Encoder          string `json:"encoder"`
-	Kind             string `json:"kind"`
-	Accepting        bool   `json:"accepting"`
-	WithinSchedule   bool   `json:"withinSchedule"`
-	ActiveJobs       uint32 `json:"activeJobs"`
-	ReservedJobs     int    `json:"reservedJobs"`
-	MaxActiveJobs    int    `json:"maxActiveJobs"`
-	ActiveEncodes    int    `json:"activeEncodes"`
-	MaxEncodes       int    `json:"maxEncodes"`
+	Paused           bool               `json:"paused"`
+	RAMPaused        bool               `json:"ramPaused"`
+	PauseMode        string             `json:"pauseMode"`
+	SuspendedEncodes int                `json:"suspendedEncodes"`
+	Finishing        bool               `json:"finishing"`
+	Draining         bool               `json:"draining"`
+	ManagedProfile   bool               `json:"managedProfile"`
+	Jobs             []WorkerJobRuntime `json:"jobs,omitempty"`
+	CapacityVersion  int                `json:"capacityVersion,omitempty"`
+	CPUJobs          int                `json:"cpuJobs"`
+	GPUJobs          int                `json:"gpuJobs"`
+	ActiveCPUEncodes int                `json:"activeCPUEncodes"`
+	ActiveGPUEncodes int                `json:"activeGPUEncodes"`
+	CPUMaxEncodes    int                `json:"cpuMaxEncodes"`
+	GPUMaxEncodes    int                `json:"gpuMaxEncodes"`
+	CPUEncoder       string             `json:"cpuEncoder,omitempty"`
+	GPUEncoder       string             `json:"gpuEncoder,omitempty"`
+	Encoder          string             `json:"encoder"`
+	Kind             string             `json:"kind"`
+	Accepting        bool               `json:"accepting"`
+	WithinSchedule   bool               `json:"withinSchedule"`
+	ActiveJobs       uint32             `json:"activeJobs"`
+	ReservedJobs     int                `json:"reservedJobs"`
+	MaxActiveJobs    int                `json:"maxActiveJobs"`
+	ActiveEncodes    int                `json:"activeEncodes"`
+	MaxEncodes       int                `json:"maxEncodes"`
 }
 
 type Dashboard struct {

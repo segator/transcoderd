@@ -3,8 +3,31 @@ package step
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"transcoder/worker/config"
 )
+
+func TestPGSCommandSelectsNativeExecutableOrAssembly(t *testing.T) {
+	tests := []struct {
+		name       string
+		cfg        config.PGSConfig
+		executable string
+		args       []string
+	}{
+		{"assembly", config.PGSConfig{DotnetPath: "dotnet", DLLPath: "PgsToSrt.dll"}, "dotnet", []string{"PgsToSrt.dll", "--input", `C:\películas\film.sup`}},
+		{"native", config.PGSConfig{ExecutablePath: `C:\Program Files\OCR\PgsToSrt.exe`, DLLPath: "unused.dll"}, `C:\Program Files\OCR\PgsToSrt.exe`, []string{"--input", `C:\películas\film.sup`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := pgsCommand(&tt.cfg, []string{"--input", `C:\películas\film.sup`})
+			if got.Command != tt.executable || !reflect.DeepEqual(got.Params, tt.args) {
+				t.Fatalf("pgsCommand() = %q %q, want %q %q", got.Command, got.Params, tt.executable, tt.args)
+			}
+		})
+	}
+}
 
 func TestWriteEmptySRT(t *testing.T) {
 	dir := t.TempDir()

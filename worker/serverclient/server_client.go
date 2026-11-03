@@ -137,10 +137,14 @@ func (s *ServerClient) GetWorkerSettings(ctx context.Context) (*WorkerSettings, 
 }
 
 func (s *ServerClient) SetWorkerMaxActiveJobs(ctx context.Context, max int) error {
-	if max < 0 {
-		return fmt.Errorf("maximum active jobs must be non-negative")
+	return s.SetWorkerSettings(ctx, WorkerSettings{MaxActiveJobs: &max})
+}
+
+func (s *ServerClient) SetWorkerSettings(ctx context.Context, settings WorkerSettings) error {
+	if err := settings.ValidateWrite(); err != nil {
+		return err
 	}
-	body, err := json.Marshal(WorkerSettings{MaxActiveJobs: &max})
+	body, err := json.Marshal(settings)
 	if err != nil {
 		return err
 	}

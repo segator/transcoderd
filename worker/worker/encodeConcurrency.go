@@ -20,6 +20,7 @@ type encodeConcurrency struct {
 	cpuActive, gpuActive     int
 	cpuTarget, gpuTarget     int
 	lastCPUJobs, lastGPUJobs int
+	paused                   bool
 }
 
 func newEncodeConcurrency(target int) *encodeConcurrency {
@@ -127,7 +128,7 @@ func (c *encodeConcurrency) hasIndependentLimits() bool {
 func (c *encodeConcurrency) tryStartEncoder(pinned string) (string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.independent && c.active >= c.target {
+	if c.paused || (!c.independent && c.active >= c.target) {
 		return "", false
 	}
 	try := func(kind string, restored bool) bool {
@@ -220,10 +221,23 @@ func (c *encodeConcurrency) Status() (active, target int) {
 	return c.active, c.target
 }
 
+func (c *encodeConcurrency) SetPaused(paused bool) {
+	c.mu.Lock()
+	c.paused = paused
+	c.mu.Unlock()
+	c.notify()
+}
+
+func (c *encodeConcurrency) Paused() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.paused
+}
+
 func (c *encodeConcurrency) tryStart() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.active >= c.target {
+	if c.paused || c.active >= c.target {
 		return false
 	}
 	c.active++

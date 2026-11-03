@@ -24,14 +24,22 @@ import (
 )
 
 type FFMPEGStepExecutor struct {
-	ffmpegConfig *config.FFMPEGConfig
+	ffmpegConfig    *config.FFMPEGConfig
+	pauseController *command.PauseController
+}
+
+type ffmpegProgress struct {
+	value  int64
+	frames int64
+	fps    float64
+	speed  string
 }
 
 func NewFFMPEGStepExecutor(ffmpegConfig *config.FFMPEGConfig, options ...ExecutorOption) *Executor {
-	ffmpegStep := &FFMPEGStepExecutor{
-		ffmpegConfig,
-	}
-	return NewStepExecutor(model.FFMPEGSNotification, ffmpegStep.actions, options...)
+	ffmpegStep := &FFMPEGStepExecutor{ffmpegConfig: ffmpegConfig}
+	executor := NewStepExecutor(model.FFMPEGSNotification, ffmpegStep.actions, options...)
+	ffmpegStep.pauseController = executor.pauseController
+	return executor
 }
 
 func (f *FFMPEGStepExecutor) actions(jobContext *job.Context) []Action {
@@ -47,7 +55,7 @@ func (f *FFMPEGStepExecutor) actions(jobContext *job.Context) []Action {
 }
 
 func (f *FFMPEGStepExecutor) encode(ctx context.Context, stepTracker Tracker, jobContext *job.Context) error {
-	FFMPEGProgressChan := make(chan int64, 1)
+	FFMPEGProgressChan := make(chan ffmpegProgress, 1)
 	go f.ffmpegProgressRoutine(ctx, jobContext, stepTracker, FFMPEGProgressChan)
 	err := f.ffmpeg(ctx, stepTracker.Logger(), jobContext, FFMPEGProgressChan)
 	if err != nil {
@@ -57,7 +65,7 @@ func (f *FFMPEGStepExecutor) encode(ctx context.Context, stepTracker Tracker, jo
 	return nil
 }
 
-func (f *FFMPEGStepExecutor) ffmpegProgressRoutine(ctx context.Context, job *job.Context, tracker Tracker, ffmpegProgressChan chan int64) {
+func (f *FFMPEGStepExecutor) ffmpegProgressRoutine(ctx context.Context, job *job.Context, tracker Tracker, ffmpegProgressChan chan ffmpegProgress) {
 	tracker.SetTotal(int64(job.Source.FFProbeData.Video.Duration.Seconds()) * int64(job.Source.FFProbeData.Video.FrameRate))
 	for {
 		select {
@@ -67,12 +75,17 @@ func (f *FFMPEGStepExecutor) ffmpegProgressRoutine(ctx context.Context, job *job
 			if !open {
 				return
 			}
-			tracker.UpdateValue(progress)
+			tracker.UpdateValue(progress.value)
+			if detailed, ok := tracker.(interface {
+				SetFFmpegProgress(frames int64, fps float64, speed string)
+			}); ok {
+				detailed.SetFFmpegProgress(progress.frames, progress.fps, progress.speed)
+			}
 		}
 	}
 }
 
-func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledLogger, jobContext *job.Context, ffmpegProgressChan chan<- int64) error {
+func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledLogger, jobContext *job.Context, ffmpegProgressChan chan<- ffmpegProgress) error {
 	defer close(ffmpegProgressChan)
 	profile := f.ffmpegConfig
 	if jobContext.EncodeConfig != nil {
@@ -100,21 +113,24 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 		progress := s.Key("progress").String()
 		if progress == "continue" {
 			var progressValue int64
+			frame, frameErr := s.Key("frame").Int64()
+			fps, _ := s.Key("fps").Float64()
+			speed := s.Key("speed").String()
 			outTimeUs, err := s.Key("out_time_ms").Int64()
 			if err == nil {
 				progressValue = (outTimeUs / 1000000) * int64(jobContext.Source.FFProbeData.Video.FrameRate)
 			}
-			// If out_time_ms is not present, we can use frame as a fallback, even is not as precise
-			if progressValue == 0 {
-				frame, err := s.Key("frame").Int64()
-				if err != nil {
-					return
-				}
+			if frameErr == nil {
 				progressValue = frame
+			} else if progressValue == 0 {
+				return
+			}
+			if frameErr != nil {
+				frame = progressValue
 			}
 
 			select {
-			case ffmpegProgressChan <- progressValue:
+			case ffmpegProgressChan <- ffmpegProgress{value: progressValue, frames: frame, fps: fps, speed: speed}:
 			default:
 			}
 
@@ -125,7 +141,7 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 	targetPath := filepath.Join(jobContext.WorkingDir, encodedFilePath)
 
 	ffmpegArguments := ffmpegGenerator.buildArguments(uint8(profile.Threads), profile.ExtraArgs, targetPath)
-	ffmpegCommand := command.NewCommand(helper.GetFFmpegPath(), ffmpegArguments...)
+	ffmpegCommand := command.NewCommand(helper.GetFFmpegPath(), ffmpegArguments...).SetPauseController(f.pauseController, jobContext.JobId.String())
 	logger.Cmdf("FFMPEG Command: %s", ffmpegCommand.GetFullCommand())
 	ffmpegCommand = ffmpegCommand.
 		SetWorkDir(jobContext.WorkingDir).

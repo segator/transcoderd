@@ -9,29 +9,70 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 )
 
-const SocketPath = "/run/transcoderd-worker/control.sock"
+var ErrJobNotPausable = errors.New("job has no active controllable encoding")
+
+const controlRequestTimeout = 15 * time.Second
 
 type AdmissionStatus struct {
-	Accepting           bool   `json:"accepting"`
-	ActiveJobs          uint32 `json:"activeJobs"`
-	ReservedJobs        int    `json:"reservedJobs"`
-	MaxActiveJobs       int    `json:"maxActiveJobs"`
-	MaxAcceptedJobs     int    `json:"maxAcceptedJobs"`
-	ActiveEncodes       int    `json:"activeEncodes"`
-	MaxEncodes          int    `json:"maxEncodes"`
-	WithinSchedule      bool   `json:"withinSchedule"`
-	CPUJobs             int    `json:"cpuJobs"`
-	GPUJobs             int    `json:"gpuJobs"`
-	ActiveCPUEncodes    int    `json:"activeCPUEncodes"`
-	ActiveGPUEncodes    int    `json:"activeGPUEncodes"`
-	CPUMaxEncodes       int    `json:"cpuMaxEncodes"`
-	GPUMaxEncodes       int    `json:"gpuMaxEncodes"`
-	IndependentEncoders bool   `json:"independentEncoders"`
+	CPUJobs             int  `json:"cpuJobs"`
+	GPUJobs             int  `json:"gpuJobs"`
+	ActiveCPUEncodes    int  `json:"activeCPUEncodes"`
+	ActiveGPUEncodes    int  `json:"activeGPUEncodes"`
+	CPUMaxEncodes       int  `json:"cpuMaxEncodes"`
+	GPUMaxEncodes       int  `json:"gpuMaxEncodes"`
+	IndependentEncoders bool `json:"independentEncoders"`
+	Finishing           bool `json:"finishing"`
+	Draining            bool `json:"draining"`
+
+	RAMPaused        bool           `json:"ramPaused"`
+	PauseMode        string         `json:"pauseMode"`
+	SuspendedEncodes int            `json:"suspendedEncodes"`
+	Accepting        bool           `json:"accepting"`
+	ActiveJobs       uint32         `json:"activeJobs"`
+	ReservedJobs     int            `json:"reservedJobs"`
+	MaxActiveJobs    int            `json:"maxActiveJobs"`
+	MaxAcceptedJobs  int            `json:"maxAcceptedJobs"`
+	ActiveEncodes    int            `json:"activeEncodes"`
+	MaxEncodes       int            `json:"maxEncodes"`
+	WithinSchedule   bool           `json:"withinSchedule"`
+	Paused           bool           `json:"paused"`
+	Progress         []TaskProgress `json:"progress,omitempty"`
+	Jobs             []JobState     `json:"jobs,omitempty"`
+}
+
+type JobState struct {
+	PausedByWorker     bool   `json:"pausedByWorker"`
+	CanPause           bool   `json:"canPause"`
+	IndividuallyPaused bool   `json:"individuallyPaused"`
+	JobID              string `json:"jobId"`
+	Name               string `json:"name,omitempty"`
+	Profile            string `json:"profile,omitempty"`
+	Codec              string `json:"codec,omitempty"`
+	Phase              string `json:"phase"`
+	State              string `json:"state"`
+	Downloaded         bool   `json:"downloaded"`
+}
+
+type TaskProgress struct {
+	JobID           string  `json:"jobId"`
+	Name            string  `json:"name,omitempty"`
+	Profile         string  `json:"profile,omitempty"`
+	Codec           string  `json:"codec,omitempty"`
+	StepID          string  `json:"stepId"`
+	Phase           string  `json:"phase"`
+	Percent         float64 `json:"percent"`
+	ETASeconds      int64   `json:"etaSeconds"`
+	ElapsedSeconds  int64   `json:"elapsedSeconds"`
+	Value           int64   `json:"value"`
+	Total           int64   `json:"total"`
+	BytesPerSecond  int64   `json:"bytesPerSecond,omitempty"`
+	Frames          int64   `json:"frames,omitempty"`
+	FramesPerSecond float64 `json:"framesPerSecond,omitempty"`
+	EncoderSpeed    string  `json:"encoderSpeed,omitempty"`
 }
 
 type AdmissionController interface {
@@ -39,12 +80,16 @@ type AdmissionController interface {
 	PersistMaxActiveJobs(int) error
 }
 
-type request struct {
-	Command string `json:"command"`
-	MaxJobs int    `json:"maxJobs,omitempty"`
+type Request struct {
+	CPUJobs   *int   `json:"cpuJobs,omitempty"`
+	GPUJobs   *int   `json:"gpuJobs,omitempty"`
+	JobID     string `json:"jobId,omitempty"`
+	PauseMode string `json:"pauseMode,omitempty"`
+	Command   string `json:"command"`
+	MaxJobs   int    `json:"maxJobs,omitempty"`
 }
 
-type response struct {
+type Response struct {
 	Status AdmissionStatus `json:"status"`
 	Error  string          `json:"error,omitempty"`
 }
@@ -52,56 +97,26 @@ type response struct {
 type Server struct {
 	listener net.Listener
 	state    AdmissionController
+	shutdown func()
 }
 
-func Start(path string, state AdmissionController) (*Server, error) {
+func Start(path string, state AdmissionController, shutdown ...func()) (*Server, error) {
 	if path == "" {
-		path = SocketPath
+		path = ConfiguredPath()
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("create worker control directory: %w", err)
-	}
-	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("restrict worker control directory permissions: %w", err)
-	}
-	if info, err := os.Lstat(path); err == nil {
-		if info.Mode()&os.ModeSocket == 0 {
-			return nil, fmt.Errorf("control socket path exists and is not a socket: %s", path)
-		}
-		conn, dialErr := net.DialTimeout("unix", path, 100*time.Millisecond)
-		if dialErr == nil {
-			_ = conn.Close()
-			return nil, fmt.Errorf("worker control socket is already in use: %s", path)
-		}
-		if err := os.Remove(path); err != nil {
-			return nil, fmt.Errorf("remove stale control socket: %w", err)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect control socket: %w", err)
-	}
-	listener, err := net.Listen("unix", path)
+	listener, err := listenControl(path)
 	if err != nil {
-		return nil, fmt.Errorf("listen on worker control socket: %w", err)
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		_ = listener.Close()
-		_ = os.Remove(path)
-		return nil, fmt.Errorf("restrict control socket permissions: %w", err)
+		return nil, err
 	}
 	server := &Server{listener: listener, state: state}
+	if len(shutdown) > 0 {
+		server.shutdown = shutdown[0]
+	}
 	go server.acceptLoop()
 	return server, nil
 }
 
-func (s *Server) Close() error {
-	path := s.listener.Addr().String()
-	closeErr := s.listener.Close()
-	removeErr := os.Remove(path)
-	if errors.Is(removeErr, os.ErrNotExist) {
-		removeErr = nil
-	}
-	return errors.Join(closeErr, removeErr)
-}
+func (s *Server) Close() error { return closeControl(s.listener) }
 
 func (s *Server) Serve(ctx context.Context) {
 	<-ctx.Done()
@@ -120,46 +135,154 @@ func (s *Server) acceptLoop() {
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	var req request
+	// PersistMaxActiveJobs may make a server request with its own 10-second
+	// timeout. Keep the pipe open long enough for that request to finish and
+	// return its result to the CLI/dashboard.
+	_ = conn.SetDeadline(time.Now().Add(controlRequestTimeout))
+	var req Request
 	decoder := json.NewDecoder(bufio.NewReader(conn))
 	if err := decoder.Decode(&req); err != nil {
-		s.writeResponse(conn, response{Error: "invalid control request"})
+		s.writeResponse(conn, Response{Error: "invalid control request"})
 		return
 	}
-	result := response{}
+	result := Response{}
+	stop := false
 	switch req.Command {
 	case "status":
+	case "hold-admission":
+		if h, ok := s.state.(interface{ HoldAdmission() error }); ok {
+			if err := h.HoldAdmission(); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "mandatory admission hold is unavailable"
+		}
+	case "pause-job", "resume-job":
+		if p, ok := s.state.(interface{ SetJobPaused(string, bool) error }); ok {
+			if err := p.SetJobPaused(req.JobID, req.Command == "pause-job"); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "individual encoding control is unavailable"
+		}
+	case "set-pause-mode":
+		if p, ok := s.state.(interface{ SetPauseMode(string) error }); ok {
+			if err := p.SetPauseMode(req.PauseMode); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "pause mode control is unavailable"
+		}
+	case "pause-encodes", "resume-encodes":
+		if p, ok := s.state.(interface{ SetRAMPaused(bool) error }); ok {
+			if err := p.SetRAMPaused(req.Command == "pause-encodes"); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "RAM encoding control is unavailable"
+		}
+	case "set-admission-limit":
+		if p, ok := s.state.(interface{ PersistAdmissionLimit(int) error }); ok {
+			if err := p.PersistAdmissionLimit(req.MaxJobs); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "independent admission control is unavailable"
+		}
+	case "set-encoder-jobs":
+		if p, ok := s.state.(interface{ PersistEncoderLimits(int, int) error }); ok && req.CPUJobs != nil && req.GPUJobs != nil {
+			if err := p.PersistEncoderLimits(*req.CPUJobs, *req.GPUJobs); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "both encoder limits and independent encoder control are required"
+		}
 	case "set-max-jobs":
 		if err := s.state.PersistMaxActiveJobs(req.MaxJobs); err != nil {
 			result.Error = err.Error()
+		}
+	case "finish-accepted":
+		if d, ok := s.state.(interface{ FinishAcceptedJobs() error }); ok {
+			if err := d.FinishAcceptedJobs(); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "finishing accepted work is unavailable"
+		}
+	case "drain":
+		if d, ok := s.state.(interface{ DrainAcceptedJobs() error }); ok {
+			if err := d.DrainAcceptedJobs(); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "draining is unavailable"
+		}
+	case "shutdown":
+		if s.shutdown == nil {
+			result.Error = "shutdown is unavailable"
+		} else {
+			stop = true
 		}
 	default:
 		result.Error = "unknown control command"
 	}
 	result.Status = s.state.AdmissionStatus()
 	s.writeResponse(conn, result)
+	if stop {
+		s.shutdown()
+	}
 }
 
-func (s *Server) writeResponse(conn net.Conn, result response) {
+func (s *Server) writeResponse(conn net.Conn, result Response) {
 	_ = json.NewEncoder(conn).Encode(result)
 }
 
 func RunCLI(args []string, output io.Writer) error {
-	return runCLI(args, output, SocketPath)
+	return runCLI(args, output, ConfiguredPath())
+}
+
+// ConfiguredPath lets supervised worker instances use distinct local control endpoints.
+func ConfiguredPath() string {
+	if path := os.Getenv("TRANSCODERD_CONTROL_PIPE"); path != "" {
+		return path
+	}
+	return SocketPath
 }
 
 func runCLI(args []string, output io.Writer, socketPath string) error {
 	if len(args) == 0 {
-		return errors.New("usage: transcoderd-worker control status|set-max-jobs <N>")
+		return errors.New("usage: transcoderd-worker control status|set-encoder-jobs <CPU> <GPU>|set-max-jobs <N>|set-admission-limit <N>|pause-encodes|resume-encodes|set-pause-mode <finish|ram>|pause-job|resume-job <job UUID>")
 	}
-	req := request{Command: args[0]}
+	req := Request{Command: args[0]}
 	switch req.Command {
-	case "status":
+	case "set-encoder-jobs":
+		if len(args) != 3 {
+			return errors.New("usage: transcoderd-worker control set-encoder-jobs <CPU> <GPU>")
+		}
+		cpu, err := strconv.Atoi(args[1])
+		if err != nil || cpu < 0 {
+			return errors.New("CPU jobs must be a non-negative integer")
+		}
+		gpu, err := strconv.Atoi(args[2])
+		if err != nil || gpu < 0 || cpu > int(^uint(0)>>1)-gpu {
+			return errors.New("GPU jobs or encoder total is invalid")
+		}
+		req.CPUJobs, req.GPUJobs = &cpu, &gpu
+	case "status", "pause-encodes", "resume-encodes":
 		if len(args) != 1 {
 			return fmt.Errorf("usage: transcoderd-worker control %s", req.Command)
 		}
-	case "set-max-jobs":
+	case "pause-job", "resume-job":
+		if len(args) != 2 || args[1] == "" {
+			return errors.New("usage: transcoderd-worker control pause-job|resume-job <job UUID>")
+		}
+		req.JobID = args[1]
+	case "set-pause-mode":
+		if len(args) != 2 || (args[1] != "finish" && args[1] != "ram") {
+			return errors.New("usage: transcoderd-worker control set-pause-mode <finish|ram>")
+		}
+		req.PauseMode = args[1]
+	case "set-max-jobs", "set-admission-limit":
 		if len(args) != 2 {
 			return errors.New("usage: transcoderd-worker control set-max-jobs <non-negative integer>")
 		}
@@ -171,26 +294,53 @@ func runCLI(args []string, output io.Writer, socketPath string) error {
 	default:
 		return fmt.Errorf("unknown control command %q", req.Command)
 	}
-	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	result, err := Call(socketPath, req)
 	if err != nil {
-		return fmt.Errorf("connect to running worker control socket: %w", err)
+		return err
 	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return fmt.Errorf("send control request: %w", err)
-	}
-	var result response
-	if err := json.NewDecoder(conn).Decode(&result); err != nil {
-		return fmt.Errorf("read control response: %w", err)
-	}
-	if result.Error != "" {
-		return errors.New(result.Error)
+	if req.Command == "set-encoder-jobs" {
+		_, err = fmt.Fprintf(output, "CPU=%d GPU=%d; accepting=%t\n", result.Status.CPUJobs, result.Status.GPUJobs, result.Status.Accepting)
+		return err
 	}
 	if req.Command == "status" {
-		_, err = fmt.Fprintf(output, "accepting=%t active=%d reserved=%d max_jobs=%d admitted_limit=%d encodes=%d/%d within_schedule=%t\n", result.Status.Accepting, result.Status.ActiveJobs, result.Status.ReservedJobs, result.Status.MaxActiveJobs, result.Status.MaxAcceptedJobs, result.Status.ActiveEncodes, result.Status.MaxEncodes, result.Status.WithinSchedule)
+		_, err = fmt.Fprintf(output, "accepting=%t active=%d reserved=%d max_jobs=%d admitted_limit=%d encodes=%d/%d within_schedule=%t paused=%t ram_paused=%t pause_mode=%s suspended_encodes=%d\n", result.Status.Accepting, result.Status.ActiveJobs, result.Status.ReservedJobs, result.Status.MaxActiveJobs, result.Status.MaxAcceptedJobs, result.Status.ActiveEncodes, result.Status.MaxEncodes, result.Status.WithinSchedule, result.Status.Paused, result.Status.RAMPaused, result.Status.PauseMode, result.Status.SuspendedEncodes)
+		return err
+	}
+	if req.Command == "pause-encodes" || req.Command == "resume-encodes" {
+		_, err = fmt.Fprintf(output, "ram_paused=%t; max_jobs=%d; suspended_encodes=%d\n", result.Status.RAMPaused, result.Status.MaxActiveJobs, result.Status.SuspendedEncodes)
+		return err
+	}
+	if req.Command == "pause-job" || req.Command == "resume-job" {
+		_, err = fmt.Fprintf(output, "%s applied to %s; suspended_encodes=%d\n", req.Command, req.JobID, result.Status.SuspendedEncodes)
+		return err
+	}
+	if req.Command == "set-pause-mode" {
+		_, err = fmt.Fprintf(output, "pause mode set to %s; suspended_encodes=%d\n", result.Status.PauseMode, result.Status.SuspendedEncodes)
 		return err
 	}
 	_, err = fmt.Fprintf(output, "max jobs set to %d; admitted_limit=%d; accepting=%t encodes=%d/%d\n", result.Status.MaxActiveJobs, result.Status.MaxAcceptedJobs, result.Status.Accepting, result.Status.ActiveEncodes, result.Status.MaxEncodes)
 	return err
+}
+
+func Call(socketPath string, req Request) (Response, error) {
+	if socketPath == "" {
+		socketPath = ConfiguredPath()
+	}
+	conn, err := dialControl(socketPath)
+	if err != nil {
+		return Response{}, fmt.Errorf("connect to running worker control socket: %w", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(controlRequestTimeout))
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		return Response{}, fmt.Errorf("send control request: %w", err)
+	}
+	var result Response
+	if err := json.NewDecoder(conn).Decode(&result); err != nil {
+		return Response{}, fmt.Errorf("read control response: %w", err)
+	}
+	if result.Error != "" {
+		return result, errors.New(result.Error)
+	}
+	return result, nil
 }

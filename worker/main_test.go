@@ -20,6 +20,7 @@ func TestAV1WorkerFlagDefaults(t *testing.T) {
 		{"worker.ffmpegConfig.videoCodec", "av1_nvenc"},
 		{"worker.ffmpegConfig.parallelJobs", "0"},
 		{"worker.maxActiveJobs", "2"},
+		{"worker.pauseMode", "finish"},
 		{"worker.pgsConfig.parallelJobs", "1"},
 		{"worker.ffmpegConfig.videoCQ", "0"},
 		{"worker.schedule.timeZone", "Local"},

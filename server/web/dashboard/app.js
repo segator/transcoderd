@@ -474,13 +474,45 @@
     const stale = j.progress.some((p) => p.stale);
     return `<div class="load-labels"><span>${esc((phases[j.phase] ?? j.phase) + (j.message ? " · " + j.message : ""))}</span><strong>${number.format(percent)} %</strong></div><div class="progress-track"><span data-width="${percent}"></span></div><div class="progress-caption ${stale ? "stale" : ""}"><span>${stale ? "Progreso desactualizado" : "ETA de fase: " + duration(eta)}</span><span>${j.progress.length > 1 ? `${j.progress.length} subtareas` : ""}</span></div>`;
   }
+  function observedJob(job) {
+    if (job.state !== "active") return null;
+    const worker = data.workers.find((w) => w.name === job.worker);
+    const local = worker?.runtime?.jobs?.find((j) => j.id === job.id);
+    if (!local) return null;
+    return {
+      ...local,
+      queueHeld:
+        local.state === "queued" &&
+        local.phase === "FFMPEG" &&
+        worker.runtime.paused,
+    };
+  }
+  function jobBadge(job) {
+    const local = observedJob(job);
+    return local?.state === "paused"
+      ? badge(
+          "queued",
+          local.individuallyPaused ? "Pausa individual" : "Pausa RAM",
+        )
+      : local?.queueHeld
+        ? badge("queued", "Cola detenida")
+        : badge(job.state);
+  }
+  function observedProgress(job) {
+    const local = observedJob(job);
+    if (local?.state === "paused")
+      return `<span class="muted">${job.progress?.length ? number.format(job.progress[0].percent) + "% · " : ""}Suspendido en RAM · progreso conservado</span>`;
+    if (local?.queueHeld)
+      return '<span class="muted">En espera de reanudar la cola</span>';
+    return jobProgress(job);
+  }
   function jobsTable(jobs) {
     if (!jobs.length)
       return empty(
         "No hay trabajos que mostrar",
         "Los archivos aparecerán aquí cuando se incorporen a la cola o cambies el filtro.",
       );
-    return `<table><thead><tr><th>Archivo</th><th>Estado</th><th>Worker</th><th>Progreso / resultado</th><th>Actualización</th><th>Vídeo</th></tr></thead><tbody>${jobs.map((j) => `<tr><td class="file-cell"><div class="file-name"><span aria-hidden="true">▹</span><div><strong title="${esc(j.sourcePath)}">${esc(basename(j.sourcePath))}</strong><small title="${esc(j.id)}">${bytes(j.sourceBytes)} · ${esc(j.id.slice(0, 8))}</small></div></div></td><td>${badge(j.state)}</td><td>${esc(j.worker || "—")}</td><td><div class="job-progress">${jobProgress(j)}</div></td><td title="${esc(new Date(j.updatedAt).toLocaleString("es-ES"))}">${age(j.updatedAt)}</td><td><button type="button" class="button media-job-play" data-job-media="${esc(j.id)}" aria-label="Reproducir ${esc(basename(j.sourcePath))}">▷ Ver</button></td></tr>`).join("")}</tbody></table>`;
+    return `<table><thead><tr><th>Archivo</th><th>Estado</th><th>Worker</th><th>Progreso / resultado</th><th>Actualización</th><th>Vídeo</th></tr></thead><tbody>${jobs.map((j) => `<tr><td class="file-cell"><div class="file-name"><span aria-hidden="true">▹</span><div><strong title="${esc(j.sourcePath)}">${esc(basename(j.sourcePath))}</strong><small title="${esc(j.id)}">${bytes(j.sourceBytes)} · ${esc(j.id.slice(0, 8))}</small></div></div></td><td>${jobBadge(j)}</td><td>${esc(j.worker || "—")}</td><td><div class="job-progress">${observedProgress(j)}</div></td><td title="${esc(new Date(j.updatedAt).toLocaleString("es-ES"))}">${age(j.updatedAt)}</td><td><button type="button" class="button media-job-play" data-job-media="${esc(j.id)}" aria-label="Reproducir ${esc(basename(j.sourcePath))}">▷ Ver</button></td></tr>`).join("")}</tbody></table>`;
   }
   function renderJobs() {
     if (!data) return;
@@ -534,31 +566,46 @@
           (!modern ||
             Number(desired.cpu) !== rt.cpuJobs ||
             Number(desired.gpu) !== rt.gpuJobs);
-        const paused = modern && rt.cpuJobs === 0 && rt.gpuJobs === 0;
+        const paused =
+          modern && (rt.paused || (rt.cpuJobs === 0 && rt.gpuJobs === 0));
         const status = !w.online
           ? ["offline", "Offline"]
           : !modern
             ? ["queued", "Actualizar worker"]
-            : paused
-              ? ["queued", "Pausado"]
-              : !rt.withinSchedule
-                ? ["queued", "Fuera de horario"]
-                : ["completed", "Online"];
+            : rt.draining
+              ? ["queued", "Mantenimiento"]
+              : rt.finishing
+                ? ["queued", "Terminando jobs"]
+                : rt.ramPaused
+                  ? ["queued", "Pausa RAM"]
+                  : paused
+                    ? ["queued", "Cola pausada"]
+                    : !rt.withinSchedule
+                      ? ["queued", "Fuera de horario"]
+                      : ["completed", "Online"];
         const busy = saving.has(w.name);
+        const fixedCPU = rt?.managedProfile && rt.encoder !== "av1_nvenc",
+          fixedGPU = rt?.managedProfile && rt.encoder === "av1_nvenc";
         const lane = (kind, encoder, active, limit) =>
           `<div class="encoder-lane ${kind}"><div class="load-labels"><span><b>${kind.toUpperCase()}</b> · ${esc(encoder || "Sin telemetría")}</span><strong>${modern ? `${active} / ${limit}` : "—"}</strong></div><div class="progress-track"><span data-width="${modern && limit > 0 ? (active / limit) * 100 : 0}"></span></div><p class="lane-note">${!modern ? "Actualiza este worker para observar y controlar ambos encoders." : active > limit ? `${active} encodes aceptados terminando · límite ${limit}` : limit === 0 ? "Desactivado para nuevos encodes" : `${limit} slots de codificación${w.online ? "" : " · último dato"}`}</p></div>`;
         const note = pending
           ? `◷ Deseado: CPU ${desired.cpu || "?"} · GPU ${desired.gpu || "?"} — ${!modern ? "requiere actualizar el worker" : w.online ? "pendiente de aplicar" : "se aplicará al reconectar"}`
           : !modern
             ? "Los límites se guardan juntos; el worker antiguo se pausa hasta actualizarlo."
-            : paused
-              ? "Admisión pausada. Los trabajos aceptados siguen terminando."
-              : `✓ Límites aplicados · hasta ${rt.cpuJobs + rt.gpuJobs + 2} jobs en el pipeline`;
+            : rt.draining
+              ? "Mantenimiento: termina el trabajo aceptado sin admitir más."
+              : rt.finishing
+                ? "Terminando trabajo aceptado; la sincronización mantiene este bloqueo."
+                : rt.ramPaused
+                  ? `Pausa RAM · ${rt.suspendedEncodes || 0} encodes suspendidos. Los límites se conservan.`
+                  : paused
+                    ? "Cola detenida. Los encodes activos terminan; los pendientes esperan reanudación."
+                    : `✓ Límites aplicados · hasta ${rt.cpuJobs + rt.gpuJobs + 1} jobs en el pipeline`;
         return `<article class="panel worker-card" data-worker="${esc(w.name)}">
-        <div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${modern ? "CPU + GPU · ejecución independiente" : esc(rt?.encoder || "Esperando telemetría compatible")}</p></div>${badge(...status)}</div>
+        <div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${modern ? (rt.managedProfile ? "Perfil Windows · " + (fixedCPU ? "CPU" : "GPU") : "CPU + GPU · ejecución independiente") : esc(rt?.encoder || "Esperando telemetría compatible")}</p></div>${badge(...status)}</div>
         <div class="worker-stats"><div class="worker-stat"><small>CPU en marcha${w.online ? "" : " · último dato"}</small><strong>${modern ? rt.activeCPUEncodes : "—"}<span>${modern ? "/ " + rt.cpuJobs : ""}</span></strong></div><div class="worker-stat"><small>GPU en marcha${w.online ? "" : " · último dato"}</small><strong>${modern ? rt.activeGPUEncodes : "—"}<span>${modern ? "/ " + rt.gpuJobs : ""}</span></strong></div><div class="worker-stat"><small>Jobs aceptados</small><strong>${rt ? rt.activeJobs : w.activeJobs}</strong></div></div>
         <div class="encoder-lanes">${lane("cpu", rt?.cpuEncoder, rt?.activeCPUEncodes, rt?.cpuJobs)}${lane("gpu", rt?.gpuEncoder, rt?.activeGPUEncodes, rt?.gpuJobs)}</div>
-        <form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs"><div><label for="cpu-${i}">Límite CPU <span>ENCODES</span></label><input id="cpu-${i}" name="cpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${esc(draft.cpu)}" ${busy ? "disabled" : ""} aria-label="Límite CPU de ${esc(w.name)}"></div><div><label for="gpu-${i}">Límite GPU <span>ENCODES</span></label><input id="gpu-${i}" name="gpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${esc(draft.gpu)}" ${busy ? "disabled" : ""} aria-label="Límite GPU de ${esc(w.name)}"></div></div><div class="capacity-controls"><button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Guardando…" : "Guardar límites"}</button><button class="button subtle" type="button" data-pause="${esc(w.name)}" ${busy ? "disabled" : ""}>Pausar ambos</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>
+        <form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs"><div><label for="cpu-${i}">Límite CPU <span>ENCODES</span></label><input id="cpu-${i}" name="cpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${fixedGPU ? 0 : esc(draft.cpu)}" ${rt?.managedProfile ? 'max="64"' : ""} ${busy || fixedGPU ? "disabled" : ""} aria-label="Límite CPU de ${esc(w.name)}"></div><div><label for="gpu-${i}">Límite GPU <span>ENCODES</span></label><input id="gpu-${i}" name="gpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${fixedCPU ? 0 : esc(draft.gpu)}" ${rt?.managedProfile ? 'max="64"' : ""} ${busy || fixedCPU ? "disabled" : ""} aria-label="Límite GPU de ${esc(w.name)}"></div></div><div class="capacity-controls"><button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Guardando…" : "Guardar límites"}</button><button class="button subtle" type="button" data-pause="${esc(w.name)}" ${busy ? "disabled" : ""}>Pausar ambos</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>
         <div class="worker-footer"><span>${esc(w.ip || "Sin presencia registrada")} · ${age(w.lastSeen)}</span><span>${integer.format(w.completed)} completados · ${integer.format(w.failed)} fallos · ${bytes(w.sourceBytes - w.targetBytes)}</span></div>
       </article>`;
       })

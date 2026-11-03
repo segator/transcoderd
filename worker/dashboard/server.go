@@ -1,0 +1,202 @@
+package dashboard
+
+import (
+	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"net"
+	"net/http"
+	"strings"
+	"time"
+
+	"transcoder/model"
+	"transcoder/version"
+	"transcoder/worker/control"
+
+	"github.com/google/uuid"
+)
+
+//go:embed wwwroot/*
+var assets embed.FS
+
+type admissionController interface {
+	AdmissionStatus() control.AdmissionStatus
+	PersistMaxActiveJobs(int) error
+}
+
+type Server struct {
+	listener net.Listener
+	http     *http.Server
+}
+
+type statusResponse struct {
+	Configured bool                    `json:"configured"`
+	Running    bool                    `json:"running"`
+	Version    string                  `json:"version"`
+	Worker     control.AdmissionStatus `json:"worker"`
+}
+
+// Start opens the optional browser dashboard. An address without a token is rejected.
+func Start(address, token string, worker admissionController) (*Server, error) {
+	if strings.TrimSpace(address) == "" {
+		return nil, nil
+	}
+	if strings.TrimSpace(token) == "" {
+		return nil, errors.New("worker.dashboard.token is required when worker.dashboard.listenAddress is configured")
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("listen for worker dashboard: %w", err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/status", authorize(token, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, statusResponse{Configured: true, Running: true, Version: version.Version, Worker: worker.AdmissionStatus()})
+	}))
+	mux.HandleFunc("POST /api/worker/max-jobs", authorize(token, func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			MaxJobs *int `json:"maxJobs"`
+			CPUJobs *int `json:"cpuJobs"`
+			GPUJobs *int `json:"gpuJobs"`
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1024)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"maxJobs must be an integer between 0 and 1024"}`, http.StatusBadRequest)
+			return
+		}
+		settings := model.WorkerSettings{MaxActiveJobs: req.MaxJobs, CPUJobs: req.CPUJobs, GPUJobs: req.GPUJobs}
+		if err := settings.ValidateWrite(); err != nil {
+			http.Error(w, `{"error":"supply maxJobs or both non-negative cpuJobs and gpuJobs"}`, 400)
+			return
+		}
+		var err error
+		if settings.Independent() {
+			controller, ok := worker.(interface{ PersistEncoderLimits(int, int) error })
+			if !ok {
+				http.Error(w, `{"error":"independent encoder controls unavailable"}`, http.StatusServiceUnavailable)
+				return
+			}
+			if *req.CPUJobs > 1024 || *req.GPUJobs > 1024 || *req.CPUJobs+*req.GPUJobs > 1024 {
+				http.Error(w, `{"error":"encoder total must not exceed 1024"}`, 400)
+				return
+			}
+			err = controller.PersistEncoderLimits(*req.CPUJobs, *req.GPUJobs)
+		} else {
+			if *req.MaxJobs > 1024 {
+				http.Error(w, `{"error":"maxJobs must not exceed 1024"}`, 400)
+				return
+			}
+			setLimit := worker.PersistMaxActiveJobs
+			if controller, ok := worker.(interface{ PersistAdmissionLimit(int) error }); ok {
+				setLimit = controller.PersistAdmissionLimit
+			}
+			err = setLimit(*req.MaxJobs)
+		}
+		if err != nil {
+			http.Error(w, `{"error":"worker could not persist and apply the limit"}`, http.StatusConflict)
+			return
+		}
+
+		writeJSON(w, statusResponse{Configured: true, Running: true, Version: version.Version, Worker: worker.AdmissionStatus()})
+	}))
+	for _, action := range []string{"pause", "resume"} {
+		mux.HandleFunc("POST /api/worker/encodes/"+action, authorize(token, func(w http.ResponseWriter, r *http.Request) {
+			controller, ok := worker.(interface{ SetRAMPaused(bool) error })
+			if !ok {
+				http.Error(w, `{"error":"RAM encoding control is unavailable"}`, http.StatusServiceUnavailable)
+				return
+			}
+			if err := controller.SetRAMPaused(action == "pause"); err != nil {
+				http.Error(w, `{"error":"cannot change RAM pause during maintenance"}`, http.StatusConflict)
+				return
+			}
+			writeJSON(w, statusResponse{Configured: true, Running: true, Version: version.Version, Worker: worker.AdmissionStatus()})
+		}))
+	}
+	for _, action := range []string{"pause", "resume"} {
+		mux.HandleFunc("POST /api/worker/jobs/{jobID}/"+action, authorize(token, func(w http.ResponseWriter, r *http.Request) {
+			id, err := uuid.Parse(r.PathValue("jobID"))
+			if err != nil {
+				http.Error(w, `{"error":"invalid encoding job ID"}`, http.StatusBadRequest)
+				return
+			}
+			controller, ok := worker.(interface{ SetJobPaused(string, bool) error })
+			if !ok {
+				http.Error(w, `{"error":"individual encoding control is unavailable"}`, http.StatusServiceUnavailable)
+				return
+			}
+			if err := controller.SetJobPaused(id.String(), action == "pause"); err != nil {
+				code := http.StatusConflict
+				if errors.Is(err, control.ErrJobNotPausable) {
+					code = http.StatusNotFound
+				}
+				http.Error(w, `{"error":"encoding is no longer active or cannot be controlled during maintenance"}`, code)
+				return
+			}
+			writeJSON(w, statusResponse{Configured: true, Running: true, Version: version.Version, Worker: worker.AdmissionStatus()})
+		}))
+	}
+	webroot, err := fs.Sub(assets, "wwwroot")
+	if err != nil {
+		_ = listener.Close()
+		return nil, fmt.Errorf("open embedded dashboard assets: %w", err)
+	}
+	static := http.FileServer(http.FS(webroot))
+	mux.Handle("/", static)
+	server := &http.Server{Handler: securityHeaders(mux), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+	return &Server{listener: listener, http: server}, nil
+}
+
+func (s *Server) Serve() error {
+	if s == nil {
+		return nil
+	}
+	if err := s.http.Serve(s.listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+func (s *Server) Shutdown() error {
+	if s == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return s.http.Shutdown(ctx)
+}
+
+func authorize(token string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		providedHash, expectedHash := sha256.Sum256([]byte(provided)), sha256.Sum256([]byte(token))
+		if subtle.ConstantTimeCompare(providedHash[:], expectedHash[:]) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func writeJSON(w http.ResponseWriter, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+// Addr returns the bound address, including the selected ephemeral port.
+func (s *Server) Addr() net.Addr { return s.listener.Addr() }

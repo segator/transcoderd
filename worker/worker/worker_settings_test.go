@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -281,10 +282,39 @@ func TestLocalAdmissionDrainDoesNotPersistZero(t *testing.T) {
 		encodePool:    newEncodeConcurrency(2),
 		client:        client,
 	}
-	if err := executor.SetMaxActiveJobs(0); err != nil {
+	if err := executor.DrainAcceptedJobs(); err != nil {
 		t.Fatal(err)
 	}
 	if requests != 0 {
 		t.Errorf("local drain sent %d persistence requests, want zero", requests)
+	}
+}
+
+func TestManagedLimitsHonorPersistedServerSettingsBeforeAdmission(t *testing.T) {
+	for _, target := range []int{0, 1, 4} {
+		t.Run(fmt.Sprint(target), func(t *testing.T) {
+			worker := testAdmissionWorker(2)
+			worker.UseManagedLimits()
+			worker.RequireWorkerSettings()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Error("startup overwrote existing desired settings")
+					w.WriteHeader(500)
+					return
+				}
+				if worker.ReserveJobSlot() {
+					t.Error("admission opened before synchronization")
+				}
+				_ = json.NewEncoder(w).Encode(serverclient.WorkerSettings{MaxActiveJobs: &target})
+			}))
+			defer server.Close()
+			client := serverclient.NewServerClient(&web.Config{Domain: server.URL}, "managed")
+			if !NewServerCoordinator(client, worker, nil, testConsoleLogger{}).loadPersistedWorkerSettings(t.Context()) {
+				t.Fatal("managed sync failed")
+			}
+			if got := worker.AdmissionStatus().MaxActiveJobs; got != target {
+				t.Errorf("managed max = %d, want %d", got, target)
+			}
+		})
 	}
 }

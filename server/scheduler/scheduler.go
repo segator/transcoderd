@@ -41,6 +41,7 @@ type Scheduler interface {
 	CancelJob(ctx context.Context, id string) error
 	GetJob(ctx context.Context, id string) (*model.Job, error)
 	GetDashboard(ctx context.Context, hours int) (*model.Dashboard, error)
+	ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error)
 }
 
 type Config struct {
@@ -59,6 +60,10 @@ type RuntimeScheduler struct {
 	jobRequestMu    sync.Mutex
 	jobIntakeMu     sync.Mutex
 	handleEventMu   sync.Mutex
+}
+
+func (r *RuntimeScheduler) ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error) {
+	return r.repo.ListQueuedJobs(ctx)
 }
 
 func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*model.RequestJobResponse, error) {
@@ -83,6 +88,7 @@ func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 	task := &model.RequestJobResponse{
 		Id:      video.Id,
 		EventID: video.Events.GetLatest().EventID,
+		Name:    filepath.Base(video.SourcePath),
 	}
 	log.WithFields(log.Fields{
 		"job_id":      video.Id.String(),
@@ -138,6 +144,21 @@ func (r *RuntimeScheduler) GetWorkerSettings(ctx context.Context, name string) (
 }
 
 func (r *RuntimeScheduler) SetWorkerSettings(ctx context.Context, name string, settings model.WorkerSettings) error {
+	if settings.Independent() {
+		if err := settings.ValidateWrite(); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidWorkerSettings, err)
+		}
+		worker, err := r.repo.GetWorker(ctx, name)
+		if err != nil && !errors.Is(err, repository.ErrElementNotFound) {
+			return err
+		}
+		if worker != nil && worker.Runtime != nil && worker.Runtime.ManagedProfile {
+			rt := worker.Runtime
+			if *settings.CPUJobs+*settings.GPUJobs > 64 || (rt.Encoder == "av1_nvenc" && *settings.CPUJobs > 0) || (rt.Encoder != "av1_nvenc" && *settings.GPUJobs > 0) {
+				return fmt.Errorf("%w: Windows profiles keep their configured encoder class and support up to 64 jobs", ErrInvalidWorkerSettings)
+			}
+		}
+	}
 	return r.repo.SetWorkerSettings(ctx, name, settings)
 }
 
@@ -938,3 +959,5 @@ func formatTargetName(path string) string {
 
 	return p
 }
+
+var ErrInvalidWorkerSettings = errors.New("invalid worker settings")

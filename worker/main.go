@@ -10,11 +10,13 @@ import (
 	"syscall"
 
 	"transcoder/cmd"
+	"transcoder/helper"
 	"transcoder/update"
 	"transcoder/version"
 	"transcoder/worker/config"
 	"transcoder/worker/console"
 	"transcoder/worker/control"
+	"transcoder/worker/dashboard"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/worker"
 
@@ -42,11 +44,16 @@ func init() {
 		defaultThreads = 16
 	}
 	pflag.Int("worker.threads", defaultThreads, "Worker Threads")
-	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum FFmpeg encode concurrency; the worker may accept two additional pipeline jobs; 0 disables new job requests")
+	pflag.Bool("worker.ramPaused", false, "Start with encoding and admission held by the independent RAM pause control")
+	pflag.String("worker.pauseMode", config.PauseFinish, "Pause mode: finish lets active encodes finish; ram suspends encoders and retains RAM/VRAM until Resume (cannot survive exit or reboot)")
+	pflag.Int("worker.maxActiveJobs", config.DefaultMaxActiveJobs, "Maximum FFmpeg encode concurrency; the worker may accept one additional pipeline job; 0 pauses requests and queued encodes")
+	pflag.String("worker.dashboard.listenAddress", "", "Optional HTTP listen address for the local browser dashboard (requires worker.dashboard.token)")
+	pflag.String("worker.dashboard.token", "", "Bearer token required by the local browser dashboard API")
 	pflag.Int("worker.pgsConfig.parallelJobs", 1, "Maximum PGS OCR actions per job")
+	pflag.String("worker.pgsConfig.executablePath", helper.BundledPath("pgs/PgsToSrt.exe", ""), "PgsToSrt executable; empty uses dotnet and DLLPath")
 	pflag.String("worker.pgsConfig.dotnetPath", "dotnet", "dotnet path")
 	pflag.String("worker.pgsConfig.DLLPath", "./PgsToSrt.dll", "PGSToSrt.dll path")
-	pflag.String("worker.pgsConfig.tessdataPath", "./tessdata", "tesseract data path")
+	pflag.String("worker.pgsConfig.tessdataPath", helper.BundledPath("tessdata", "./tessdata"), "tesseract data path")
 	pflag.Int("worker.pgsConfig.tessVersion", 5, "tesseract data version")
 	pflag.String("worker.pgsConfig.libleptName", "leptonica", "leptonica library name")
 	pflag.Int("worker.pgsConfig.libleptVersion", 6, "leptonica library version")
@@ -111,7 +118,13 @@ func main() {
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	wg.Add(1)
 	go func() {
-		shutdownHandler(sigs, cancel)
+		select {
+		case <-sigs:
+			cancel()
+			log.Info("Termination Signal Detected...")
+		case <-ctx.Done():
+		}
+		signal.Stop(sigs)
 		wg.Done()
 	}()
 
@@ -126,7 +139,7 @@ func main() {
 
 	if opts.NoUpdateMode || opts.NoUpdates {
 		version.AppLogger().Info("Starting Worker")
-		err = applicationRun(wg, ctx, updater)
+		err = applicationRunWithShutdown(wg, ctx, updater, cancel)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -139,6 +152,10 @@ func main() {
 }
 
 func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) error {
+	return applicationRunWithShutdown(wg, ctx, updater, nil)
+}
+
+func applicationRunWithShutdown(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater, shutdown func()) error {
 	if err := opts.Worker.Validate(); err != nil {
 		return err
 	}
@@ -158,9 +175,17 @@ func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Upd
 	}
 
 	encodeWorker := worker.NewEncodeWorker(opts.Worker, serverClient, renderService)
+	if os.Getenv("TRANSCODERD_MANAGED_PROFILE") == "1" {
+		encodeWorker.UseManagedLimits()
+	}
+	if os.Getenv("TRANSCODERD_ADMISSION_HOLD") == "1" {
+		if err := encodeWorker.HoldAdmission(); err != nil {
+			return err
+		}
+	}
 	encodeWorker.RequireWorkerSettings()
 	encodeWorker.Run(wg, ctx)
-	controlServer, err := control.Start(control.SocketPath, encodeWorker)
+	controlServer, err := control.Start(control.ConfiguredPath(), encodeWorker, shutdown)
 	if err != nil {
 		return fmt.Errorf("start worker control interface: %w", err)
 	}
@@ -169,15 +194,36 @@ func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Upd
 		defer wg.Done()
 		controlServer.Serve(ctx)
 	}()
+	dashboardConfig := opts.Worker.Dashboard
+	var dashboardAddress, dashboardToken string
+	if dashboardConfig != nil {
+		dashboardAddress, dashboardToken = dashboardConfig.ListenAddress, dashboardConfig.Token
+	}
+	dashboardServer, err := dashboard.Start(dashboardAddress, dashboardToken, encodeWorker)
+	if err != nil {
+		_ = controlServer.Close()
+		return err
+	}
+	if dashboardServer != nil {
+		log.WithField("address", dashboardAddress).Info("Starting worker browser dashboard")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := dashboardServer.Serve(); err != nil {
+				log.WithError(err).Error("Worker browser dashboard stopped")
+			}
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-ctx.Done()
+			if err := dashboardServer.Shutdown(); err != nil {
+				log.WithError(err).Warn("Could not shut down worker browser dashboard cleanly")
+			}
+		}()
+	}
 
 	coordinator := worker.NewServerCoordinator(serverClient, encodeWorker, updater, renderService.Logger())
 	coordinator.Run(wg, ctx)
 	return nil
-}
-
-func shutdownHandler(sigs chan os.Signal, cancel context.CancelFunc) {
-	<-sigs
-	cancel()
-	log.Info("Termination Signal Detected...")
-	signal.Stop(sigs)
 }

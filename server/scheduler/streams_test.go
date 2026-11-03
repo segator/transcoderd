@@ -1,11 +1,57 @@
 package scheduler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestDownloadStreamClosePublishesReadOnlyChecksum(t *testing.T) {
+	for _, push := range []bool{true, false} {
+		name := "without publishing"
+		if push {
+			name = "publish checksum"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "source.bin")
+			data := []byte("read-only source contents")
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			file, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = file.Close() })
+			published := make(chan PathChecksum, 1)
+			stream := &DownloadJobStream{JobStream: &JobStream{file: file, path: path, checksumPublisher: published}}
+			if _, err := io.Copy(io.Discard, stream); err != nil {
+				t.Fatal(err)
+			}
+			if err := stream.Close(push); err != nil {
+				t.Fatalf("Close(%t) = %v", push, err)
+			}
+			if _, err := file.Read(make([]byte, 1)); !errors.Is(err, os.ErrClosed) {
+				t.Fatalf("closed source Read() = %v, want os.ErrClosed", err)
+			}
+			select {
+			case got := <-published:
+				want := sha256.Sum256(data)
+				if !push || got.path != path || got.checksum != hex.EncodeToString(want[:]) {
+					t.Fatalf("published checksum = %#v, push=%t", got, push)
+				}
+			default:
+				if push {
+					t.Fatal("source checksum was not published")
+				}
+			}
+		})
+	}
+}
 
 func newTestUploadStream(t *testing.T, dir, finalPath, name string) *UploadJobStream {
 	t.Helper()

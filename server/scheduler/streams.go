@@ -118,16 +118,16 @@ func rootChecksum(root *os.Root, name string) (string, error) {
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-func (j *JobStream) Close(pushChecksum bool) error {
-	err := j.file.Sync()
-	if err != nil {
+func (d *DownloadJobStream) Close(pushChecksum bool) error {
+	// Downloads open the source read-only. FlushFileBuffers requires write
+	// access on Windows, and there are no writes to flush for this stream.
+	if err := d.file.Close(); err != nil {
 		return err
 	}
-	j.file.Close()
-	if j.hasher != nil && pushChecksum {
-		j.checksumPublisher <- PathChecksum{
-			path:     j.path,
-			checksum: j.GetHash(),
+	if d.hasher != nil && pushChecksum {
+		d.checksumPublisher <- PathChecksum{
+			path:     d.path,
+			checksum: d.GetHash(),
 		}
 	}
 	return nil

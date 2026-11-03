@@ -16,7 +16,7 @@ The specs state observable behavior and the configuration values that affect it.
 | `subtitles` | `worker/ffmpeg/ffprobe.go`, `worker/step/MKVExtractStep.go`, `worker/step/PGStoSrtStep.go` |
 | `persistence` | `server/repository/repository.go`, `server/repository/resources/database/` |
 | `maintenance-and-recovery` | `server/scheduler/scheduler.go`, `worker/job/job.go`, `worker/worker/executor.go` |
-| `self-update` | `update/update.go`, `server/web/web.go`, `worker/worker/coordinator.go` |
+| `self-update` | `update/update.go`, `update/managed/`, `cmd/windows-service/updates_windows.go`, `server/web/web.go`, `worker/worker/coordinator.go` |
 | `operations-dashboard` | `server/web/dashboard*`, `server/repository/dashboard.go`, `model/dashboard.go`, `worker/worker/coordinator.go` |
 
 ## Known implementation gaps
@@ -33,6 +33,14 @@ These observations are not normative requirements. They need separate fixes or e
 - Viper enables a `TR_` environment prefix, but does not configure a nested-key replacer. The `envconfig` struct tags are not read by the Viper setup, so nested environment-variable spellings are not a verified interface.
 - Historical notification/presence columns are naive SQL timestamps. Before the dashboard change, notification and presence writes used server local time while progress used database session time. The dashboard change normalizes new monitoring writes and timeout comparisons to UTC, but cannot infer or rewrite the timezone of old rows. Historical dashboards on previously non-UTC deployments may require an explicit operator-led timestamp correction.
 
+## Resolved implementation discrepancies
+
+- Before `pause-queued-encodes`, the implemented two-job prefetch buffer exceeded the unsynchronized main admission contract; zero admission continued prefetched encodes, and Windows startup could replace local profile limits with stale server values. The change reduces the buffer to one, separates user pause from maintenance drain and gives service-owned profiles authoritative startup limits.
+
+- Native Windows CPU CI exposed a download close failure: syncing the read-only source invokes Windows FlushFileBuffers without write access and prevents checksum publication. Download streams now close without a write flush, then publish their checksum; upload streams retain their sync. A read-only download regression and the complete native E2E cover this fix.
+
+- PR 187 initially replaced the Linux builder's FFmpeg hash with the official release tarball hash, incorrectly treating the upstream pin as stale. CI demonstrated that Linux downloads the GitHub n9.0.2 tag archive, whose verified SHA-256 is `6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9`. The override was removed. Windows retains the separate official tar.gz (`84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98`), verified with FFmpeg release key `FCF986EA15E6E293A5644F10B4322F04D67658D8`. Both recipes retain source version 9.0.2 and their intended archive/hash pair.
+
 ## Verification boundary
 
 Dashboard investigation identified two pre-existing contract discrepancies: main job-dispatch specs still described the prefetch-free admission ceiling and local-only persisted controls even though completed active deltas `keep-encoder-prefetched` and `persist-worker-job-limit` describe shipped code. Those deltas remain separate changes; dashboard capacity displays follow the implemented encode-target-plus-two ceiling. The dashboard change explicitly supersedes the local-only operator restriction while keeping the worker listener local. It also fixes the worker lookup's obsolete `queue_name` scan, which disagreed with migration 003 and would break reads after the additive telemetry migration; PostgreSQL regression coverage verifies that lookup.
@@ -45,3 +53,13 @@ Dashboard investigation identified two pre-existing contract discrepancies: main
 `server/library/` implements rooted discovery, metadata caching, bounded scan/load operations and compatible/original playback; `server/web/media.go` exposes authenticated dashboard routes. Migration 009 persists fingerprinted probes. The source root is queueable and optional `web.mediaRoots` are read-only. See `docs/media-library.md` for inspected Unraid script provenance and mount examples. Legacy Plex-only metadata type selection is intentionally replaced by filesystem discovery within operator-selected folders.
 
 Investigation found `SQLRepository.WithTransaction` previously committed callback failures and could hide commit errors because its deferred closure observed an unchanged local error. The media-library change fixes rollback/commit propagation and includes real PostgreSQL callback-rollback and deferred-constraint commit-failure tests. Per-file intake is serialized across dashboard and legacy requests to prevent duplicate creation within one scheduler process; trusted reviewed probes avoid a second unrooted probe. Existing legacy recursive job intake has its own extension/filter semantics; the new rooted library does not silently rewrite those contracts.
+- Complete Windows upgrades previously assumed the configured workspace was outside the installation tree, although desktop configuration accepted nested paths. The mandatory updater change rejects those paths (including existing junction aliases) during configuration and bootstrap before Setup can replace files; existing affected installations must choose an external workspace before bootstrap.
+
+- Consecutive managed Windows updates exposed stale completed-journal recovery clearing a newer pending target after downloading it, falsely reporting success and reopening admission. The coordinator now requires matching pending release and signed candidate identity before clearing a completed barrier; regression coverage retains newer targets through drain and installation.
+
+- Manual Windows Setup previously invoked the installed helper and aborted at the first busy CPU profile, potentially leaving GPU admission open. Setup now uses its extracted helper to hold both profiles and wait for accepted work before replacement. Immediate service preparation also drains/checks both profiles and rejects missing configured workers.
+
+
+### Worker UI synchronization and current main integration (2026-11-03)
+
+The dashboard branch was integrated with main through 884c371, including the shared worker UI, Windows service and queue/RAM controls. Main changed the pipeline buffer from two to one and operator zero from draining all queued encodes to holding queued starts. The synchronization change reconciles those observable contracts explicitly; archived earlier evidence remains historical. It also replaces managed startup's unconditional server overwrite with existing-override restoration, with empty-store default bootstrap. Local pair writes persist first, and worker polling serializes with local controls. RAM toggles previously reset independent limits through the single-limit setter; they now preserve the pair and individual holds. Fleet telemetry records queue/RAM/job/maintenance observations separately from desired settings. `worker/worker/dashboardSync_test.go` exercises real local HTTP -> worker API -> repository -> heartbeat -> fleet data and the reverse direction.

@@ -4,11 +4,13 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"transcoder/server/scheduler"
 
 	"github.com/gorilla/mux"
 	log "github.com/sirupsen/logrus"
@@ -118,6 +120,10 @@ func (s *Server) dashboardWorkerSettings(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	if err := s.scheduler.SetWorkerSettings(ctx, name, input); err != nil {
+		if errors.Is(err, scheduler.ErrInvalidWorkerSettings) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		log.WithError(err).WithField("worker", name).Error("Could not update worker capacity")
 		http.Error(w, "Could not save worker settings", http.StatusInternalServerError)
 		return

@@ -75,7 +75,7 @@ func TestFFMPEGExecutionUsesPinnedProfileForEveryOption(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			j := &job.Context{WorkingDir: dir, EncodeConfig: &tt.pinned, Source: &job.VideoData{FilePath: filepath.Join(dir, "source.mkv"), FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{Id: 0, Duration: time.Minute, FrameRate: 24}}}}
 			executor := &FFMPEGStepExecutor{ffmpegConfig: &tt.fallback}
-			if err := executor.ffmpeg(t.Context(), &mockLogger{}, j, make(chan int64, 1)); err == nil {
+			if err := executor.ffmpeg(t.Context(), &mockLogger{}, j, make(chan ffmpegProgress, 1)); err == nil {
 				t.Fatal("capture fixture did not terminate FFmpeg as expected")
 			}
 			raw, err := os.ReadFile(argsPath)

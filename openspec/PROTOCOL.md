@@ -61,10 +61,10 @@ The extension predicate is case-sensitive. It currently accepts `mp4`, `mpg`, `m
 
 ## Assignment and event sequence
 
-A worker asks for work with `workerName` and receives a response like:
+A worker asks for work with `workerName` and receives the assigned source filename without its server path:
 
 ```json
-{"id":"00000000-0000-0000-0000-000000000001","eventID":1}
+{"id":"00000000-0000-0000-0000-000000000001","eventID":1,"name":"Example Movie.mkv"}
 ```
 
 The server has already stored that assignment event. The worker uses the returned `eventID` as its starting point, so its first `Job/started` notification has the next number. Every subsequent notification for the job must increment the number by one, across all phases.
@@ -92,7 +92,7 @@ A progress event carries `jobId`, `progressID`, `percent`, `eta`, `notificationT
 
 ## File transfer
 
-The server streams an assigned source with `Content-Length` and `Content-Disposition`. The worker checks received length, computes SHA-256, and compares it with the checksum route before probing the file. The checksum becomes available after the server closes the download stream.
+The server streams an assigned source with `Content-Length` and an RFC 5987 UTF-8 `Content-Disposition` filename. The worker checks received length, computes SHA-256, and compares it with the checksum route before probing the file. The checksum becomes available after the server closes the download stream.
 
 For upload, the worker sends the encoded bytes with `Content-Length`, `checksum` (hexadecimal SHA-256), and `workerName`. The server checks the current job assignment and compares actual length and checksum before answering `201`. A completion notification follows only after that response. See `BASELINE.md` for the current handling of rejected uploads.
 
@@ -102,3 +102,93 @@ For upload, the worker sends the encoded bytes with `Content-Length`, `checksum`
 The dashboard API now includes rooted listing, playback and visual intake under `/dashboard/api/media/`. All routes require dashboard auth and no-store responses; POST/DELETE require the dashboard request header and same-origin checks. `GET roots` returns configured roots/presets; `GET browse` accepts `root`, relative `path`, and `offset`; `GET info/{fileID}` returns metadata; `GET/HEAD file/{fileID}` supports original byte ranges; `GET preview/{fileID}?start=seconds` streams compatible fragmented MP4. `GET jobs/{jobUUID}` returns available sources/completed outputs.
 
 `POST scans` accepts the filter object and returns HTTP 202 with an operation UUID. `GET operations/{UUID}` reports progress, `files` and per-file `results`; `DELETE operations/{UUID}` requests cancellation. `POST batches` accepts `scanId`, selected `ids`, and a successful-job `target`, requiring a completed source-root scan. It returns HTTP 202. Operations are bounded, process-local and expiring; previously scheduled jobs survive cancellation/restart. Unknown fields and unreviewed selections are rejected. Rooted IDs cannot grant access outside configured roots. See `docs/media-library.md` for field names, bounds and examples.
+## Desktop queue view
+
+`GET /api/v1/jobs/queued` requires the existing bearer token and returns `{ "total": number, "jobs": [{ "id": string, "name": string, "size": number, "queuedAt": timestamp }] }`. Jobs are ordered by queue time, with at most 100 entries; the count includes all queued jobs. Only the filename is returned, not the server path. This read-only endpoint does not assign work. Older servers do not provide it, and desktop clients display the global queue as unavailable.
+
+
+## Windows managed-update control
+
+The optional numeric request `id` correlates browser bridge requests. The
+restricted desktop named pipe accepts `status`, `configure`, `set-max-jobs`
+and `check-update`. `check-update` queues an immediate release check; it cannot
+select an endpoint, key, path, executable or installer arguments. Unknown fields
+are rejected. There is no update-disable, postpone or confirmation command.
+
+Desktop status includes an optional `update` object, separate from pending
+configuration. It contains `pending`, `phase`, `installedVersion`,
+`targetVersion`, `downloaded`, `total`, `lastCheck`, `nextRetry`, `attempts` and
+`message`. Byte counts are integers; timestamps use RFC 3339. Phases are
+`current`, `pending`, `downloading`, `draining`, `prepared`, `installing`,
+`verifying`, `recovering`, `restart-required`, `retrying` and `updated`.
+The authenticated candidate, signature, installer URL and server token are never
+included in this public status.
+
+While `update.pending` is true, `configure` and `set-max-jobs` return
+`A mandatory update is pending. Configuration is locked until the update completes.`
+without mutating saved or running configuration. Status and progress remain
+readable. The UI locks on unconfirmed service status and retains its last pending
+alert across disconnects and reloads. Linux browser dashboards do not expose the
+Windows installer lifecycle.
+
+
+## Worker pause and maintenance drain
+
+Worker status includes `paused`, indicating whether queued FFmpeg starts are
+held. Operator `set-max-jobs 0` persists zero, stops new requests and queued
+encodes, and applies the configured `pauseMode` to active encodes while verification and uploads finish. Positive
+values resume at that encode target. The admission ceiling is the effective
+encode target plus one accepted pipeline job per profile, including reservations.
+Windows service workers restore persisted per-name settings before admission and seed their service-owned defaults only when no override exists. Paused Windows startup holds restored
+encodes too. Internal `drain` and `hold-admission` permit accepted queued work to
+finish, resuming any RAM-suspended encoder first, without persisting a change to the user's pause preference. The mandatory
+update/configuration lifecycle owns those temporary maintenance transitions.
+
+Local `set-pause-mode` accepts `pauseMode: "finish"` or `"ram"`. Runtime status includes `pauseMode` (default `finish`) and `suspendedEncodes` (actual owned suspended encoding process count); the corresponding `jobs` entries use `state: "paused"`. Existing `activeEncodes` includes the occupied encoding slots, including suspended ones. Desktop public settings include `pauseMode`; it is saved in the protected service configuration. HTTP server worker-settings payloads remain unchanged. No durable process or chunk checkpoints are exposed.
+
+## Individual encoding control
+
+Local `pause-job` and `resume-job` commands carry `jobId` (a job UUID), with CLI forms `control pause-job <UUID>` and `control resume-job <UUID>`. The worker resolves only owned active encoding processes. The desktop service resolves the owning CPU/GPU profile from live snapshots; callers cannot select a PID or trusted profile. Stale jobs and maintenance/pending-reconfiguration controls fail.
+
+The authenticated optional browser dashboard exposes `POST /api/worker/jobs/{jobId}/pause` and `/resume`, protected by its existing dashboard bearer token. Invalid UUIDs return 400, unknown/noncontrollable encodes 404, and rejected transitions 409. The routes return the refreshed worker status on success.
+
+Job status includes `canPause`, `individuallyPaused` and `pausedByWorker`. An individual hold uses RAM pause regardless of the general pause mode, retains its occupied slot, and does not alter admission or limits. General Resume does not clear individual holds. Individual Resume cannot bypass a general hold. Maintenance clears live holds so accepted encodes can finish and blocks further individual mutations.
+
+## Independent queue and RAM controls
+
+Local `set-admission-limit` carries `maxJobs` and persists a finish-active admission limit. Local `pause-encodes` / `resume-encodes` suspend or resume owned encoding processes immediately without changing the admission limit. Runtime status exposes `ramPaused` independently of `maxActiveJobs`; zero limit still identifies a stopped queue. Both holds gate new assignments/starts and releasing either preserves the other and individual job holds.
+
+The optional authenticated dashboard's existing `/api/worker/max-jobs` route now uses the explicit admission operation; `POST /api/worker/encodes/pause` and `/resume` use the RAM operation. The desktop bridge accepts the same RAM commands and saves `ramPaused` separately from its existing `paused` queue preference. Generated profile config carries `worker.ramPaused` and finish zero-limit policy. Both preferences are restored before accepting work, while maintenance temporarily releases live suspensions and preserves the saved preferences.
+
+### Explicit Windows shutdown after accepted work
+
+The restricted desktop pipe accepts `stop-after-current` with boolean
+`shutdownAfterCurrent`. Only `true` arms a transient request; omitted/false uses
+ordinary queue stop. Desktop status includes `shutdownPending`. Both profiles
+must confirm idle with no active jobs, encodes or reserved requests before the
+service invokes normal Windows shutdown once. Resume/configuration/maintenance,
+worker exit or control loss, and service restart cancel the request. The native
+tray handles `confirm-shutdown` locally and returns the user's boolean choice;
+this is not a service command. No HTTP power-management endpoint is exposed.
+The worker's local `finish-accepted` command closes admission and runs accepted
+queued work; the next explicit admission-limit change releases this operator
+hold. Maintenance admission holds remain independent.
+
+### Manual Setup preparation
+
+The installer's extracted service helper accepts `--prepare-upgrade-wait`. It
+polls the restricted desktop status channel and existing worker `hold-admission`
+controls until both profiles report no accepted jobs, queued work, active encodes
+or reserved requests. It then invokes `prepare-upgrade` and stops the service.
+The immediate `--prepare-upgrade` path remains available for uninstall. Service
+preparation drains all connected profiles before returning busy and rejects
+missing configured profiles. Setup logs remaining jobs/requests while waiting;
+the wait is bounded to 24 hours and ends if its Setup parent process exits.
+Neither path force-stops accepted work or arms PC shutdown.
+
+
+### Worker UI synchronization
+
+Local HTTP `POST /api/worker/max-jobs` accepts either legacy `maxJobs` or the atomic `cpuJobs`/`gpuJobs` pair (total at most 1024); missing, mixed or incomplete settings are rejected. Local CLI `control set-encoder-jobs CPU GPU` shares the same server persistence. Settings writes complete before local runtime changes. Managed startup restores server overrides and bootstraps service defaults only when absent. Last committed writes win; worker polls and heartbeats run approximately every five seconds, fleet refresh every five seconds, local browser refresh every two seconds.
+
+Runtime heartbeat data adds `paused`, `ramPaused`, `pauseMode`, `suspendedEncodes`, `finishing`, `draining`, `managedProfile` and bounded `jobs` entries (`id`, `phase`, `state`, `individuallyPaused`, `pausedByWorker`). These observations do not overwrite desired limits. RAM and individual holds survive capacity changes. Queue stop holds pending encodes; maintenance/finish allows accepted work to drain without reopening admission. Windows supervised profiles retain their encoder class and support up to 64 slots each; incompatible fleet pair writes return 400. See `docs/dashboard.md`.

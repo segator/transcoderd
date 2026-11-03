@@ -234,7 +234,7 @@ func TestNewUpdater(t *testing.T) {
 				t.Fatal("NewUpdater() returned nil")
 			}
 
-			if got.assetName != tt.assetName {
+			if got.assetName != platformAssetName(tt.assetName, runtime.GOOS, runtime.GOARCH) {
 				t.Errorf("assetName = %s, want %s", got.assetName, tt.assetName)
 			}
 

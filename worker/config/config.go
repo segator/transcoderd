@@ -4,10 +4,11 @@ import (
 	"time"
 )
 
-// DefaultMaxActiveJobs is the number of jobs a worker accepts by default.
+// DefaultMaxActiveJobs is the default FFmpeg encode target.
 const DefaultMaxActiveJobs = 2
 
 type PGSConfig struct {
+	ExecutablePath    string `mapstructure:"executablePath" envconfig:"WORKER_PGS_EXECUTABLE_PATH"`
 	ParallelJobs      int    `mapstructure:"parallelJobs" envconfig:"WORKER_PGS_PARALLELJOBS"`
 	DLLPath           string `mapstructure:"DLLPath" envconfig:"WORKER_PGS_TO_SRT_DLL_PATH"`
 	TesseractDataPath string `mapstructure:"tessdataPath" envconfig:"WORKER_TESSERACT_DATA_PATH"`
@@ -32,17 +33,25 @@ type FFMPEGConfig struct {
 }
 
 type Config struct {
-	TemporalPath    string          `mapstructure:"temporalPath" envconfig:"WORKER_TMP_PATH"`
-	Name            string          `mapstructure:"name" envconfig:"WORKER_NAME"`
-	StartAfter      *time.Duration  `mapstructure:"startAfter" envconfig:"WORKER_START_AFTER"`
-	StopAfter       *time.Duration  `mapstructure:"stopAfter" envconfig:"WORKER_STOP_AFTER"`
-	Schedule        *ScheduleConfig `mapstructure:"schedule"`
-	MaxActiveJobs   int             `mapstructure:"maxActiveJobs" envconfig:"WORKER_MAX_ACTIVE_JOBS"`
-	PGSConfig       *PGSConfig      `mapstructure:"pgsConfig"`
-	EncodeConfig    *FFMPEGConfig   `mapstructure:"ffmpegConfig"`
-	CPUEncodeConfig *FFMPEGConfig   `mapstructure:"cpuFFmpegConfig"`
-	GPUEncodeConfig *FFMPEGConfig   `mapstructure:"gpuFFmpegConfig"`
-	VerifyDeltaTime float64         `mapstructure:"verifyDeltaTime" envconfig:"WORKER_VERIFY_DELTA_TIME"`
+	CPUEncodeConfig *FFMPEGConfig    `mapstructure:"cpuFFmpegConfig"`
+	GPUEncodeConfig *FFMPEGConfig    `mapstructure:"gpuFFmpegConfig"`
+	RAMPaused       bool             `mapstructure:"ramPaused"`
+	PauseMode       string           `mapstructure:"pauseMode"`
+	TemporalPath    string           `mapstructure:"temporalPath" envconfig:"WORKER_TMP_PATH"`
+	Name            string           `mapstructure:"name" envconfig:"WORKER_NAME"`
+	StartAfter      *time.Duration   `mapstructure:"startAfter" envconfig:"WORKER_START_AFTER"`
+	StopAfter       *time.Duration   `mapstructure:"stopAfter" envconfig:"WORKER_STOP_AFTER"`
+	Schedule        *ScheduleConfig  `mapstructure:"schedule"`
+	MaxActiveJobs   int              `mapstructure:"maxActiveJobs" envconfig:"WORKER_MAX_ACTIVE_JOBS"`
+	PGSConfig       *PGSConfig       `mapstructure:"pgsConfig"`
+	EncodeConfig    *FFMPEGConfig    `mapstructure:"ffmpegConfig"`
+	Dashboard       *DashboardConfig `mapstructure:"dashboard"`
+	VerifyDeltaTime float64          `mapstructure:"verifyDeltaTime" envconfig:"WORKER_VERIFY_DELTA_TIME"`
+}
+
+type DashboardConfig struct {
+	ListenAddress string `mapstructure:"listenAddress" envconfig:"WORKER_DASHBOARD_LISTEN_ADDRESS"`
+	Token         string `mapstructure:"token" envconfig:"WORKER_DASHBOARD_TOKEN"`
 }
 
 func (c Config) HaveSettedPeriodTime() bool {
@@ -53,7 +62,7 @@ func (c Config) EncodeParallelJobs() int {
 	if c.EncodeConfig != nil && c.EncodeConfig.ParallelJobs > 0 {
 		return c.EncodeConfig.ParallelJobs
 	}
-	// A zero admission limit still allows jobs already persisted on disk to resume.
+	// Keep a positive capacity for maintenance draining even when user-paused.
 	if c.MaxActiveJobs == 0 {
 		return 1
 	}

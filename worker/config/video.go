@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -114,8 +115,19 @@ func (c *Config) Validate() error {
 	if c == nil {
 		return fmt.Errorf("worker configuration is required")
 	}
+	if c.RAMPaused {
+		if _, err := ResolvePauseMode(PauseRAM); err != nil {
+			return err
+		}
+	}
+	if _, err := ResolvePauseMode(c.PauseMode); err != nil {
+		return err
+	}
 	if c.MaxActiveJobs < 0 {
 		return fmt.Errorf("worker.maxActiveJobs must be non-negative, got %d", c.MaxActiveJobs)
+	}
+	if c.Dashboard != nil && strings.TrimSpace(c.Dashboard.ListenAddress) != "" && strings.TrimSpace(c.Dashboard.Token) == "" {
+		return fmt.Errorf("worker.dashboard.token is required when worker.dashboard.listenAddress is configured")
 	}
 	if c.EncodeConfig == nil {
 		return fmt.Errorf("worker.ffmpegConfig is required")

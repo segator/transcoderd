@@ -35,6 +35,17 @@ type Server struct {
 	library       *library.Library
 }
 
+func (s *Server) listQueuedJobs(writer http.ResponseWriter, request *http.Request) {
+	queue, err := s.scheduler.ListQueuedJobs(request.Context())
+	if webError(writer, err, http.StatusInternalServerError) {
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(writer).Encode(queue); err != nil {
+		log.Errorf("Error writing queue response: %v", err)
+	}
+}
+
 func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 	workerName := request.Header.Get("workerName")
 	if workerName == "" {
@@ -104,7 +115,12 @@ func (s *Server) setWorkerSettings(writer http.ResponseWriter, request *http.Req
 		webError(writer, err, http.StatusBadRequest)
 		return
 	}
-	if err := s.scheduler.SetWorkerSettings(request.Context(), workerName, settings); webError(writer, err, http.StatusInternalServerError) {
+	if err := s.scheduler.SetWorkerSettings(request.Context(), workerName, settings); err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, scheduler.ErrInvalidWorkerSettings) {
+			code = http.StatusBadRequest
+		}
+		webError(writer, err, code)
 		return
 	}
 	writer.WriteHeader(http.StatusNoContent)
@@ -324,7 +340,7 @@ func (s *Server) download(writer http.ResponseWriter, request *http.Request) {
 	defer downloadStream.Close(true)
 
 	writer.Header().Set("Content-Length", strconv.FormatInt(downloadStream.Size(), 10))
-	writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", url.QueryEscape(downloadStream.Name())))
+	writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", url.PathEscape(downloadStream.Name())))
 	writer.WriteHeader(200)
 	b := make([]byte, 131072)
 loop:
@@ -405,6 +421,7 @@ func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update
 	}
 	webServer.registerDashboard(rtr)
 	rtr.Handle("/api/v1/job/", webServer.AuthFunc(webServer.addJobs)).Methods("POST")
+	rtr.Handle("/api/v1/jobs/queued", webServer.AuthFunc(webServer.listQueuedJobs)).Methods("GET")
 	rtr.Handle("/api/v1/job/request", webServer.AuthFunc(webServer.requestJob)).Methods("GET")
 	rtr.Handle("/api/v1/worker/settings", webServer.AuthFunc(webServer.getWorkerSettings)).Methods("GET")
 	rtr.Handle("/api/v1/worker/settings", webServer.AuthFunc(webServer.setWorkerSettings)).Methods("PUT")
@@ -540,3 +557,6 @@ func webError(writer http.ResponseWriter, err error, code int) bool {
 	}
 	return false
 }
+
+// ServeHTTP allows the embedded server routes to be mounted by another HTTP host.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.srv.Handler.ServeHTTP(w, r) }

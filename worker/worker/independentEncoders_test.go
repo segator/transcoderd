@@ -140,21 +140,21 @@ func TestIndependentAdmissionAndProfilePersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := e.AdmissionStatus()
-	if s.MaxActiveJobs != 5 || s.MaxAcceptedJobs != 7 || s.CPUJobs != 2 || s.GPUJobs != 3 {
-		t.Fatalf("dual status = %+v, want 5 slots plus 2 pipeline jobs", s)
+	if s.MaxActiveJobs != 5 || s.MaxAcceptedJobs != 6 || s.CPUJobs != 2 || s.GPUJobs != 3 {
+		t.Fatalf("dual status = %+v, want 5 slots plus 1 pipeline job", s)
 	}
-	e.activeJobs = 6
+	e.activeJobs = 5
 	if !e.ReserveJobSlot() {
-		t.Fatal("seventh pipeline slot unavailable")
+		t.Fatal("sixth pipeline slot unavailable")
 	}
 	if e.ReserveJobSlot() {
-		t.Fatal("admission exceeded CPU+GPU+2")
+		t.Fatal("admission exceeded CPU+GPU+1")
 	}
 	e.ReleaseJobSlot()
 	if err := e.SetEncoderLimits(0, 0); err != nil {
 		t.Fatal(err)
 	}
-	if e.ReserveJobSlot() || e.AdmissionStatus().ActiveJobs != 6 {
+	if e.ReserveJobSlot() || e.AdmissionStatus().ActiveJobs != 5 {
 		t.Error("global pause did not preserve accepted work while closing admission")
 	}
 	cpu := job.NewContext(uuid.New(), 0, filepath.Join(t.TempDir(), "cpu"))

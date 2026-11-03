@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -78,16 +79,26 @@ func NewUpdater(currentVersionString string, assetName string, noUpdates bool, t
 	if err != nil {
 		return nil, fmt.Errorf("resolve executable path: %w", err)
 	}
+	if !noUpdates {
+		cleanupBinaryBackups(binaryPath)
+	}
 
 	updater := &Updater{
 		currentVersion: currentVersion,
 		binaryPath:     binaryPath,
-		assetName:      assetName,
+		assetName:      platformAssetName(assetName, runtime.GOOS, runtime.GOARCH),
 		tmpPath:        tmpPath,
 		noUpdates:      noUpdates,
 		checkInterval:  checkInterval,
 	}
 	return updater, nil
+}
+
+func platformAssetName(application, goos, goarch string) string {
+	if goos != "windows" {
+		return application
+	}
+	return application + "-windows-" + goarch + ".exe"
 }
 
 func (u *Updater) Run(wg *sync.WaitGroup, ctx context.Context) {
@@ -226,7 +237,15 @@ func (u *Updater) update(githubRelease *GitHubRelease) error {
 // after an in-place update, causing subsequent updates to target nested .old
 // files instead of the executable started by the user.
 func applyBinaryUpdate(binaryPath string, update io.Reader) error {
-	return selfupdate.Apply(update, selfupdate.Options{TargetPath: binaryPath})
+	options, err := binaryUpdateOptions(binaryPath)
+	if err != nil {
+		return fmt.Errorf("prepare binary update: %w", err)
+	}
+	if err := selfupdate.Apply(update, options); err != nil {
+		return err
+	}
+	cleanupBinaryBackups(binaryPath)
+	return nil
 }
 
 func downloadAsset(assetURL string, wc io.Writer) error {

@@ -7,6 +7,11 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: 'Complete missing Windows assets for an existing stable release from its exact tag'
+        type: string
+        required: false
+        default: ''
       windows_debug_artifact_run:
         description: 'Reuse Windows fixtures from this run for isolated test debugging; never publishes a release'
         type: string
@@ -20,13 +25,37 @@ permissions:
   packages: write
 
 jobs:
+  release-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      source_ref: ${{ steps.source.outputs.source_ref }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      release_tag: ${{ steps.source.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test release source guards
+        run: python3 -m unittest discover -s scripts/release -v
+      - name: Resolve immutable release source
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          WINDOWS_DEBUG_RUN: ${{ inputs.windows_debug_artifact_run }}
+        run: python3 scripts/release/resolve_release.py
+
   pwa-tests:
+    needs: release-source
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-source.outputs.source_ref }}
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -35,10 +64,13 @@ jobs:
         run: node --test frontend/web/dashboardPWA_test.cjs frontend/web/resources_test.cjs worker/dashboard/activity_test.js
 
   windows-unit:
+    needs: release-source
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-source.outputs.source_ref }}
       - uses: actions/setup-go@v6
         with:
           go-version: 1.26.10
@@ -58,13 +90,19 @@ jobs:
         run: go test -v -timeout 2m ./update/managed ./cmd/windows-service ./cmd/windows-update-manifest ./worker/control ./worker/desktop ./worker/worker ./worker/step ./worker/resources ./frontend/...
 
   ci:
+    needs: release-source
     runs-on: transcoderd
     outputs:
       project_version: ${{ steps.artifact_version.outputs.version }}
       release_created: ${{ steps.release.outputs.release_created }}
-      release_tag: ${{ steps.release.outputs.tag_name }}
+      release_tag: ${{ steps.release.outputs.tag_name || needs.release-source.outputs.release_tag }}
+      release_publish: ${{ steps.release.outputs.release_created == 'true' || needs.release-source.outputs.release_tag != '' }}
+      source_ref: ${{ needs.release-source.outputs.source_ref }}
+      source_sha: ${{ needs.release-source.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-source.outputs.source_ref }}
       - uses: dagger/dagger-for-github@v8.4.1
         with:
           version: 0.20.6
@@ -88,6 +126,12 @@ jobs:
       - name: Set release version
         if: steps.release.outputs.release_created
         run: echo "PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}" >> "$GITHUB_ENV"
+
+      - name: Set existing release version
+        if: needs.release-source.outputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ needs.release-source.outputs.release_tag }}
+        run: echo "PROJECT_VERSION=$RELEASE_TAG" >> "$GITHUB_ENV"
 
       - name: Record artifact version
         id: artifact_version
@@ -122,7 +166,7 @@ jobs:
         run: mage release:upload
 
   windows-build:
-    if: github.event_name != 'workflow_dispatch' || inputs.windows_debug_artifact_run == ''
+    if: ${{ success() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.windows_debug_artifact_run == '') }}
     needs: [ci, windows-unit]
     env:
       PROJECT_VERSION: ${{ needs.ci.outputs.project_version }}
@@ -130,6 +174,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ci.outputs.source_ref }}
       - uses: dagger/dagger-for-github@v8.4.1
         with:
           version: 0.20.6
@@ -146,10 +192,15 @@ jobs:
 
   windows-native:
     needs: [ci, windows-build]
+    concurrency:
+      group: windows-release-${{ needs.ci.outputs.release_tag || github.run_id }}
+      cancel-in-progress: false
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ci.outputs.source_ref }}
       - uses: actions/download-artifact@v4
         with:
           name: windows-worker
@@ -212,13 +263,28 @@ jobs:
             dist/windows-update-e2e/**/*.log
             dist/windows-update-e2e/**/*.err
       - name: Upload validated Windows release assets
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci.outputs.release_created == 'true'
+        if: needs.ci.outputs.release_publish == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != ''))
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.ci.outputs.release_tag }}
+          EXPECTED_SOURCE_SHA: ${{ needs.ci.outputs.source_sha }}
           WINDOWS_UPDATE_SIGNING_KEY: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY }}
         run: |
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect release.' }
+          if ($release.draft -or $release.prerelease -or $release.tag_name -cne $env:RELEASE_TAG) { throw 'Expected stable published release.' }
+          if (@($release.assets | Where-Object name -eq 'windows-update.json.sig').Count -ne 0) { throw 'Refusing to replace an already signed Windows release.' }
+          $target = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect release tag.' }
+          $target = $target.object
+          for ($i = 0; $target.type -eq 'tag' -and $i -lt 6; $i++) {
+            $annotation = gh api "repos/$env:GITHUB_REPOSITORY/git/tags/$($target.sha)" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve annotated tag.' }
+            $target = $annotation.object
+          }
+          if ($target.type -ne 'commit' -or $target.sha -cne $env:EXPECTED_SOURCE_SHA) { throw 'Release tag no longer matches validated source.' }
+          if ((Get-Content version.txt -Raw).Trim() -cne $env:RELEASE_TAG.Substring(1)) { throw 'Release source version mismatch.' }
           $assets = @((Get-ChildItem dist -Filter '*-windows-amd64.zip').FullName)
           $assets += "$PWD/dist/transcoderd-worker-windows-amd64.exe"
           $assets += (Get-ChildItem dist -Filter '*-windows-amd64-setup.exe').FullName
@@ -226,14 +292,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows update metadata signing failed.' }
           & "$PWD/dist/windows-update-manifest.exe" verify "$PWD/dist"
           if ($LASTEXITCODE -ne 0) { throw 'Windows update metadata verification failed.' }
-          $assets += "$PWD/dist/windows-update.json"
-          $assets += "$PWD/dist/windows-update.json.sig"
           gh release upload $env:RELEASE_TAG @assets --clobber
-          if ($LASTEXITCODE -ne 0) { throw 'Windows release asset upload failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Windows release payload upload failed.' }
+          gh release upload $env:RELEASE_TAG "$PWD/dist/windows-update.json" --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Windows release manifest upload failed.' }
+          # Eligibility is established only after every validated payload is available.
+          gh release upload $env:RELEASE_TAG "$PWD/dist/windows-update.json.sig"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows release signature upload failed.' }
 
   windows-debug:
     if: github.event_name == 'workflow_dispatch' && inputs.windows_debug_artifact_run != ''
-    needs: windows-unit
+    needs: [release-source, windows-unit]
     permissions:
       contents: read
       actions: read

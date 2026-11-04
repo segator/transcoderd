@@ -96,3 +96,26 @@ setup, before exercising the coordinator; elevated CI must execute that coverage
 An already installed affected coordinator can require a manual bootstrap upgrade
 with the complete official installer after accepted jobs finish. Do not delete
 update journals or force-stop active encodes to work around this issue.
+
+## Complete an existing stable release
+
+If a published stable release lacks Windows assets (for example after an interrupted
+publication), dispatch the ordinary workflow from `main`:
+
+```sh
+gh workflow run main.yml --ref main -f release_tag=v2.12.0
+```
+
+The read-only source guard resolves the existing tag to an immutable commit,
+requires its version to match `version.txt` and its commit to belong to main's
+history, and rejects draft/prerelease releases. Every build and native test checks
+out that source and uses the exact stable version. The ordinary Linux validation,
+Windows unit, media/OCR, CPU, installed-service and unattended-upgrade/recovery
+gates still run. Existing Linux assets and container tags are preserved.
+
+Publication rechecks the tag, signs using the protected CI key, uploads the
+validated Windows payloads, then the manifest, and publishes its signature last.
+An unsigned partial upload can be retried using the same command. A release that
+already has a signature is rejected to prevent replacing payloads already trusted
+by automatic clients. Debug-fixture dispatch and release completion are mutually
+exclusive; debug runs never publish.

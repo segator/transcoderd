@@ -253,8 +253,9 @@ and Windows cross-builds share the required `ci` job. See
 The ordinary CI E2E run selects **SVT-AV1 CPU**, so a hosted runner needs no
 GPU. CI validates compilation and the CPU pipeline; it cannot validate NVENC
 hardware without a GPU runner. The local opt-in RTX 5080 tests cover that
-hardware path. A stacked PR whose base is not `main` does not trigger this
-main-only build workflow; the local results are recorded separately.
+hardware path. CI now covers PRs against every base branch, preserving the former
+standalone lint workflow's coverage when checks are consolidated. Push/release
+publication remains restricted to `main`.
 
 Local build commands are:
 

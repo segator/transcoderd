@@ -9,6 +9,9 @@ native-test executables, the desktop installer and two update/recovery fixtures.
 Each Windows target has a separate Actions step and timing. There is no separate
 `windows-build` job or lint workflow.
 
+PRs against every base branch run these checks, preserving the former standalone
+lint workflow's coverage. Push/release publication remains restricted to `main`.
+
 `windows-unit` runs focused native Go unit tests alongside `ci`. After both jobs
 pass, `windows-native` downloads the cross-built tools and runs the complete
 portable, installed-service, desktop and mandatory-update/recovery checks on
@@ -54,6 +57,9 @@ CI uses `mage docker:check`: it evaluates the same application-image graphs
 without exporting OCI tarballs or loading the runner's Docker daemon. Dagger
 Services run the CPU E2E directly. `mage docker:all` still exports archives and
 loads tags for local development; release runs retain that export step.
+Explicit completion of an older tagged release uses its original `docker:all`
+target, since that immutable source may predate `docker:check`. The source guard
+outputs the compatible target alongside the validated SHA and version.
 
 Windows artifact uploads explicitly include Windows files and test directories;
 Linux executables and image tarballs are excluded. The Linux release uploader

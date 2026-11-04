@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -40,6 +39,7 @@ jobs:
       source_ref: ${{ steps.source.outputs.source_ref }}
       source_sha: ${{ steps.source.outputs.source_sha }}
       release_tag: ${{ steps.source.outputs.release_tag }}
+      image_target: ${{ steps.source.outputs.image_target }}
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Test release source guards
@@ -162,7 +162,8 @@ jobs:
         run: mage build:all
 
       - name: Validate Linux container images
-        run: mage docker:check
+        # Tagged source predates docker:check; retain its original target.
+        run: mage ${{ needs.release-source.outputs.image_target }}
 
       - name: E2E Test
         timeout-minutes: 15

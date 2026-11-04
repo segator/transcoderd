@@ -12,6 +12,7 @@ type WorkerJobRuntime struct {
 }
 
 type WorkerRuntime struct {
+	Resources        *WorkerResources   `json:"resources,omitempty"`
 	Paused           bool               `json:"paused"`
 	RAMPaused        bool               `json:"ramPaused"`
 	PauseMode        string             `json:"pauseMode"`

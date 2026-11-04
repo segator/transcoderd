@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"transcoder/helper/command"
 	"transcoder/model"
@@ -22,6 +23,58 @@ import (
 
 	"github.com/google/uuid"
 )
+
+type fixedResourceSampler struct{ sample *model.WorkerResources }
+
+func (s *fixedResourceSampler) Start(context.Context)            {}
+func (s *fixedResourceSampler) Stop()                            {}
+func (s *fixedResourceSampler) Snapshot() *model.WorkerResources { return s.sample }
+
+func TestHardwareTelemetryHeartbeatToDashboard(t *testing.T) {
+	repo := repository.NewInMemoryRepository()
+	sch, err := scheduler.NewScheduler(&scheduler.Config{SourcePath: t.TempDir()}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fleet := httptest.NewServer(web.NewWebServer(&web.Config{Token: "worker-api", DashboardToken: "encoding123"}, sch, nil))
+	defer fleet.Close()
+	zero, encode := 0.0, 82.5
+	executor := testAdmissionWorker(1)
+	executor.resources = &fixedResourceSampler{sample: &model.WorkerResources{SampledAt: time.Now().UTC(), Hostname: "host", CPU: &model.CPUResources{Percent: &zero, Cores: 8, Scope: "host"}, Memory: &model.MemoryResources{UsedBytes: 50, TotalBytes: 100}, GPUStatus: "available", GPUs: []model.GPUResources{{UUID: "gpu-a", EncoderPercent: &encode}}}}
+	client := serverclient.NewServerClient(&web.Config{Domain: fleet.URL, Token: "worker-api"}, "hardware-node")
+	read := func() *model.WorkerResources {
+		t.Helper()
+		r, _ := http.NewRequestWithContext(t.Context(), "GET", fleet.URL+"/dashboard/api/stats", nil)
+		r.Header.Set("Authorization", "Bearer encoding123")
+		response, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		var dashboard model.Dashboard
+		if err := json.NewDecoder(response.Body).Decode(&dashboard); err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != 200 || len(dashboard.Workers) != 1 {
+			t.Fatalf("dashboard response = %d %+v", response.StatusCode, dashboard.Workers)
+		}
+		return dashboard.Workers[0].Runtime.Resources
+	}
+	if err := client.PublishPingEvent(executor.RuntimeTelemetry()); err != nil {
+		t.Fatal(err)
+	}
+	got := read()
+	if got == nil || got.CPU == nil || got.CPU.Percent == nil || *got.CPU.Percent != 0 || got.Memory.UsedBytes != 50 || len(got.GPUs) != 1 || got.GPUs[0].Percent != nil || *got.GPUs[0].EncoderPercent != 82.5 {
+		t.Fatalf("hardware readings lost in heartbeat/API: %+v", got)
+	}
+	executor.resources = nil
+	if err := client.PublishPingEvent(executor.RuntimeTelemetry()); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != nil {
+		t.Fatalf("older worker readings fabricated: %+v", got)
+	}
+}
 
 func TestWorkerUIAndFleetDashboardSynchronizeBothDirections(t *testing.T) {
 	ctx := context.Background()

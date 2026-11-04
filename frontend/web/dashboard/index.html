@@ -23,6 +23,7 @@
     <link rel="icon" href="/dashboard/icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/dashboard/styles.css" />
     <link rel="stylesheet" href="/dashboard/media.css" />
+    <script src="/dashboard/resources.js" defer></script>
     <script src="/dashboard/app.js" defer></script>
     <script src="/dashboard/media.js" defer></script>
   </head>
@@ -225,8 +226,8 @@
                 <div class="panel-header">
                   <div>
                     <span class="eyebrow muted">TEAMWORK</span>
-                    <h2>Results by worker</h2>
-                    <p>Completed and failed · selected period</p>
+                    <h2>Workers at a glance</h2>
+                    <p>Live resources · job outcomes in selected period</p>
                   </div>
                   <a href="#workers" class="text-link">Manage ↗</a>
                 </div>
@@ -273,6 +274,8 @@
                 Accepted jobs continue.
               </p>
             </div>
+            <div id="worker-detail-navigation" class="worker-detail-navigation" hidden><a href="#workers" class="text-link">← All workers</a></div>
+            <div id="worker-resource-detail" class="worker-resource-detail" hidden></div>
             <div id="worker-cards" class="worker-grid"></div>
           </section>
           <section

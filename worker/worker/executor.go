@@ -16,6 +16,7 @@ import (
 	"transcoder/worker/console"
 	"transcoder/worker/control"
 	"transcoder/worker/job"
+	"transcoder/worker/resources"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/step"
 
@@ -45,9 +46,16 @@ type JobExecutor struct {
 	encodeProcesses *command.PauseController
 	pauseMode       string
 	ramPaused       bool
+	resources       resourceSampler
 
 	console       *console.RenderService
 	stepExecutors map[model.NotificationType]*step.Executor
+}
+
+type resourceSampler interface {
+	Start(context.Context)
+	Stop()
+	Snapshot() *model.WorkerResources
 }
 
 // One extra accepted job overlaps preparation or upload without accumulating
@@ -71,6 +79,7 @@ func NewEncodeWorker(workerConfig *config.Config, client *serverclient.ServerCli
 		pauseMode:       workerConfig.PauseMode,
 		ramPaused:       workerConfig.RAMPaused,
 		jobs:            jobRegistry{codec: workerConfig.EncodeConfig},
+		resources:       resources.NewSampler(),
 	}
 	if jobExecutor.pauseMode == "" {
 		jobExecutor.pauseMode = config.PauseFinish
@@ -187,6 +196,9 @@ func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) {
 }
 
 func (e *JobExecutor) start(ctx context.Context) {
+	if e.resources != nil {
+		e.resources.Start(ctx)
+	}
 	e.resumeJobs()
 	for notificationType, stepExecutor := range e.stepExecutors {
 		if notificationType == model.FFMPEGSNotification {
@@ -198,6 +210,9 @@ func (e *JobExecutor) start(ctx context.Context) {
 }
 
 func (e *JobExecutor) stop() {
+	if e.resources != nil {
+		e.resources.Stop()
+	}
 	for _, stepExecutor := range e.stepExecutors {
 		stepExecutor.Stop()
 	}

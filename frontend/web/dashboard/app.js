@@ -56,6 +56,9 @@
       "Track the phases, progress and outcome of every job.",
     ],
   };
+  const resources = window.TranscoderResources;
+  const resourceHistory = new resources.History();
+  let selectedWorker = null;
   let data = null,
     hours = 168,
     filter = "all",
@@ -187,6 +190,7 @@
   function render() {
     const s = data.summary,
       workers = data.workers;
+    resourceHistory.observe(workers, Date.parse(data.generatedAt));
     const online = workers.filter((w) => w.online).length;
     $("nav-worker-count").textContent = workers.length;
     $("nav-job-count").textContent = integer.format(s.active + s.queued);
@@ -214,6 +218,7 @@
     renderJobs();
     // Polling must not replace a form while an operator is typing.
     if (!$("worker-cards").contains(document.activeElement)) renderWorkers();
+    renderWorkerDetails();
     applyWidths($("overview-view"));
     applyWidths($("jobs-view"));
   }
@@ -435,7 +440,7 @@
     }
     const max = Math.max(1, ...workers.map((w) => w.completed + w.failed));
     $("worker-chart").innerHTML =
-      `<div class="horizontal-chart">${workers.map((w) => `<div><div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} failures</span></div><div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div></div>`).join("")}</div><p class="worker-chart-footer">Worker outcomes in the selected period. Capacity does not measure CPU/GPU utilization.</p>`;
+      `<div class="horizontal-chart">${workers.map((w) => `<a class="worker-summary-link" href="${esc(resources.link(w.name))}"><div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} failures</span></div>${resources.summary(w, Date.parse(data.generatedAt))}<div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div><span class="worker-details-link">Resource details ↗</span></a>`).join("")}</div><p class="worker-chart-footer">Job outcomes in the selected period · measured host/device usage. Multi-GPU summaries show the highest reported value for each metric.</p>`;
   }
   function renderActivity() {
     if (!data.activity.length) {
@@ -555,6 +560,7 @@
       return;
     }
     $("worker-cards").innerHTML = data.workers
+      .filter(w => !selectedWorker || w.name === selectedWorker)
       .map((w, i) => {
         const rt = w.runtime;
         const modern = rt?.capacityVersion >= 2;
@@ -604,6 +610,7 @@
         return `<article class="panel worker-card" data-worker="${esc(w.name)}">
         <div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${modern ? (rt.managedProfile ? "Windows profile · " + (fixedCPU ? "CPU" : "GPU") : "CPU + GPU · independent execution") : esc(rt?.encoder || "Waiting for compatible telemetry")}</p></div>${badge(...status)}</div>
         <div class="worker-stats"><div class="worker-stat"><small>CPU encodes${w.online ? "" : " · last reported"}</small><strong>${modern ? rt.activeCPUEncodes : "—"}<span>${modern ? "/ " + rt.cpuJobs : ""}</span></strong></div><div class="worker-stat"><small>GPU encodes${w.online ? "" : " · last reported"}</small><strong>${modern ? rt.activeGPUEncodes : "—"}<span>${modern ? "/ " + rt.gpuJobs : ""}</span></strong></div><div class="worker-stat"><small>Accepted jobs</small><strong>${rt ? rt.activeJobs : w.activeJobs}</strong></div></div>
+        ${resources.summary(w, Date.parse(data.generatedAt))}<a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">View resource details ↗</a>
         <div class="encoder-lanes">${lane("cpu", rt?.cpuEncoder, rt?.activeCPUEncodes, rt?.cpuJobs)}${lane("gpu", rt?.gpuEncoder, rt?.activeGPUEncodes, rt?.gpuJobs)}</div>
         <form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs"><div><label for="cpu-${i}">CPU limit <span>ENCODES</span></label><input id="cpu-${i}" name="cpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${fixedGPU ? 0 : esc(draft.cpu)}" ${rt?.managedProfile ? 'max="64"' : ""} ${busy || fixedGPU ? "disabled" : ""} aria-label="CPU limit for ${esc(w.name)}"></div><div><label for="gpu-${i}">GPU limit <span>ENCODES</span></label><input id="gpu-${i}" name="gpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${fixedCPU ? 0 : esc(draft.gpu)}" ${rt?.managedProfile ? 'max="64"' : ""} ${busy || fixedCPU ? "disabled" : ""} aria-label="GPU limit for ${esc(w.name)}"></div></div><div class="capacity-controls"><button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Saving…" : "Save limits"}</button><button class="button subtle" type="button" data-pause="${esc(w.name)}" ${busy ? "disabled" : ""}>Pause both</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>
         <div class="worker-footer"><span>${esc(w.ip || "No heartbeat recorded")} · ${age(w.lastSeen)}</span><span>${integer.format(w.completed)} completed · ${integer.format(w.failed)} failures · ${bytes(w.sourceBytes - w.targetBytes)}</span></div>
@@ -611,6 +618,17 @@
       })
       .join("");
     applyWidths($("worker-cards"));
+  }
+  function renderWorkerDetails() {
+    const show = view === "workers" && selectedWorker !== null;
+    $("worker-detail-navigation").hidden = !show;
+    $("worker-resource-detail").hidden = !show;
+    if (!show || !data) return;
+    const worker = data.workers.find(w => w.name === selectedWorker);
+    $("worker-resource-detail").innerHTML = worker
+      ? resources.details(worker, resourceHistory, Date.parse(data.generatedAt))
+      : empty("Worker not found", "Return to all workers to choose an available worker.");
+    applyWidths($("worker-resource-detail"));
   }
   async function saveWorker(name, values) {
     const w = data.workers.find((worker) => worker.name === name);
@@ -658,7 +676,9 @@
   }
   function setView() {
     window.scrollTo(0, 0);
-    view = window.location.hash.slice(1);
+    const [route, query = ""] = window.location.hash.slice(1).split("?", 2);
+    view = route;
+    selectedWorker = view === "workers" ? new URLSearchParams(query).get("worker") : null;
     if (!titles[view]) view = "overview";
     const [label, title, description] = titles[view];
     $("breadcrumb-view").textContent = label;
@@ -674,6 +694,7 @@
       else a.removeAttribute("aria-current");
     });
     if (view === "workers") renderWorkers();
+    renderWorkerDetails();
   }
   $("period").addEventListener("change", () => {
     hours = Number($("period").value);

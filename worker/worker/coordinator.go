@@ -205,6 +205,9 @@ func (e *JobExecutor) RuntimeTelemetry() *model.WorkerRuntime {
 		CPUMaxEncodes: status.CPUMaxEncodes, GPUMaxEncodes: status.GPUMaxEncodes,
 		Paused: status.Paused, RAMPaused: status.RAMPaused, PauseMode: status.PauseMode, SuspendedEncodes: status.SuspendedEncodes,
 		Finishing: status.Finishing, Draining: status.Draining, ManagedProfile: e.managedLimits}
+	if e.resources != nil {
+		runtime.Resources = e.resources.Snapshot()
+	}
 	for _, j := range status.Jobs {
 		runtime.Jobs = append(runtime.Jobs, model.WorkerJobRuntime{ID: j.JobID, Phase: j.Phase, State: j.State, IndividuallyPaused: j.IndividuallyPaused, PausedByWorker: j.PausedByWorker})
 	}

@@ -64,6 +64,10 @@ Existing rows without a pair keep their single-limit startup behavior. Positive 
 
 The **Library** view browses source folders and optional read-only output roots, filters and previews candidates, loads reviewed selections with progress/cancellation, and plays available files directly or through a compatible preview. **View** in job tables opens available source/completed output assets. See [Media library and visual job loading](media-library.md) for roots, presets matching the Unraid scripts, resource limits and the API. Migration 009 adds the fingerprinted metadata cache.
 
+## CPU/GPU resource details
+
+Overview worker rows now show measured CPU, GPU and NVENC utilization and link to that worker in the Workers view. Details include recent CPU/RAM and per-device GPU/encoder graphs, VRAM, temperature, power and freshness, with the existing controls underneath. Host/device measurements include other processes and are distinct from encode slots. See [worker resources](worker-resources.md) for platform scope, missing/stale readings and collection requirements.
+
 ## What the charts measure
 
 - **Recovered space:** all-time paired positive source/output sizes for jobs whose current outcome is `Job/completed`. The saving is the signed byte difference; reduction percentage is weighted by total source bytes. A completed FFmpeg phase is still an active job. Missing or zero output sizes do not produce invented savings.

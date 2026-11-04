@@ -13,7 +13,7 @@
           "'": "&#39;",
         })[c],
     );
-  const num = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 1 });
+  const num = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
   const bytes = (n) => {
     if (!(n >= 0)) return "—";
     const units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -26,11 +26,11 @@
     return `${h ? h + ":" : ""}${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
   };
   const names = {
-    queued: "En cola",
-    active: "Activo",
-    completed: "Completado",
-    failed: "Fallido",
-    canceled: "Cancelado",
+    queued: "Queued",
+    active: "Active",
+    completed: "Completed",
+    failed: "Failed",
+    canceled: "Canceled",
   };
   let roots = [],
     presets = {},
@@ -70,11 +70,11 @@
     if (response.status === 401) {
       closePlayer();
       location.replace("/dashboard/login");
-      throw new Error("La sesión ha caducado.");
+      throw new Error("Your session has expired.");
     }
     if (!response.ok) {
       const message = (await response.text()).trim();
-      const error = new Error(message || "No se pudo completar la operación.");
+      const error = new Error(message || "Could not complete the operation.");
       error.status = response.status;
       throw error;
     }
@@ -139,7 +139,7 @@
       $("media-root").innerHTML = roots
         .map(
           (r) =>
-            `<option value="${esc(r.id)}" ${r.available ? "" : "disabled"}>${esc(r.name)}${r.queueable ? "" : " · reproducción"}${r.available ? "" : " · no disponible"}</option>`,
+            `<option value="${esc(r.id)}" ${r.available ? "" : "disabled"}>${esc(r.name)}${r.queueable ? "" : " · playback"}${r.available ? "" : " · unavailable"}</option>`,
         )
         .join("");
       root = $("media-root").value || "source";
@@ -153,10 +153,10 @@
     }
   }
   function stateLabel(f) {
-    if (f.directory) return '<span class="muted">Carpeta</span>';
+    if (f.directory) return '<span class="muted">Folder</span>';
     if (f.job)
-      return `<span class="badge ${esc(f.job.state)}">${esc(f.job.role === "output" ? "Codificado" : names[f.job.state] || f.job.state)}</span>`;
-    return `<span class="badge ${f.eligible ? "completed" : "offline"}">${f.root === "source" ? "Disponible" : "Salida"}</span>`;
+      return `<span class="badge ${esc(f.job.state)}">${esc(f.job.role === "output" ? "Encoded" : names[f.job.state] || f.job.state)}</span>`;
+    return `<span class="badge ${f.eligible ? "completed" : "offline"}">${f.root === "source" ? "Available" : "Output"}</span>`;
   }
   async function browse(next = folder, page = 0) {
     clearError();
@@ -164,7 +164,7 @@
     browseOffset = page;
     $("media-folder").value = folder;
     $("media-files").innerHTML =
-      '<div class="empty-state">Leyendo carpeta…</div>';
+      '<div class="empty-state">Reading folder…</div>';
     try {
       const result = await api(
         `browse?root=${encodeURIComponent(root)}&path=${encodeURIComponent(folder)}&offset=${page}`,
@@ -173,22 +173,22 @@
       const segments = folder === "." ? [] : folder.split("/");
       let path = "";
       $("media-breadcrumb").innerHTML =
-        '<button type="button" data-media-folder=".">Inicio</button>' +
+        '<button type="button" data-media-folder=".">Home</button>' +
         segments
           .map((part) => {
             path += (path ? "/" : "") + part;
             return `<span>/</span><button type="button" data-media-folder="${esc(path)}">${esc(part)}</button>`;
           })
           .join("");
-      $("media-file-count").textContent = `${result.total} elementos`;
+      $("media-file-count").textContent = `${result.total} items`;
       $("media-files").innerHTML = result.files.length
-        ? `<table><thead><tr><th>Nombre</th><th>Tamaño</th><th>Estado</th><th></th></tr></thead><tbody>${result.files.map((f) => `<tr><td class="media-name-cell">${f.directory ? `<button class="media-folder-link" data-media-folder="${esc(f.path)}" type="button"><span aria-hidden="true">▱</span>${esc(f.name)}</button>` : `<span title="${esc(f.path)}">${esc(f.name)}</span>`}</td><td>${f.directory ? "—" : bytes(f.size)}</td><td>${stateLabel(f)}</td><td>${f.directory ? "" : `<button class="button" data-media-play="${esc(f.id)}" type="button">▷ Ver</button>`}</td></tr>`).join("")}</tbody></table>`
-        : '<div class="empty-state"><strong>No hay vídeos en esta carpeta</strong><p>Abre una subcarpeta o elige otra biblioteca.</p></div>';
+        ? `<table><thead><tr><th>Name</th><th>Size</th><th>Status</th><th></th></tr></thead><tbody>${result.files.map((f) => `<tr><td class="media-name-cell">${f.directory ? `<button class="media-folder-link" data-media-folder="${esc(f.path)}" type="button"><span aria-hidden="true">▱</span>${esc(f.name)}</button>` : `<span title="${esc(f.path)}">${esc(f.name)}</span>`}</td><td>${f.directory ? "—" : bytes(f.size)}</td><td>${stateLabel(f)}</td><td>${f.directory ? "" : `<button class="button" data-media-play="${esc(f.id)}" type="button">▷ View</button>`}</td></tr>`).join("")}</tbody></table>`
+        : '<div class="empty-state"><strong>No videos in this folder</strong><p>Open a subfolder or choose another library.</p></div>';
       $("media-pagination").innerHTML =
-        `<span>${result.total ? result.offset + 1 : 0}–${Math.min(result.offset + 100, result.total)} de ${result.total}</span><div><button class="button" data-media-page="${Math.max(0, result.offset - 100)}" ${result.offset === 0 ? "disabled" : ""} type="button">Anterior</button><button class="button" data-media-page="${result.offset + 100}" ${result.offset + 100 >= result.total ? "disabled" : ""} type="button">Siguiente</button></div>`;
+        `<span>${result.total ? result.offset + 1 : 0}–${Math.min(result.offset + 100, result.total)} of ${result.total}</span><div><button class="button" data-media-page="${Math.max(0, result.offset - 100)}" ${result.offset === 0 ? "disabled" : ""} type="button">Previous</button><button class="button" data-media-page="${result.offset + 100}" ${result.offset + 100 >= result.total ? "disabled" : ""} type="button">Next</button></div>`;
     } catch (e) {
       $("media-files").innerHTML =
-        '<div class="empty-state">No se pudo leer la carpeta.</div>';
+        '<div class="empty-state">Could not read the folder.</div>';
       fail(e.message);
     }
   }
@@ -243,27 +243,27 @@
     if (!op) return;
     $("media-operation-panel").hidden = false;
     $("media-operation-kind").textContent =
-      op.kind === "scan" ? "ANÁLISIS DE CANDIDATOS" : "CARGA DE JOBS";
+      op.kind === "scan" ? "CANDIDATE SCAN" : "JOB INTAKE";
     const running = op.state === "running";
     $("media-cancel").hidden = !running;
     $("media-operation-title").textContent =
       op.kind === "scan"
         ? running
-          ? "Buscando tus próximos jobs"
+          ? "Finding your next jobs"
           : op.state === "completed"
-            ? `${op.matched} vídeos coinciden`
+            ? `${op.matched} matching videos`
             : op.state === "canceled"
-              ? "Análisis detenido"
-              : "No se pudo completar el análisis"
+              ? "Scan stopped"
+              : "Could not complete the scan"
         : running
-          ? `${op.scheduled} jobs cargados`
-          : `Carga ${op.state === "canceled" ? "detenida" : op.state === "failed" ? "interrumpida" : "completada"} · ${op.scheduled} jobs`;
+          ? `${op.scheduled} jobs queued`
+          : `Intake ${op.state === "canceled" ? "stopped" : op.state === "failed" ? "interrupted" : "completed"} · ${op.scheduled} jobs`;
     $("media-operation-detail").textContent =
       op.kind === "scan"
         ? op.stage === "discovering"
-          ? `Explorando carpetas · ${op.discovered} vídeos descubiertos`
-          : `${op.examined} de ${op.candidates} analizados · ${op.matched} coincidencias · ${op.failed} sin analizar`
-        : `${op.examined} candidatos revisados · objetivo ${op.target} éxitos · ${op.skipped} omitidos · ${op.failed} fallidos`;
+          ? `Exploring folders · ${op.discovered} videos discovered`
+          : `${op.examined} of ${op.candidates} scanned · ${op.matched} matches · ${op.failed} not scanned`
+        : `${op.examined} candidates reviewed · target ${op.target} successes · ${op.skipped} skipped · ${op.failed} failed`;
     const percent =
       op.kind === "scan"
         ? op.candidates
@@ -275,18 +275,18 @@
     $("media-progress").style.width = `${Math.max(0, Math.min(100, percent))}%`;
     $("media-truncated").hidden = !op.truncated;
     $("media-truncated").textContent =
-      "Vista limitada a los candidatos de mayor tamaño dentro del límite de análisis. Si se alcanza el tope de 100 000 vídeos descubiertos, acota la carpeta para una selección completa.";
+      "Preview shows the largest candidates within the scan limit. If the 100,000 discovered-video cap is reached, narrow the folder for a complete selection.";
     const rows = op.results || [];
     $("media-operation-results").innerHTML = rows.length
-      ? `<details class="media-result-details" ${op.kind === "queue" ? "open" : ""}><summary>Resultados por archivo (${rows.length})</summary><div class="media-result-list">${rows
+      ? `<details class="media-result-details" ${op.kind === "queue" ? "open" : ""}><summary>Results by file (${rows.length})</summary><div class="media-result-list">${rows
           .slice(-200)
           .map(
             (r) =>
-              `<div><span class="badge ${r.state === "scheduled" ? "completed" : r.state === "failed" ? "failed" : "offline"}">${r.state === "scheduled" ? "Cargado" : r.state === "failed" ? "Fallido" : "Omitido"}</span><div><strong title="${esc(r.path)}">${esc(r.path)}</strong>${r.message ? `<p>${esc(r.message)}</p>` : ""}</div></div>`,
+              `<div><span class="badge ${r.state === "scheduled" ? "completed" : r.state === "failed" ? "failed" : "offline"}">${r.state === "scheduled" ? "Queued" : r.state === "failed" ? "Failed" : "Skipped"}</span><div><strong title="${esc(r.path)}">${esc(r.path)}</strong>${r.message ? `<p>${esc(r.message)}</p>` : ""}</div></div>`,
           )
           .join(
             "",
-          )}</div>${rows.length > 200 ? '<p class="media-help">Se muestran los 200 resultados más recientes.</p>' : ""}</details>`
+          )}</div>${rows.length > 200 ? '<p class="media-help">Showing the 200 most recent results.</p>' : ""}</details>`
       : "";
     if (op.error) fail(op.error);
   }
@@ -323,14 +323,14 @@
     $("media-review-panel").hidden = false;
     $("media-dirty").hidden = !dirty;
     $("media-review-count").textContent =
-      `${scan.files.length} coincidencias · mayor tamaño primero · ${scan.files.filter((f) => f.eligible).length} aptas para cargar`;
+      `${scan.files.length} matches · largest first · ${scan.files.filter((f) => f.eligible).length} eligible for queuing`;
     $("media-selection").innerHTML = scan.files.length
-      ? `<table><thead><tr><th>Elegir</th><th>Vídeo</th><th>Tamaño</th><th>Imagen / códec</th><th>Bitrate total</th><th></th></tr></thead><tbody>${scan.files.map((f) => `<tr><td><input type="checkbox" data-media-select="${esc(f.id)}" ${selected.has(f.id) ? "checked" : ""} ${!f.eligible || dirty || busy ? "disabled" : ""} aria-label="Seleccionar ${esc(f.name)}" /></td><td class="media-name-cell"><strong title="${esc(f.path)}">${esc(f.name)}</strong><small>${esc(f.path)}</small>${f.job ? stateLabel(f) : ""}${!f.eligible ? `<p class="media-help">${esc(f.reason)}</p>` : ""}</td><td>${bytes(f.size)}</td><td>${f.metadata ? `${f.metadata.width} × ${f.metadata.height}<br>${esc(f.metadata.codec.toUpperCase())}` : "—"}</td><td>${f.metadata ? `${num.format(f.metadata.bitrateMbps)} Mb/s<br>${clock(f.metadata.durationSeconds)}` : "—"}</td><td><button class="button" data-media-play="${esc(f.id)}" type="button">▷ Ver</button></td></tr>`).join("")}</tbody></table>`
-      : '<div class="empty-state"><strong>Ningún vídeo coincide</strong><p>Prueba otra carpeta, reduce los umbrales o revisa los códecs excluidos.</p></div>';
+      ? `<table><thead><tr><th>Select</th><th>Video</th><th>Size</th><th>Dimensions / codec</th><th>Total bitrate</th><th></th></tr></thead><tbody>${scan.files.map((f) => `<tr><td><input type="checkbox" data-media-select="${esc(f.id)}" ${selected.has(f.id) ? "checked" : ""} ${!f.eligible || dirty || busy ? "disabled" : ""} aria-label="Select ${esc(f.name)}" /></td><td class="media-name-cell"><strong title="${esc(f.path)}">${esc(f.name)}</strong><small>${esc(f.path)}</small>${f.job ? stateLabel(f) : ""}${!f.eligible ? `<p class="media-help">${esc(f.reason)}</p>` : ""}</td><td>${bytes(f.size)}</td><td>${f.metadata ? `${f.metadata.width} × ${f.metadata.height}<br>${esc(f.metadata.codec.toUpperCase())}` : "—"}</td><td>${f.metadata ? `${num.format(f.metadata.bitrateMbps)} Mb/s<br>${clock(f.metadata.durationSeconds)}` : "—"}</td><td><button class="button" data-media-play="${esc(f.id)}" type="button">▷ View</button></td></tr>`).join("")}</tbody></table>`
+      : '<div class="empty-state"><strong>No matching videos</strong><p>Try another folder, lower the thresholds or check excluded codecs.</p></div>';
     const chosen = scan.files.filter((f) => selected.has(f.id));
-    $("media-selected-count").textContent = `${chosen.length} seleccionados`;
+    $("media-selected-count").textContent = `${chosen.length} selected`;
     $("media-selected-size").textContent =
-      `${bytes(chosen.reduce((n, f) => n + f.size, 0))} de origen`;
+      `${bytes(chosen.reduce((n, f) => n + f.size, 0))} source size`;
     $("media-select-all").disabled =
       dirty || busy || !scan.files.some((f) => f.eligible);
     $("media-queue").disabled =
@@ -340,7 +340,7 @@
     if (!scan || dirty || busy || !selected.size) return;
     const target = Number($("media-target").value);
     if (!Number.isInteger(target) || target < 1 || target > 5000) {
-      fail("El objetivo debe estar entre 1 y 5000 jobs.");
+      fail("The target must be between 1 and 5000 jobs.");
       return;
     }
     clearError();
@@ -379,7 +379,7 @@
     v.pause();
     v.removeAttribute("src");
     v.load();
-    $("media-player-toggle").textContent = "Reproducir";
+    $("media-player-toggle").textContent = "Play";
     internalStop = false;
   }
   function closePlayer() {
@@ -425,7 +425,7 @@
     currentFile = null;
     $("media-player-toggle").disabled = true;
     $("media-player-error").hidden = true;
-    $("media-player-info").textContent = "Analizando el vídeo…";
+    $("media-player-info").textContent = "Reading video information…";
     try {
       const f = await api(`info/${id}`);
       if (generation !== infoGeneration) return;
@@ -439,7 +439,7 @@
       $("media-player-seek").max = Math.max(1, totalTime);
       $("media-player-seek").disabled = !totalTime;
       $("media-player-info").textContent =
-        `${bytes(f.size)} · ${f.metadata?.codec?.toUpperCase() || "Vídeo"} · ${f.metadata?.width || "?"} × ${f.metadata?.height || "?"} · ${f.metadata ? num.format(f.metadata.bitrateMbps) + " Mb/s totales" : ""}${playerFiles.some((a) => a.job?.role === "output") && !playerFiles.some((a) => a.job?.role === "source") ? " · Origen no disponible" : ""}`;
+        `${bytes(f.size)} · ${f.metadata?.codec?.toUpperCase() || "Video"} · ${f.metadata?.width || "?"} × ${f.metadata?.height || "?"} · ${f.metadata ? num.format(f.metadata.bitrateMbps) + " Mb/s total" : ""}${playerFiles.some((a) => a.job?.role === "output") && !playerFiles.some((a) => a.job?.role === "source") ? " · Source unavailable" : ""}`;
       assignSource(0);
     } catch (e) {
       if (generation === infoGeneration) playerError(e.message);
@@ -448,7 +448,7 @@
   function showPlayer(files) {
     closePlayer();
     playerFiles = files;
-    $("media-player-title").textContent = "Reproductor";
+    $("media-player-title").textContent = "Video player";
     $("media-player-duration").textContent = "—";
     $("media-player-current").textContent = "00:00";
     $("media-player-info").textContent = "";
@@ -459,14 +459,14 @@
     if (!files.length) {
       $("media-player").showModal();
       playerError(
-        "No hay un archivo de origen o salida disponible para este job.",
+        "No source or output file is available for this job.",
       );
       return;
     }
     $("media-player-asset").innerHTML = files
       .map(
         (f) =>
-          `<option value="${esc(f.id)}">${f.job?.role === "output" ? "Codificado" : f.job?.role === "source" ? "Origen" : f.root === "source" ? "Archivo de origen" : "Archivo disponible"}</option>`,
+          `<option value="${esc(f.id)}">${f.job?.role === "output" ? "Encoded" : f.job?.role === "source" ? "Source" : f.root === "source" ? "Source file" : "Available file"}</option>`,
       )
       .join("");
     const preferred = files.find((f) => f.job?.role === "output") || files[0];
@@ -500,19 +500,19 @@
     } catch (e) {
       if (e.name !== "AbortError")
         playerError(
-          "No se pudo iniciar la reproducción. Prueba de nuevo o cambia al modo original.",
+          "Could not start playback. Try again or switch to original mode.",
         );
     }
   }
   $("media-video").addEventListener("timeupdate", updateTime);
   $("media-video").addEventListener("play", () => {
     clearTimeout(pauseTimer);
-    $("media-player-toggle").textContent = "Pausar";
+    $("media-player-toggle").textContent = "Pause";
   });
   $("media-video").addEventListener("pause", () => {
     if (internalStop || !currentFile) return;
     absoluteTime = currentTime();
-    $("media-player-toggle").textContent = "Reanudar";
+    $("media-player-toggle").textContent = "Resume";
     if ($("media-player-mode").value === "compatible")
       pauseTimer = setTimeout(() => {
         if ($("media-video").paused) {
@@ -521,7 +521,7 @@
           absoluteTime = at;
           offset = at;
           updateTime();
-          $("media-player-toggle").textContent = "Reanudar";
+          $("media-player-toggle").textContent = "Resume";
         }
       }, 2000);
   });
@@ -529,8 +529,8 @@
     if (!internalStop && $("media-video").getAttribute("src"))
       playerError(
         $("media-player-mode").value === "original"
-          ? "El navegador no admite este archivo. Cambia al modo compatible."
-          : "La vista compatible no pudo iniciarse. Puede haber otras reproducciones ocupando los slots; reintenta o usa el modo original.",
+          ? "Your browser does not support this file. Switch to compatible mode."
+          : "Could not start compatible playback. Other videos may be using the available slots; retry or use original mode.",
       );
   });
   $("media-player-toggle").addEventListener("click", togglePlay);

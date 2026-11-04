@@ -170,10 +170,10 @@ func (l *Library) Roots() []model.MediaRoot {
 	for id := range l.roots {
 		name := id
 		if id == "source" {
-			name = "Origen"
+			name = "Source"
 		}
 		if id == "encoded" {
-			name = "Codificados"
+			name = "Encoded files"
 		}
 		r, _, err := l.openRoot(id)
 		if err == nil {
@@ -289,11 +289,11 @@ func (l *Library) annotate(ctx context.Context, files []model.MediaFile, filters
 		f.Eligible = false
 		switch {
 		case f.Directory:
-			f.Reason = "Carpeta"
+			f.Reason = "Folder"
 		case f.Root != "source":
-			f.Reason = "Biblioteca de salida (solo reproducción)"
+			f.Reason = "Output library (playback only)"
 		case f.Size < l.backend.MediaMinimumSize():
-			f.Reason = "Inferior al tamaño mínimo del servidor"
+			f.Reason = "Below the server minimum file size"
 		default:
 			f.Eligible = true
 		}
@@ -301,12 +301,12 @@ func (l *Library) annotate(ctx context.Context, files []model.MediaFile, filters
 			copy := state
 			f.Job = &copy
 			f.Eligible = false
-			f.Reason = "Ya tiene un job: " + state.State
+			f.Reason = "Already has a job: " + state.State
 			if state.Role == "output" {
-				f.Reason = "Salida de un job completado"
+				f.Reason = "Output of a completed job"
 			} else if f.Size >= l.backend.MediaMinimumSize() && (state.State == "failed" && filters.RetryFailed || state.State == "canceled" && filters.RetryCanceled) {
 				f.Eligible = true
-				f.Reason = "Reintento explícito"
+				f.Reason = "Explicit retry"
 			}
 		}
 	}

@@ -59,7 +59,7 @@ self.addEventListener("fetch", (event) => {
         return (
           offline ||
           new Response(
-            "Sin conexión. Vuelve a conectar para abrir TranscoderD.",
+            "Offline. Reconnect to open TranscoderD.",
             {
               status: 503,
               headers: {

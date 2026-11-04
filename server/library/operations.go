@@ -296,12 +296,12 @@ func (l *Library) scan(ctx context.Context, op *operation, filters model.MediaFi
 					d.Examined++
 					if err != nil {
 						d.Failed++
-						d.Results = append(d.Results, model.MediaLoadResult{ID: f.ID, Path: f.Path, State: "failed", Message: "No se pudo analizar el vídeo"})
+						d.Results = append(d.Results, model.MediaLoadResult{ID: f.ID, Path: f.Path, State: "failed", Message: "Could not analyze the video"})
 						return
 					}
 					if full.Size != f.Size || full.ModifiedNS != f.ModifiedNS {
 						d.Failed++
-						d.Results = append(d.Results, model.MediaLoadResult{ID: f.ID, Path: f.Path, State: "failed", Message: "El archivo cambió durante el análisis"})
+						d.Results = append(d.Results, model.MediaLoadResult{ID: f.ID, Path: f.Path, State: "failed", Message: "The file changed during analysis"})
 						return
 					}
 					full.Job = f.Job
@@ -400,7 +400,7 @@ func (l *Library) load(ctx context.Context, op *operation, files []model.MediaFi
 			}
 		}
 		if err != nil {
-			result.Message = "El archivo cambió o ya no está disponible"
+			result.Message = "The file changed or is no longer available"
 		} else {
 			entries := []model.MediaFile{f}
 			if err := l.annotate(ctx, entries, filters); err != nil {
@@ -418,7 +418,7 @@ func (l *Library) load(ctx context.Context, op *operation, files []model.MediaFi
 					result.Message = err.Error()
 					if errors.Is(err, ErrChanged) || errors.Is(err, fs.ErrNotExist) || errors.Is(err, ErrInvalidPath) {
 						result.State = "skipped"
-						result.Message = "El archivo cambió o ya no está disponible"
+						result.Message = "The file changed or is no longer available"
 					} else {
 						// Another intake can win after our state read. Report that
 						// collision as a skip, without consuming the success target.

@@ -1,8 +1,8 @@
 "use strict";
 (() => {
   const $ = (id) => document.getElementById(id);
-  const number = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 1 });
-  const integer = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0 });
+  const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+  const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
   const esc = (value) =>
     String(value ?? "").replace(
       /[&<>"']/g,
@@ -17,43 +17,43 @@
     );
   const basename = (path) => String(path).split(/[\\/]/).pop() || path;
   const stateNames = {
-    active: "Activo",
-    queued: "En cola",
-    completed: "Completado",
-    failed: "Fallido",
-    canceled: "Cancelado",
-    assigned: "Asignado",
-    started: "Iniciado",
+    active: "Active",
+    queued: "Queued",
+    completed: "Completed",
+    failed: "Failed",
+    canceled: "Canceled",
+    assigned: "Assigned",
+    started: "Started",
   };
   const phases = {
-    Job: "Preparación",
-    Download: "Descarga",
-    MKVExtract: "Subtítulos",
+    Job: "Preparation",
+    Download: "Download",
+    MKVExtract: "Subtitles",
     PGS: "OCR",
-    FFMPEG: "Codificación",
-    JobVerify: "Verificación",
-    Upload: "Subida",
+    FFMPEG: "Encoding",
+    JobVerify: "Verification",
+    Upload: "Upload",
   };
   const titles = {
     library: [
-      "Biblioteca",
-      "Tu biblioteca, sin terminal",
-      "Explora, reproduce y elige qué vídeos cargar en la cola.",
+      "Library",
+      "Your library, visually",
+      "Browse, play and choose which videos to queue.",
     ],
     overview: [
-      "Resumen",
-      "Tu flota, en movimiento",
-      "Cada trabajo, cada worker y cada byte que recuperas.",
+      "Overview",
+      "Your fleet in motion",
+      "Every job, every worker and every byte you save.",
     ],
     workers: [
       "Workers",
-      "La potencia, bajo tu control",
-      "Ajusta CPU y GPU por separado en cada worker, sin reiniciar.",
+      "Your processing power, your control",
+      "Adjust CPU and GPU limits independently for each worker, without restarting.",
     ],
     jobs: [
-      "Trabajos",
-      "Cada archivo tiene su historia",
-      "Sigue las fases, el progreso y el resultado de cada trabajo.",
+      "Jobs",
+      "Every file has a story",
+      "Track the phases, progress and outcome of every job.",
     ],
   };
   let data = null,
@@ -86,12 +86,12 @@
     return `${number.format(seconds / 3600)} h`;
   }
   function age(time) {
-    if (!time) return "sin heartbeat";
+    if (!time) return "no heartbeat";
     const seconds = Math.max(0, (Date.now() - new Date(time)) / 1000);
-    if (seconds < 60) return `hace ${Math.floor(seconds)} s`;
-    if (seconds < 3600) return `hace ${Math.floor(seconds / 60)} min`;
-    if (seconds < 86400) return `hace ${Math.floor(seconds / 3600)} h`;
-    return `hace ${Math.floor(seconds / 86400)} d`;
+    if (seconds < 60) return `${Math.floor(seconds)} s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
+    return `${Math.floor(seconds / 86400)} d ago`;
   }
   function empty(title, detail = "") {
     return `<div class="empty-state"><span class="empty-icon" aria-hidden="true">◌</span><strong>${esc(title)}</strong><p>${esc(detail)}</p></div>`;
@@ -130,13 +130,13 @@
     });
     if (response.status === 401) {
       window.location.replace("/dashboard/login");
-      throw new Error("La sesión ha caducado.");
+      throw new Error("Your session has expired.");
     }
     if (!response.ok)
       throw new Error(
         response.status === 400
-          ? "Revisa los datos introducidos."
-          : "El servidor no pudo completar la operación.",
+          ? "Check the values you entered."
+          : "The server could not complete the operation.",
       );
     return response.status === 204 ? null : response.json();
   }
@@ -159,10 +159,10 @@
       $("error-banner").hidden = true;
       $("loading").hidden = true;
       $("dashboard-content").hidden = false;
-      $("connection").innerHTML = '<span class="status-dot"></span>En directo';
+      $("connection").innerHTML = '<span class="status-dot"></span>Live';
       $("last-sync").textContent = new Date(
         data.generatedAt,
-      ).toLocaleTimeString("es-ES", {
+      ).toLocaleTimeString("en-US", {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
@@ -171,10 +171,10 @@
     } catch (e) {
       $("loading").hidden = true;
       $("error-banner").textContent =
-        `${e.message} ${data ? "Mostrando los últimos datos recibidos; pueden estar desactualizados." : "Reintentaremos automáticamente en unos segundos."}`;
+        `${e.message} ${data ? "Showing the last received data; it may be outdated." : "Retrying automatically in a few seconds."}`;
       $("error-banner").hidden = false;
       $("connection").innerHTML =
-        '<span class="status-dot error"></span>Sin conexión';
+        '<span class="status-dot error"></span>Offline';
     } finally {
       fetching = false;
       $("refresh").disabled = false;
@@ -191,10 +191,10 @@
     $("nav-worker-count").textContent = workers.length;
     $("nav-job-count").textContent = integer.format(s.active + s.queued);
     $("fleet-note").textContent =
-      `${online} de ${workers.length} workers online`;
+      `${online} of ${workers.length} workers online`;
     $("fleet-detail").textContent = workers.length
-      ? `${integer.format(s.active)} activos · ${integer.format(s.queued)} en cola`
-      : "Esperando el primer worker";
+      ? `${integer.format(s.active)} active · ${integer.format(s.queued)} queued`
+      : "Waiting for the first worker";
     $("fleet-lights").innerHTML = workers
       .slice(0, 24)
       .map((w) => `<i class="${w.online ? "" : "offline"}"></i>`)
@@ -238,30 +238,30 @@
     const saved = bytes(s.savedBytes).split(" ");
     const cards = [
       [
-        "Espacio recuperado",
+        "Space saved",
         "↙",
         `${saved[0]}<small>${saved[1]}</small>`,
-        `<span class="positive">${s.sourceBytes ? `${number.format(s.compressionPercent)} % menos espacio` : "Esperando el primer resultado"}</span> · acumulado`,
+        `<span class="positive">${s.sourceBytes ? `${number.format(s.compressionPercent)} % less space` : "Waiting for the first result"}</span> · all time`,
       ],
       [
-        "Trabajos completados",
+        "Completed jobs",
         "✓",
         integer.format(s.completedInRange),
-        `${integer.format(s.completed)} en total · <span class="positive">${integer.format(s.queued)} en cola</span>`,
+        `${integer.format(s.completed)} total · <span class="positive">${integer.format(s.queued)} queued</span>`,
       ],
       [
-        "Encodes en marcha",
+        "Active encodes",
         "ϟ",
         live.length ? `${encodes}<small>/ ${target} slots</small>` : "—",
         split.length
-          ? `<span class="positive">CPU ${cpuActive}</span> · <span class="purple-text">GPU ${gpuActive}</span> · ${integer.format(s.active)} jobs activos`
-          : `${integer.format(s.active)} trabajos activos · sin desglose CPU/GPU`,
+          ? `<span class="positive">CPU ${cpuActive}</span> · <span class="purple-text">GPU ${gpuActive}</span> · ${integer.format(s.active)} active jobs`
+          : `${integer.format(s.active)} active jobs · CPU/GPU breakdown unavailable`,
       ],
       [
-        "Tasa de éxito",
+        "Success rate",
         "↗",
         `${success}${outcomes ? "<small>%</small>" : ""}`,
-        `${integer.format(s.failedInRange)} fallidos · media ${duration(s.averageSeconds)} / trabajo`,
+        `${integer.format(s.failedInRange)} failed · average ${duration(s.averageSeconds)} / job`,
       ],
     ];
     $("metrics").innerHTML = cards
@@ -273,7 +273,7 @@
   }
   const chartDate = (time) =>
     new Date(time).toLocaleString(
-      "es-ES",
+      "en-US",
       hours === 24
         ? { hour: "2-digit", minute: "2-digit" }
         : { day: "numeric", month: "short" },
@@ -282,11 +282,11 @@
     const s = data.summary,
       buckets = data.timeline;
     $("throughput-total").textContent =
-      `${integer.format(s.completedInRange)} completados`;
+      `${integer.format(s.completedInRange)} completed`;
     if (!s.completedInRange && !s.failedInRange) {
       $("throughput-chart").innerHTML = empty(
-        "Tu próximo resultado empieza aquí",
-        "Las finalizaciones y los fallos aparecerán en este gráfico cuando lleguen.",
+        "Your next result starts here",
+        "Completions and failures will appear in this chart as they arrive.",
       );
       return;
     }
@@ -325,26 +325,26 @@
       ]),
     ];
     $("throughput-chart").innerHTML =
-      `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${s.completedInRange} trabajos completados y ${s.failedInRange} fallidos en el periodo"><defs><linearGradient id="throughput-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#b7ef79" stop-opacity=".16"/><stop offset="100%" stop-color="#b7ef79" stop-opacity="0"/></linearGradient></defs>${grid}<path class="chart-area" d="${points("completed")} L${x(buckets.length - 1)},${y(0)} L${x(0)},${y(0)} Z"/><path class="chart-line" d="${points("completed")}"/><path class="chart-failed" d="${points("failed")}"/>${buckets.map((b, i) => `<circle class="chart-point" cx="${x(i)}" cy="${y(b.completed)}" r="${b.completed > 0 ? 3 : 0}"/><rect class="chart-hover" x="${Math.max(left, x(i) - 8)}" y="${top}" width="16" height="${height - bottom - top}"><title>${esc(chartDate(b.time))}: ${b.completed} completados · ${b.failed} fallidos</title></rect>`).join("")}${labelIndices.map((i, n) => `<text class="chart-label" x="${x(i)}" y="${height - 7}" text-anchor="${n === 0 ? "start" : n === labelIndices.length - 1 ? "end" : "middle"}">${esc(chartDate(buckets[i].time))}</text>`).join("")}</svg>`;
+      `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${s.completedInRange} completed jobs and ${s.failedInRange} failed in the selected period"><defs><linearGradient id="throughput-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#b7ef79" stop-opacity=".16"/><stop offset="100%" stop-color="#b7ef79" stop-opacity="0"/></linearGradient></defs>${grid}<path class="chart-area" d="${points("completed")} L${x(buckets.length - 1)},${y(0)} L${x(0)},${y(0)} Z"/><path class="chart-line" d="${points("completed")}"/><path class="chart-failed" d="${points("failed")}"/>${buckets.map((b, i) => `<circle class="chart-point" cx="${x(i)}" cy="${y(b.completed)}" r="${b.completed > 0 ? 3 : 0}"/><rect class="chart-hover" x="${Math.max(left, x(i) - 8)}" y="${top}" width="16" height="${height - bottom - top}"><title>${esc(chartDate(b.time))}: ${b.completed} completed · ${b.failed} failed</title></rect>`).join("")}${labelIndices.map((i, n) => `<text class="chart-label" x="${x(i)}" y="${height - 7}" text-anchor="${n === 0 ? "start" : n === labelIndices.length - 1 ? "end" : "middle"}">${esc(chartDate(buckets[i].time))}</text>`).join("")}</svg>`;
   }
   function renderImpact() {
     const s = data.summary;
     if (!s.sourceBytes) {
       $("storage-impact").innerHTML = empty(
-        "El ahorro se mide al terminar",
-        "Los tamaños finales verificados se comparan con sus archivos de origen.",
+        "Savings are measured on completion",
+        "Verified final sizes are compared with their source files.",
       );
       return;
     }
     $("storage-impact").innerHTML =
-      `<div class="impact-number">${number.format(s.compressionPercent)}<span>%</span></div><p class="impact-subtitle">de espacio recuperado · ${bytes(s.savedBytes)}</p><div class="storage-row"><span>Origen</span><div class="storage-bar"><span data-width="100"></span></div><strong>${bytes(s.sourceBytes)}</strong></div><div class="storage-row output"><span>Destino</span><div class="storage-bar"><span data-width="${(s.targetBytes / s.sourceBytes) * 100}"></span></div><strong>${bytes(s.targetBytes)}</strong></div>`;
+      `<div class="impact-number">${number.format(s.compressionPercent)}<span>%</span></div><p class="impact-subtitle">space saved · ${bytes(s.savedBytes)}</p><div class="storage-row"><span>Source</span><div class="storage-bar"><span data-width="100"></span></div><strong>${bytes(s.sourceBytes)}</strong></div><div class="storage-row output"><span>Output</span><div class="storage-bar"><span data-width="${(s.targetBytes / s.sourceBytes) * 100}"></span></div><strong>${bytes(s.targetBytes)}</strong></div>`;
   }
   function renderQueue() {
     const s = data.summary;
     if (!s.total) {
       $("queue-chart").innerHTML = empty(
-        "Todo listo para empezar",
-        "Programa archivos desde la API de TranscoderD para ver tu cola.",
+        "Ready to get started",
+        "Add files through the library or TranscoderD API to see your queue.",
       );
       return;
     }
@@ -366,7 +366,7 @@
       })
       .join("");
     $("queue-chart").innerHTML =
-      `<div class="queue-layout"><div class="queue-ring"><svg viewBox="0 0 126 126" role="img" aria-label="Estado de ${s.total} trabajos"><circle class="ring-base" cx="63" cy="63" r="49"/>${rings}</svg><div class="ring-total"><strong>${integer.format(s.total)}</strong><small>TRABAJOS</small></div></div><div class="queue-legend">${segments.map(([key, value, , color]) => `<div><i class="legend-dot ${color}"></i>${stateNames[key]}<strong>${integer.format(value)}</strong></div>`).join("")}</div></div>`;
+      `<div class="queue-layout"><div class="queue-ring"><svg viewBox="0 0 126 126" role="img" aria-label="Status of ${s.total} jobs"><circle class="ring-base" cx="63" cy="63" r="49"/>${rings}</svg><div class="ring-total"><strong>${integer.format(s.total)}</strong><small>JOBS</small></div></div><div class="queue-legend">${segments.map(([key, value, , color]) => `<div><i class="legend-dot ${color}"></i>${stateNames[key]}<strong>${integer.format(value)}</strong></div>`).join("")}</div></div>`;
   }
   function renderSavings() {
     const buckets = data.timeline;
@@ -376,8 +376,8 @@
     );
     if (!buckets.some((b) => b.sourceBytes)) {
       $("savings-chart").innerHTML = empty(
-        "El espacio también cuenta una historia",
-        "Aquí verás cuánto recuperas en cada intervalo.",
+        "See your savings over time",
+        "See how much space you save in each interval.",
       );
       return;
     }
@@ -395,7 +395,7 @@
       top + ((maximum - value) / range) * (height - bottom - top);
     const barSize = Math.max(3, ((width - left - 8) / buckets.length) * 0.55);
     $("savings-chart").innerHTML =
-      `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(bytes(total))} recuperados en el periodo">${[
+      `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(bytes(total))} saved in the selected period">${[
         0, 0.5, 1,
       ]
         .map((f) => {
@@ -404,13 +404,13 @@
         })
         .join(
           "",
-        )}${buckets.map((b, i) => `<rect x="${x(i) + 3}" y="${Math.min(y(values[i]), y(0))}" width="${barSize}" height="${Math.max(0, Math.abs(y(values[i]) - y(0)))}" rx="2" fill="${values[i] < 0 ? "#ff8992" : "#ae9bff"}"><title>${esc(chartDate(b.time))}: ${esc(bytes(values[i]))}</title></rect>`).join("")}<text class="chart-label" x="${left}" y="${height - 5}">${esc(chartDate(buckets[0].time))}</text><text class="chart-label" x="${width - 8}" y="${height - 5}" text-anchor="end">${esc(chartDate(buckets.at(-1).time))}</text></svg><div class="graph-footer"><span>Recuperado en este periodo</span><strong>${bytes(total)}</strong></div>`;
+        )}${buckets.map((b, i) => `<rect x="${x(i) + 3}" y="${Math.min(y(values[i]), y(0))}" width="${barSize}" height="${Math.max(0, Math.abs(y(values[i]) - y(0)))}" rx="2" fill="${values[i] < 0 ? "#ff8992" : "#ae9bff"}"><title>${esc(chartDate(b.time))}: ${esc(bytes(values[i]))}</title></rect>`).join("")}<text class="chart-label" x="${left}" y="${height - 5}">${esc(chartDate(buckets[0].time))}</text><text class="chart-label" x="${width - 8}" y="${height - 5}" text-anchor="end">${esc(chartDate(buckets.at(-1).time))}</text></svg><div class="graph-footer"><span>Saved in this period</span><strong>${bytes(total)}</strong></div>`;
   }
   function renderCodecs() {
     if (!data.codecs.length) {
       $("codec-chart").innerHTML = empty(
-        "Aún no hay códecs que comparar",
-        "Se usan los tamaños de archivos finalizados, agrupados por códec de salida.",
+        "No codecs to compare yet",
+        "Based on finalized file sizes, grouped by output codec.",
       );
       return;
     }
@@ -418,7 +418,7 @@
       .slice(0, 5)
       .map((c) => {
         const saved = 100 * (1 - c.targetBytes / c.sourceBytes);
-        return `<div><div class="bar-label"><strong>${esc(c.name === "unknown" ? "Sin probe de salida" : c.name.toUpperCase())}</strong><span>${number.format(saved)} % menos</span></div><div class="bar-track codec"><span data-width="${Math.max(0, saved)}"></span></div><div class="bar-detail"><span>${integer.format(c.jobs)} archivos</span><span>${bytes(c.sourceBytes)} → ${bytes(c.targetBytes)}</span></div></div>`;
+        return `<div><div class="bar-label"><strong>${esc(c.name === "unknown" ? "Output metadata unavailable" : c.name.toUpperCase())}</strong><span>${number.format(saved)} % smaller</span></div><div class="bar-track codec"><span data-width="${Math.max(0, saved)}"></span></div><div class="bar-detail"><span>${integer.format(c.jobs)} files</span><span>${bytes(c.sourceBytes)} → ${bytes(c.targetBytes)}</span></div></div>`;
       })
       .join("")}</div>`;
   }
@@ -428,20 +428,20 @@
       .slice(0, 6);
     if (!workers.length) {
       $("worker-chart").innerHTML = empty(
-        "Tu flota aún está por llegar",
-        "Los workers aparecen cuando envían su primer heartbeat.",
+        "Your fleet is on its way",
+        "Workers appear after their first heartbeat.",
       );
       return;
     }
     const max = Math.max(1, ...workers.map((w) => w.completed + w.failed));
     $("worker-chart").innerHTML =
-      `<div class="horizontal-chart">${workers.map((w) => `<div><div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} fallos</span></div><div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div></div>`).join("")}</div><p class="worker-chart-footer">Resultados por worker en el periodo. La capacidad no equivale a utilización de CPU/GPU.</p>`;
+      `<div class="horizontal-chart">${workers.map((w) => `<div><div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} failures</span></div><div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div></div>`).join("")}</div><p class="worker-chart-footer">Worker outcomes in the selected period. Capacity does not measure CPU/GPU utilization.</p>`;
   }
   function renderActivity() {
     if (!data.activity.length) {
       $("activity-feed").innerHTML = empty(
-        "Sin eventos en este periodo",
-        "Las asignaciones, finalizaciones y errores aparecerán aquí.",
+        "No events in this period",
+        "Assignments, completions and errors will appear here.",
       );
       return;
     }
@@ -449,7 +449,7 @@
       .slice(0, 5)
       .map(
         (a) =>
-          `<article class="activity-item"><span class="activity-icon ${esc(a.status)}" aria-hidden="true">${a.status === "completed" ? "✓" : a.status === "failed" ? "!" : "↗"}</span><div class="activity-content"><strong title="${esc(a.sourcePath)}">${esc(basename(a.sourcePath))}</strong><p>${esc(stateNames[a.status] ?? a.status)} · ${esc(a.worker || "Servidor")}${a.phase !== "Job" ? " · " + esc(phases[a.phase] ?? a.phase) : ""}</p>${a.message ? `<p class="activity-error" title="${esc(a.message)}">${esc(a.message)}</p>` : ""}</div><time datetime="${esc(a.time)}" title="${esc(new Date(a.time).toLocaleString("es-ES"))}">${age(a.time)}</time></article>`,
+          `<article class="activity-item"><span class="activity-icon ${esc(a.status)}" aria-hidden="true">${a.status === "completed" ? "✓" : a.status === "failed" ? "!" : "↗"}</span><div class="activity-content"><strong title="${esc(a.sourcePath)}">${esc(basename(a.sourcePath))}</strong><p>${esc(stateNames[a.status] ?? a.status)} · ${esc(a.worker || "Server")}${a.phase !== "Job" ? " · " + esc(phases[a.phase] ?? a.phase) : ""}</p>${a.message ? `<p class="activity-error" title="${esc(a.message)}">${esc(a.message)}</p>` : ""}</div><time datetime="${esc(a.time)}" title="${esc(new Date(a.time).toLocaleString("en-US"))}">${age(a.time)}</time></article>`,
       )
       .join("");
   }
@@ -457,22 +457,22 @@
     if (j.state === "completed") {
       const savings =
         j.sourceBytes > 0 && j.targetBytes > 0
-          ? `${number.format((1 - j.targetBytes / j.sourceBytes) * 100)} % menos · ${bytes(j.targetBytes)}`
-          : "Tamaño final no disponible";
-      return `<span class="accent">✓ Finalizado</span><div class="progress-caption">${esc(savings)}</div>`;
+          ? `${number.format((1 - j.targetBytes / j.sourceBytes) * 100)} % smaller · ${bytes(j.targetBytes)}`
+          : "Final size unavailable";
+      return `<span class="accent">✓ Finished</span><div class="progress-caption">${esc(savings)}</div>`;
     }
     if (j.state === "failed")
-      return `<p class="job-message" title="${esc(j.message)}">${esc(j.message || "El worker ha informado un error.")}</p>`;
+      return `<p class="job-message" title="${esc(j.message)}">${esc(j.message || "The worker reported an error.")}</p>`;
     if (j.state === "queued")
-      return '<span class="muted">Esperando asignación</span>';
-    if (j.state === "canceled") return '<span class="muted">Cancelado</span>';
+      return '<span class="muted">Waiting for assignment</span>';
+    if (j.state === "canceled") return '<span class="muted">Canceled</span>';
     if (!j.progress.length)
-      return `<span>${esc((phases[j.phase] ?? j.phase) + (j.message ? " · " + j.message : ""))}</span><div class="progress-caption">Esperando progreso</div>`;
+      return `<span>${esc((phases[j.phase] ?? j.phase) + (j.message ? " · " + j.message : ""))}</span><div class="progress-caption">Waiting for progress</div>`;
     const percent =
       j.progress.reduce((n, p) => n + p.percent, 0) / j.progress.length;
     const eta = Math.max(...j.progress.map((p) => p.etaSeconds));
     const stale = j.progress.some((p) => p.stale);
-    return `<div class="load-labels"><span>${esc((phases[j.phase] ?? j.phase) + (j.message ? " · " + j.message : ""))}</span><strong>${number.format(percent)} %</strong></div><div class="progress-track"><span data-width="${percent}"></span></div><div class="progress-caption ${stale ? "stale" : ""}"><span>${stale ? "Progreso desactualizado" : "ETA de fase: " + duration(eta)}</span><span>${j.progress.length > 1 ? `${j.progress.length} subtareas` : ""}</span></div>`;
+    return `<div class="load-labels"><span>${esc((phases[j.phase] ?? j.phase) + (j.message ? " · " + j.message : ""))}</span><strong>${number.format(percent)} %</strong></div><div class="progress-track"><span data-width="${percent}"></span></div><div class="progress-caption ${stale ? "stale" : ""}"><span>${stale ? "Outdated progress" : "Phase ETA: " + duration(eta)}</span><span>${j.progress.length > 1 ? `${j.progress.length} subtasks` : ""}</span></div>`;
   }
   function observedJob(job) {
     if (job.state !== "active") return null;
@@ -492,37 +492,37 @@
     return local?.state === "paused"
       ? badge(
           "queued",
-          local.individuallyPaused ? "Pausa individual" : "Pausa RAM",
+          local.individuallyPaused ? "Individually paused" : "RAM pause",
         )
       : local?.queueHeld
-        ? badge("queued", "Cola detenida")
+        ? badge("queued", "Queue stopped")
         : badge(job.state);
   }
   function observedProgress(job) {
     const local = observedJob(job);
     if (local?.state === "paused")
-      return `<span class="muted">${job.progress?.length ? number.format(job.progress[0].percent) + "% · " : ""}Suspendido en RAM · progreso conservado</span>`;
+      return `<span class="muted">${job.progress?.length ? number.format(job.progress[0].percent) + "% · " : ""}Paused in RAM · progress retained</span>`;
     if (local?.queueHeld)
-      return '<span class="muted">En espera de reanudar la cola</span>';
+      return '<span class="muted">Waiting for the queue to resume</span>';
     return jobProgress(job);
   }
   function jobsTable(jobs) {
     if (!jobs.length)
       return empty(
-        "No hay trabajos que mostrar",
-        "Los archivos aparecerán aquí cuando se incorporen a la cola o cambies el filtro.",
+        "No jobs to display",
+        "Files appear here when they are queued or you change the filter.",
       );
-    return `<table><thead><tr><th>Archivo</th><th>Estado</th><th>Worker</th><th>Progreso / resultado</th><th>Actualización</th><th>Vídeo</th></tr></thead><tbody>${jobs.map((j) => `<tr><td class="file-cell"><div class="file-name"><span aria-hidden="true">▹</span><div><strong title="${esc(j.sourcePath)}">${esc(basename(j.sourcePath))}</strong><small title="${esc(j.id)}">${bytes(j.sourceBytes)} · ${esc(j.id.slice(0, 8))}</small></div></div></td><td>${jobBadge(j)}</td><td>${esc(j.worker || "—")}</td><td><div class="job-progress">${observedProgress(j)}</div></td><td title="${esc(new Date(j.updatedAt).toLocaleString("es-ES"))}">${age(j.updatedAt)}</td><td><button type="button" class="button media-job-play" data-job-media="${esc(j.id)}" aria-label="Reproducir ${esc(basename(j.sourcePath))}">▷ Ver</button></td></tr>`).join("")}</tbody></table>`;
+    return `<table><thead><tr><th>File</th><th>Status</th><th>Worker</th><th>Progress / result</th><th>Updated</th><th>Video</th></tr></thead><tbody>${jobs.map((j) => `<tr><td class="file-cell"><div class="file-name"><span aria-hidden="true">▹</span><div><strong title="${esc(j.sourcePath)}">${esc(basename(j.sourcePath))}</strong><small title="${esc(j.id)}">${bytes(j.sourceBytes)} · ${esc(j.id.slice(0, 8))}</small></div></div></td><td>${jobBadge(j)}</td><td>${esc(j.worker || "—")}</td><td><div class="job-progress">${observedProgress(j)}</div></td><td title="${esc(new Date(j.updatedAt).toLocaleString("en-US"))}">${age(j.updatedAt)}</td><td><button type="button" class="button media-job-play" data-job-media="${esc(j.id)}" aria-label="Play ${esc(basename(j.sourcePath))}">▷ View</button></td></tr>`).join("")}</tbody></table>`;
   }
   function renderJobs() {
     if (!data) return;
-    const search = $("job-search").value.toLocaleLowerCase("es");
+    const search = $("job-search").value.toLocaleLowerCase("en");
     const jobs = data.jobs.filter(
       (j) =>
         (filter === "all" || j.state === filter) &&
         (!search ||
           `${j.sourcePath} ${j.worker} ${j.id}`
-            .toLocaleLowerCase("es")
+            .toLocaleLowerCase("en")
             .includes(search)),
     );
     $("job-list").innerHTML = jobsTable(jobs);
@@ -549,8 +549,8 @@
     if (!data) return;
     if (!data.workers.length) {
       $("worker-cards").innerHTML = empty(
-        "Conecta tu primer worker",
-        "Aparecerá automáticamente con su nombre, encoders y estado.",
+        "Connect your first worker",
+        "Its name, encoders and status will appear automatically.",
       );
       return;
     }
@@ -571,42 +571,42 @@
         const status = !w.online
           ? ["offline", "Offline"]
           : !modern
-            ? ["queued", "Actualizar worker"]
+            ? ["queued", "Update worker"]
             : rt.draining
-              ? ["queued", "Mantenimiento"]
+              ? ["queued", "Maintenance"]
               : rt.finishing
-                ? ["queued", "Terminando jobs"]
+                ? ["queued", "Finishing jobs"]
                 : rt.ramPaused
-                  ? ["queued", "Pausa RAM"]
+                  ? ["queued", "RAM pause"]
                   : paused
-                    ? ["queued", "Cola pausada"]
+                    ? ["queued", "Queue paused"]
                     : !rt.withinSchedule
-                      ? ["queued", "Fuera de horario"]
+                      ? ["queued", "Outside schedule"]
                       : ["completed", "Online"];
         const busy = saving.has(w.name);
         const fixedCPU = rt?.managedProfile && rt.encoder !== "av1_nvenc",
           fixedGPU = rt?.managedProfile && rt.encoder === "av1_nvenc";
         const lane = (kind, encoder, active, limit) =>
-          `<div class="encoder-lane ${kind}"><div class="load-labels"><span><b>${kind.toUpperCase()}</b> · ${esc(encoder || "Sin telemetría")}</span><strong>${modern ? `${active} / ${limit}` : "—"}</strong></div><div class="progress-track"><span data-width="${modern && limit > 0 ? (active / limit) * 100 : 0}"></span></div><p class="lane-note">${!modern ? "Actualiza este worker para observar y controlar ambos encoders." : active > limit ? `${active} slots ocupados · límite ${limit}` : limit === 0 ? "Desactivado para nuevos encodes" : `${limit} slots de codificación${w.online ? "" : " · último dato"}`}</p></div>`;
+          `<div class="encoder-lane ${kind}"><div class="load-labels"><span><b>${kind.toUpperCase()}</b> · ${esc(encoder || "No telemetry")}</span><strong>${modern ? `${active} / ${limit}` : "—"}</strong></div><div class="progress-track"><span data-width="${modern && limit > 0 ? (active / limit) * 100 : 0}"></span></div><p class="lane-note">${!modern ? "Update this worker to monitor and control both encoders." : active > limit ? `${active} occupied slots · limit ${limit}` : limit === 0 ? "Disabled for new encodes" : `${limit} encoding slots${w.online ? "" : " · last reported"}`}</p></div>`;
         const note = pending
-          ? `◷ Deseado: CPU ${desired.cpu || "?"} · GPU ${desired.gpu || "?"} — ${!modern ? "requiere actualizar el worker" : w.online ? "pendiente de aplicar" : "se aplicará al reconectar"}`
+          ? `◷ Desired: CPU ${desired.cpu || "?"} · GPU ${desired.gpu || "?"} — ${!modern ? "worker update required" : w.online ? "pending application" : "will apply on reconnection"}`
           : !modern
-            ? "Los límites se guardan juntos; el worker antiguo se pausa hasta actualizarlo."
+            ? "Both limits are saved together; this older worker is paused until updated."
             : rt.draining
-              ? "Mantenimiento: termina el trabajo aceptado sin admitir más."
+              ? "Maintenance: finishing accepted work without admitting new jobs."
               : rt.finishing
-                ? "Terminando trabajo aceptado; la sincronización mantiene este bloqueo."
+                ? "Finishing accepted work; synchronization preserves this hold."
                 : rt.ramPaused
-                  ? `Pausa RAM · ${rt.suspendedEncodes || 0} encodes suspendidos. Los límites se conservan.`
+                  ? `RAM pause · ${rt.suspendedEncodes || 0} encodes suspended. Configured limits are retained.`
                   : paused
-                    ? "Cola detenida. Los encodes activos terminan; los pendientes esperan reanudación."
-                    : `✓ Límites aplicados · hasta ${rt.cpuJobs + rt.gpuJobs + 1} jobs en el pipeline`;
+                    ? "Queue stopped. Active encodes finish; queued encodes wait for Resume."
+                    : `✓ Limits applied · up to ${rt.cpuJobs + rt.gpuJobs + 1} jobs in the pipeline`;
         return `<article class="panel worker-card" data-worker="${esc(w.name)}">
-        <div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${modern ? (rt.managedProfile ? "Perfil Windows · " + (fixedCPU ? "CPU" : "GPU") : "CPU + GPU · ejecución independiente") : esc(rt?.encoder || "Esperando telemetría compatible")}</p></div>${badge(...status)}</div>
-        <div class="worker-stats"><div class="worker-stat"><small>Encodes CPU${w.online ? "" : " · último dato"}</small><strong>${modern ? rt.activeCPUEncodes : "—"}<span>${modern ? "/ " + rt.cpuJobs : ""}</span></strong></div><div class="worker-stat"><small>Encodes GPU${w.online ? "" : " · último dato"}</small><strong>${modern ? rt.activeGPUEncodes : "—"}<span>${modern ? "/ " + rt.gpuJobs : ""}</span></strong></div><div class="worker-stat"><small>Jobs aceptados</small><strong>${rt ? rt.activeJobs : w.activeJobs}</strong></div></div>
+        <div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${modern ? (rt.managedProfile ? "Windows profile · " + (fixedCPU ? "CPU" : "GPU") : "CPU + GPU · independent execution") : esc(rt?.encoder || "Waiting for compatible telemetry")}</p></div>${badge(...status)}</div>
+        <div class="worker-stats"><div class="worker-stat"><small>CPU encodes${w.online ? "" : " · last reported"}</small><strong>${modern ? rt.activeCPUEncodes : "—"}<span>${modern ? "/ " + rt.cpuJobs : ""}</span></strong></div><div class="worker-stat"><small>GPU encodes${w.online ? "" : " · last reported"}</small><strong>${modern ? rt.activeGPUEncodes : "—"}<span>${modern ? "/ " + rt.gpuJobs : ""}</span></strong></div><div class="worker-stat"><small>Accepted jobs</small><strong>${rt ? rt.activeJobs : w.activeJobs}</strong></div></div>
         <div class="encoder-lanes">${lane("cpu", rt?.cpuEncoder, rt?.activeCPUEncodes, rt?.cpuJobs)}${lane("gpu", rt?.gpuEncoder, rt?.activeGPUEncodes, rt?.gpuJobs)}</div>
-        <form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs"><div><label for="cpu-${i}">Límite CPU <span>ENCODES</span></label><input id="cpu-${i}" name="cpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${fixedGPU ? 0 : esc(draft.cpu)}" ${rt?.managedProfile ? 'max="64"' : ""} ${busy || fixedGPU ? "disabled" : ""} aria-label="Límite CPU de ${esc(w.name)}"></div><div><label for="gpu-${i}">Límite GPU <span>ENCODES</span></label><input id="gpu-${i}" name="gpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${fixedCPU ? 0 : esc(draft.gpu)}" ${rt?.managedProfile ? 'max="64"' : ""} ${busy || fixedCPU ? "disabled" : ""} aria-label="Límite GPU de ${esc(w.name)}"></div></div><div class="capacity-controls"><button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Guardando…" : "Guardar límites"}</button><button class="button subtle" type="button" data-pause="${esc(w.name)}" ${busy ? "disabled" : ""}>Pausar ambos</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>
-        <div class="worker-footer"><span>${esc(w.ip || "Sin presencia registrada")} · ${age(w.lastSeen)}</span><span>${integer.format(w.completed)} completados · ${integer.format(w.failed)} fallos · ${bytes(w.sourceBytes - w.targetBytes)}</span></div>
+        <form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs"><div><label for="cpu-${i}">CPU limit <span>ENCODES</span></label><input id="cpu-${i}" name="cpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${fixedGPU ? 0 : esc(draft.cpu)}" ${rt?.managedProfile ? 'max="64"' : ""} ${busy || fixedGPU ? "disabled" : ""} aria-label="CPU limit for ${esc(w.name)}"></div><div><label for="gpu-${i}">GPU limit <span>ENCODES</span></label><input id="gpu-${i}" name="gpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${fixedCPU ? 0 : esc(draft.gpu)}" ${rt?.managedProfile ? 'max="64"' : ""} ${busy || fixedCPU ? "disabled" : ""} aria-label="GPU limit for ${esc(w.name)}"></div></div><div class="capacity-controls"><button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Saving…" : "Save limits"}</button><button class="button subtle" type="button" data-pause="${esc(w.name)}" ${busy ? "disabled" : ""}>Pause both</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>
+        <div class="worker-footer"><span>${esc(w.ip || "No heartbeat recorded")} · ${age(w.lastSeen)}</span><span>${integer.format(w.completed)} completed · ${integer.format(w.failed)} failures · ${bytes(w.sourceBytes - w.targetBytes)}</span></div>
       </article>`;
       })
       .join("");
@@ -626,7 +626,7 @@
       gpu < 0 ||
       !Number.isSafeInteger(cpu + gpu)
     ) {
-      showToast("Introduce dos números enteros mayores o iguales a 0.", true);
+      showToast("Enter two whole numbers greater than or equal to 0.", true);
       return;
     }
     saving.add(name);
@@ -646,7 +646,7 @@
       }
       drafts.delete(name);
       showToast(
-        `${name}: CPU ${cpu} · GPU ${gpu} guardados. Se aplicarán en la próxima sincronización.`,
+        `${name}: CPU ${cpu} · GPU ${gpu} saved. They will apply at the next synchronization.`,
       );
       await refresh();
     } catch (e) {

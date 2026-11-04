@@ -43,22 +43,22 @@ func mediaJSON(w http.ResponseWriter, value any) {
 
 func mediaError(w http.ResponseWriter, err error) {
 	code := http.StatusInternalServerError
-	message := "No se pudo completar la operación de biblioteca"
+	message := "Could not complete the library operation"
 	switch {
 	case errors.Is(err, library.ErrInvalidPath):
-		code, message = 400, "Ruta de vídeo no válida"
+		code, message = 400, "Invalid video path"
 	case errors.Is(err, library.ErrUnavailable):
-		code, message = 503, "Biblioteca no disponible"
+		code, message = 503, "Library unavailable"
 	case errors.Is(err, library.ErrBusy):
-		code, message = 429, "Hay otras operaciones o reproducciones en curso. Inténtalo en unos segundos."
+		code, message = 429, "Other operations or videos are using the available slots. Try again in a few seconds."
 	case errors.Is(err, library.ErrOperationNotFound):
-		code, message = 404, "La operación ya no está disponible; vuelve a preparar la selección"
+		code, message = 404, "The operation is no longer available; prepare the selection again"
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, repository.ErrElementNotFound):
-		code, message = 404, "El archivo ya no está disponible"
+		code, message = 404, "The file is no longer available"
 	case errors.Is(err, fs.ErrPermission):
-		code, message = 403, "No hay acceso a este vídeo"
+		code, message = 403, "Access to this video is denied"
 	case errors.Is(err, library.ErrChanged):
-		code, message = 409, "El archivo cambió desde la selección"
+		code, message = 409, "The file changed since selection"
 	}
 	if code == 500 {
 		log.WithError(err).Warn("Media operation failed")
@@ -198,13 +198,13 @@ func (s *Server) mediaStartScan(w http.ResponseWriter, r *http.Request) {
 	}
 	var filters model.MediaFilters
 	if err := decodeLimitedJSON(w, r, &filters, 16384); err != nil {
-		http.Error(w, "Filtros no válidos", 400)
+		http.Error(w, "Invalid filters", 400)
 		return
 	}
 	op, err := s.library.StartScan(filters)
 	if err != nil {
 		if !errors.Is(err, library.ErrUnavailable) && !errors.Is(err, library.ErrBusy) && !errors.Is(err, fs.ErrNotExist) {
-			http.Error(w, "Revisa los filtros y la carpeta elegida", 400)
+			http.Error(w, "Check the filters and selected folder", 400)
 		} else {
 			mediaError(w, err)
 		}
@@ -221,7 +221,7 @@ func (s *Server) mediaStartBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	var request model.MediaBatchRequest
 	if err := decodeLimitedJSON(w, r, &request, 1<<20); err != nil {
-		http.Error(w, "Selección no válida", 400)
+		http.Error(w, "Invalid selection", 400)
 		return
 	}
 	op, err := s.library.StartBatch(request)
@@ -229,7 +229,7 @@ func (s *Server) mediaStartBatch(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, library.ErrBusy) || errors.Is(err, library.ErrOperationNotFound) {
 			mediaError(w, err)
 		} else {
-			http.Error(w, "Revisa la selección y el número de jobs; se necesita una vista previa completada", 400)
+			http.Error(w, "Check the selection and job count; a completed preview is required", 400)
 		}
 		return
 	}

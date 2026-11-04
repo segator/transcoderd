@@ -103,7 +103,7 @@ func TestDashboardPWAWorkerVersionScopeAndAuth(t *testing.T) {
 		t.Fatalf("stats after logout = %d", got)
 	}
 	offline := dashboardRequest(s, "GET", "/dashboard/offline.html", "", "", nil)
-	if offline.Code != 200 || !strings.Contains(offline.Body.String(), "Volver a conectar") {
+	if offline.Code != 200 || !strings.Contains(offline.Body.String(), "Reconnect") {
 		t.Fatalf("offline page = %d", offline.Code)
 	}
 }

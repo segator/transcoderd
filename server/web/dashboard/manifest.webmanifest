@@ -1,9 +1,9 @@
 {
   "id": "/dashboard/",
-  "name": "TranscoderD · Operaciones",
+  "name": "TranscoderD · Operations",
   "short_name": "TranscoderD",
-  "description": "Progreso, compresión, workers y biblioteca de vídeo de TranscoderD.",
-  "lang": "es",
+  "description": "TranscoderD progress, compression, workers and video library.",
+  "lang": "en",
   "start_url": "/dashboard/",
   "scope": "/dashboard/",
   "display": "standalone",

@@ -5,11 +5,11 @@ const error = document.getElementById("login-error");
 document.getElementById("toggle-token").addEventListener("click", (event) => {
   const visible = token.type === "password";
   token.type = visible ? "text" : "password";
-  event.currentTarget.textContent = visible ? "Ocultar" : "Ver";
+  event.currentTarget.textContent = visible ? "Hide" : "View";
   event.currentTarget.setAttribute("aria-pressed", String(visible));
   event.currentTarget.setAttribute(
     "aria-label",
-    visible ? "Ocultar token" : "Mostrar token",
+    visible ? "Hide token" : "Show token",
   );
 });
 form.addEventListener("submit", async (event) => {
@@ -31,15 +31,15 @@ form.addEventListener("submit", async (event) => {
     if (!response.ok)
       throw new Error(
         response.status === 401
-          ? "El token no es correcto. Inténtalo de nuevo."
-          : "No se pudo iniciar sesión. Inténtalo de nuevo.",
+          ? "Incorrect token. Please try again."
+          : "Could not sign in. Please try again.",
       );
     token.value = "";
     window.location.replace("/dashboard/");
   } catch (e) {
     error.textContent =
       e.name === "TypeError" || e.name === "TimeoutError"
-        ? "No hay conexión con el servidor. Vuelve a intentarlo."
+        ? "Cannot connect to the server. Please try again."
         : e.message;
     button.disabled = false;
   }

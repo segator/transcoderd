@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -15,8 +15,8 @@
     <link rel="manifest" href="/dashboard/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/dashboard/apple-touch-icon.png" />
     <script src="/dashboard/pwa.js" defer></script>
-    <meta name="description" content="Centro de operaciones de TranscoderD" />
-    <title>Acceder · TranscoderD</title>
+    <meta name="description" content="TranscoderD operations center" />
+    <title>Sign in · TranscoderD</title>
     <link rel="icon" href="/dashboard/icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/dashboard/styles.css" />
     <script src="/dashboard/login.js" defer></script>
@@ -35,10 +35,9 @@
           <span class="eyebrow"
             ><span class="status-dot"></span> DISTRIBUTED ENCODING</span
           >
-          <h1>Más historias.<br />Menos espacio.</h1>
+          <h1>More stories.<br />Less space.</h1>
           <p>
-            El pulso de tu flota, la evolución de cada trabajo y el espacio que
-            recuperas. Todo, en un mismo lugar.
+            Your fleet activity, every job and the space you save. All in one place.
           </p>
           <div class="signal-art" aria-hidden="true">
             <span></span><span></span><span></span><span></span><span></span
@@ -49,17 +48,17 @@
           </div>
         </div>
         <p class="login-foot">
-          TRANSCODERD <span>CONTROL. CLARIDAD. CADA FRAME.</span>
+          TRANSCODERD <span>CONTROL. CLARITY. EVERY FRAME.</span>
         </p>
       </section>
       <section class="login-panel">
         <div class="login-box">
           <span class="lock-icon" aria-hidden="true">⌁</span
-          ><span class="eyebrow muted">ACCESO PRIVADO</span>
-          <h2>Bienvenido a bordo.</h2>
-          <p>Introduce tu token para abrir el centro de operaciones.</p>
+          ><span class="eyebrow muted">PRIVATE ACCESS</span>
+          <h2>Welcome aboard.</h2>
+          <p>Enter your token to open the operations center.</p>
           <form id="login-form">
-            <label for="token">Token de acceso</label>
+            <label for="token">Access token</label>
             <div class="token-field">
               <input
                 id="token"
@@ -68,19 +67,19 @@
                 autocomplete="current-password"
                 required
                 maxlength="4096"
-                placeholder="Tu token de acceso"
+                placeholder="Your access token"
               /><button
                 id="toggle-token"
                 type="button"
-                aria-label="Mostrar token"
+                aria-label="Show token"
                 aria-pressed="false"
               >
-                Ver
+                View
               </button>
             </div>
             <p id="login-error" class="form-error" role="alert"></p>
             <button class="button primary login-submit" type="submit">
-              Entrar al dashboard <span aria-hidden="true">↗</span>
+              Open dashboard <span aria-hidden="true">↗</span>
             </button>
           </form>
           <button
@@ -89,17 +88,17 @@
             type="button"
             hidden
           >
-            Instalar app</button
+            Install app</button
           ><button
             id="pwa-update"
             class="button subtle pwa-update"
             type="button"
             hidden
           >
-            Actualización lista · Recargar
+            Update ready · Reload
           </button>
           <p class="session-note">
-            Sesión privada de 12 horas. El token no se guarda en el navegador.
+            Private 12-hour session. The token is not stored in your browser.
           </p>
         </div>
       </section>

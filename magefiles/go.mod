@@ -2,7 +2,10 @@ module transcoder/magefiles
 
 go 1.26.10
 
-require dagger.io/dagger v0.20.6
+require (
+	dagger.io/dagger v0.20.6
+	golang.org/x/sync v0.20.0
+)
 
 require (
 	github.com/99designs/gqlgen v0.17.89 // indirect
@@ -20,6 +23,5 @@ require (
 	go.opentelemetry.io/otel v1.41.0 // indirect
 	go.opentelemetry.io/otel/metric v1.41.0 // indirect
 	go.opentelemetry.io/otel/trace v1.41.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 )

@@ -35,7 +35,11 @@ func (Build) SVTWindowsTools(ctx context.Context) error {
 		return err
 	}
 	defer client.Close()
-	_, err = windowsFFmpeg(client).Directory("/output").Export(ctx,
+	builder, err := windowsFFmpeg(ctx, client)
+	if err != nil {
+		return err
+	}
+	_, err = builder.Directory("/output").Export(ctx,
 		filepath.Join(projectRoot(), "build", "av1-lab", "svt-4-3", "windows-tools"))
 	return err
 }

@@ -157,8 +157,7 @@ func projectSource(client *dagger.Client) *dagger.Directory {
 	return client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
 		Exclude: []string{
 			".git", ".github", ".agents", "build", "dist", "magefiles",
-			"docs", "openspec", "scripts", "AGENTS.md", "README*", "CHANGELOG*",
-			"windows/desktop/bin", "windows/desktop/obj", "windows/desktop/publish",
+			"docs", "openspec", "scripts", "windows", "AGENTS.md", "README*", "CHANGELOG*",
 		},
 	})
 }
@@ -508,6 +507,27 @@ func (Lint) Fmt(ctx context.Context) error {
 // Docker contains targets for building container images locally.
 type Docker mg.Namespace
 
+// Check builds all application images in the Engine without exporting archives
+// or loading a runner's Docker daemon. CI E2E uses Dagger Services directly.
+func (Docker) Check(ctx context.Context) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+	src := projectSource(client)
+	for _, component := range []string{"server", "worker", "frontend"} {
+		image, err := containerImage(ctx, client, src, component)
+		if err != nil {
+			return err
+		}
+		if _, err := image.Sync(ctx); err != nil {
+			return fmt.Errorf("validate %s image: %w", component, err)
+		}
+	}
+	return nil
+}
+
 // All builds server, worker and frontend Docker images via Dagger.
 func (Docker) All(ctx context.Context) error {
 	client, err := daggerClient(ctx)
@@ -711,7 +731,8 @@ func ghcrSecret(client *dagger.Client) (*dagger.Secret, error) {
 // Release contains targets for publishing GitHub release assets.
 type Release mg.Namespace
 
-// Upload uploads dist artifacts using GitHub CLI inside Dagger.
+// Upload publishes Linux artifacts. Windows payloads and signed metadata belong
+// exclusively to the native-validation job, even when dist contains both OSes.
 func (Release) Upload(ctx context.Context) error {
 	token := os.Getenv("GH_TOKEN")
 	if token == "" {
@@ -728,9 +749,11 @@ func (Release) Upload(ctx context.Context) error {
 		return fmt.Errorf("read release assets: %w", err)
 	}
 	args := []string{"gh", "release", "upload", tag}
+	var assets []string
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() && isLinuxReleaseAsset(entry.Name()) {
 			args = append(args, "/dist/"+entry.Name())
+			assets = append(assets, entry.Name())
 		}
 	}
 	if len(args) == 4 {
@@ -753,7 +776,7 @@ func (Release) Upload(ctx context.Context) error {
 				"gh --version | grep -Fq 'gh version %s' && rm /tmp/gh.tar.gz",
 			githubCLIVersion, githubCLIVersion, githubCLIVersion, githubCLIVersion,
 		)}).
-		WithDirectory("/dist", client.Host().Directory(distPath)).
+		WithDirectory("/dist", client.Host().Directory(distPath, dagger.HostDirectoryOpts{Include: assets})).
 		WithEnvVariable("GH_REPO", "segator/transcoderd").
 		WithSecretVariable("GH_TOKEN", client.SetSecret("github-token", token)).
 		WithExec(args).
@@ -762,6 +785,16 @@ func (Release) Upload(ctx context.Context) error {
 		return fmt.Errorf("upload release assets: %w", err)
 	}
 	return nil
+}
+
+func isLinuxReleaseAsset(name string) bool {
+	switch name {
+	case "transcoderd-server", "transcoderd-worker", "transcoderd-frontend",
+		"server-image.tar", "worker-image.tar", "frontend-image.tar":
+		return true
+	default:
+		return false
+	}
 }
 
 // ---------------------------------------------------------------------------

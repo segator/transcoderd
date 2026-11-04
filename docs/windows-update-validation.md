@@ -18,7 +18,7 @@ SVT-AV1 and FDK AAC without requiring a GPU.
 Run `node scripts/windows/test-web-ui.cjs`, the relevant Go tests and
 `openspec validate --all --strict` locally. `mage lint:check lint:windows` checks
 both platforms through Dagger. CI runs focused Windows administration/update
-unit tests before packaging; Dagger builds the shipped binaries, media bundle,
+unit tests alongside Linux-hosted cross-builds; Dagger builds the shipped binaries, media bundle,
 installer and fixture installers. The full native workflow retains encode,
 service and update-state logs as artifacts.
 

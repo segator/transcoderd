@@ -1,4 +1,4 @@
-name: Build and Push
+name: CI
 
 on:
   push:
@@ -23,6 +23,12 @@ permissions:
   issues: write
   pull-requests: write
   packages: write
+
+# Superseded PR commits cannot publish releases. Never cancel a main/release
+# run, including another invocation completing missing Windows assets.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   release-source:
@@ -90,8 +96,13 @@ jobs:
         run: go test -v -timeout 2m ./update/managed ./cmd/windows-service ./cmd/windows-update-manifest ./worker/control ./worker/desktop ./worker/worker ./worker/step ./worker/resources ./frontend/...
 
   ci:
+    if: github.event_name != 'workflow_dispatch' || inputs.windows_debug_artifact_run == ''
     needs: release-source
     runs-on: transcoderd
+    timeout-minutes: 90
+    env:
+      # Aggregate C/C++ budget on the shared 16-core Dagger Engine.
+      WINDOWS_BUILD_JOBS: '16'
     outputs:
       project_version: ${{ steps.artifact_version.outputs.version }}
       release_created: ${{ steps.release.outputs.release_created }}
@@ -107,6 +118,10 @@ jobs:
         with:
           version: 0.20.6
       - uses: ./.github/actions/setup-mage
+
+      - name: Test build tooling
+        working-directory: magefiles
+        run: go test ./...
 
       - name: Verify Windows release signing key
         if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
@@ -137,18 +152,51 @@ jobs:
         id: artifact_version
         run: echo "version=${PROJECT_VERSION:-$(cat version.txt)-dev}" >> "$GITHUB_OUTPUT"
 
+      - name: Lint Linux and Windows
+        run: mage lint:check lint:windows
+
       - name: Test
         run: mage test:unit
 
       - name: Build
         run: mage build:all
 
-      - name: Build Containers
-        run: mage docker:all
+      - name: Validate Linux container images
+        run: mage docker:check
 
       - name: E2E Test
         timeout-minutes: 15
         run: mage test:e2e
+
+      - name: Build Windows portable worker
+        run: mage build:windows
+
+      - name: Build Windows native test executables
+        run: mage test:windowsBinaries
+
+      - name: Build Windows desktop installer
+        run: mage build:windowsInstaller
+
+      - name: Build Windows update and recovery fixtures
+        run: mage test:windowsUpdateFixtures
+
+      - name: Upload Windows artifacts for native validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-worker
+          path: |
+            dist/*-windows-amd64.zip
+            dist/*-windows-amd64-setup.exe
+            dist/transcoderd-worker-windows-amd64.exe
+            dist/transcoderd-desktop-service.exe
+            dist/transcoderd-updater.exe
+            dist/windows-update-manifest.exe
+            dist/windows-installation-files.json
+            dist/windows-tests/
+            dist/windows-update-fixtures/
+          # Installers and the portable bundle are already compressed.
+          compression-level: 0
+          retention-days: 7
 
       - name: Publish
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -158,6 +206,10 @@ jobs:
           IMAGE_VERSION_ALIASES: ${{ steps.release.outputs.release_created == 'true' && format('v{0}.{1},v{0}', steps.release.outputs.major, steps.release.outputs.minor) || '' }}
         run: mage publish:app
 
+      - name: Export Linux release images
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.release.outputs.release_created
+        run: mage docker:all
+
       - name: Upload release assets
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.release.outputs.release_created
         env:
@@ -165,33 +217,8 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
         run: mage release:upload
 
-  windows-build:
-    if: ${{ success() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.windows_debug_artifact_run == '') }}
-    needs: [ci, windows-unit]
-    env:
-      PROJECT_VERSION: ${{ needs.ci.outputs.project_version }}
-    runs-on: transcoderd
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.ci.outputs.source_ref }}
-      - uses: dagger/dagger-for-github@v8.4.1
-        with:
-          version: 0.20.6
-      - uses: ./.github/actions/setup-mage
-      - name: Build portable worker and native test executables
-        run: mage build:windows test:windowsBinaries build:windowsInstaller test:windowsUpdateFixtures
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-worker
-          path: dist/
-          # The installer and portable bundle are already compressed.
-          compression-level: 0
-          retention-days: 7
-
   windows-native:
-    needs: [ci, windows-build]
+    needs: [ci, windows-unit]
     concurrency:
       group: windows-release-${{ needs.ci.outputs.release_tag || github.run_id }}
       cancel-in-progress: false

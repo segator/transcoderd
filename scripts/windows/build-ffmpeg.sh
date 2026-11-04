@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Windows x64 encoders: ffmpeg-build-script v9.0.10 pins with SVT-AV1 4.3.0.
+# Shared Windows x64 cross-compilation helpers; stages pin their own sources.
 set -euo pipefail
 script_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 stage=$1
@@ -9,7 +9,11 @@ export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
 export CFLAGS='-O2'
 export CXXFLAGS='-O2'
-jobs=${BUILD_JOBS:-2}
+jobs=${BUILD_JOBS:-16}
+if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then
+    echo "BUILD_JOBS must be a positive integer, got: $jobs" >&2
+    exit 2
+fi
 mkdir -p /build "$PREFIX" /output/bin /output/licenses
 cd /build
 

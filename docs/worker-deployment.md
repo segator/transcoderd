@@ -241,7 +241,14 @@ builder supplies .NET/OCR binaries and language data. The server and worker
 images copy the needed files from those builders. An NVIDIA GPU is not needed
 to compile these images.
 
-`mage docker:all` consumes the FFmpeg and PGS builders through their Dagger build graphs. Dagger reuses each unchanged operation from the local Engine cache and rebuilds operations whose graph inputs change; no GHCR manifest probe or builder-image fallback is needed in CI. Since the Engines are node-local, a cold cache on another node can rebuild the builder there. `mage publish:ffmpeg` and `mage publish:pgs` remain explicit targets for publishing versioned builder artifacts, not prerequisites for application builds.
+`mage docker:all` consumes the FFmpeg and PGS builders through their Dagger build graphs. Dagger reuses unchanged operations from the connected Engine's cache and rebuilds operations whose graph inputs change; no GHCR manifest probe or builder-image fallback is used. Runners connected to the same Engine share those cached operations. A different or replaced Engine needs its own persisted cache. `mage publish:ffmpeg` and `mage publish:pgs` remain explicit targets for publishing versioned builder artifacts, not prerequisites for application builds.
+
+CI uses `mage docker:check` to evaluate the same application image graphs without
+exporting multi-gigabyte OCI archives or loading the runner's Docker daemon.
+E2E runs with Dagger Services. Local `mage docker:all` still exports image
+archives and loads local tags; release runs retain those Linux assets. Linux
+and Windows cross-builds share the required `ci` job. See
+[CI pipeline](ci-pipeline.md) for job dependencies and packaging measurements.
 
 The ordinary CI E2E run selects **SVT-AV1 CPU**, so a hosted runner needs no
 GPU. CI validates compilation and the CPU pipeline; it cannot validate NVENC
@@ -253,8 +260,9 @@ Local build commands are:
 
 ```bash
 mise install                    # Go, Mage, and Dagger from .mise.toml
-mise exec -- mage build:all     # Go server and worker binaries
-mise exec -- mage docker:all    # Server and worker images via Dagger
+mise exec -- mage build:all     # Go server, worker and frontend binaries
+mise exec -- mage docker:check  # Validate image graphs inside the Engine
+mise exec -- mage docker:all    # Export/load server, worker and frontend images
 mise exec -- mage test:e2e      # Short CPU AV1 server/worker pipeline check
 ```
 
@@ -262,8 +270,8 @@ mise exec -- mage test:e2e      # Short CPU AV1 server/worker pipeline check
 `mage publish:ffmpeg` and `mage publish:pgs` build and push versioned builders
 after verification. Changing FFmpeg or codec dependencies requires a new
 builder tag in `magefiles/magefile.go`, then validation and publishing of that
-tag. CI reuses existing builder tags and builds missing ones; it does not
-rebuild a present tag just because source changed. See the documented
+tag. Application CI reuses the source build graph's cached operations; it does
+not pull a published builder merely because its tag exists. See the documented
 [legacy HEVC profile](legacy-hevc-encoding.md) for rollback and benchmark
 reference.
 

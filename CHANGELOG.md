@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.12.0](https://github.com/segator/transcoderd/compare/v2.11.1...v2.12.0) (2026-11-04)
+
+
+### 🎉 Features
+
+* add standalone fleet dashboard with worker controls, media and OIDC ([#202](https://github.com/segator/transcoderd/issues/202)) ([fba63c6](https://github.com/segator/transcoderd/commit/fba63c65277ca4b280ae5ca5bca7dd8c6c4b9a46))
+
+
+### 🐛 Bug Fixes
+
+* **windows:** wait for accepted work during manual upgrades ([#200](https://github.com/segator/transcoderd/issues/200)) ([884c371](https://github.com/segator/transcoderd/commit/884c371c0b5b120574e910070a3d64942c4fbe01))
+
 ## [2.11.1](https://github.com/segator/transcoderd/compare/v2.11.0...v2.11.1) (2026-11-01)
 
 

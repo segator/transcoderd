@@ -2043,3 +2043,79 @@
     overflow-wrap: anywhere;
   }
 }
+
+@layer components {
+  .offline-layout {
+    width: min(680px, 100%);
+    margin: 0 auto;
+    padding: 72px 24px;
+  }
+  .offline-layout .brand {
+    margin-bottom: 36px;
+  }
+  .offline-card {
+    padding: 40px;
+  }
+  .offline-card h1 {
+    font-size: clamp(28px, 6vw, 46px);
+    line-height: 1.12;
+    letter-spacing: -1.4px;
+    margin: 20px 0;
+  }
+  .offline-card p {
+    line-height: 1.7;
+    margin: 18px 0;
+  }
+  .offline-card .button {
+    margin-top: 8px;
+  }
+  .login-box .pwa-install,
+  .login-box .pwa-update {
+    margin-top: 16px;
+  }
+}
+@layer responsive {
+  @media (max-width: 720px) {
+    .topbar-right .pwa-install,
+    .topbar-right .pwa-update {
+      font-size: 10px;
+      padding: 7px;
+    }
+    .topbar-right:has(.pwa-install:not([hidden]), .pwa-update:not([hidden]))
+      #last-sync {
+      display: none;
+    }
+    .offline-layout {
+      padding: 36px 16px;
+    }
+    .offline-card {
+      padding: 24px;
+    }
+  }
+}
+
+@layer components {
+  .mobile-logout {
+    display: none;
+  }
+}
+@layer responsive {
+  @media (max-width: 720px) {
+    .mobile-logout {
+      display: inline-flex;
+    }
+    .topbar {
+      height: auto;
+      min-height: 49px;
+      padding: 10px 18px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .topbar-right {
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: 100%;
+      margin-left: auto;
+    }
+  }
+}

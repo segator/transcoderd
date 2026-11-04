@@ -35,11 +35,12 @@ func (s *Server) registerDashboard(r *mux.Router) {
 	d.HandleFunc("/api/logout", s.protectDashboard(s.dashboardLogout, false)).Methods(http.MethodPost)
 	d.HandleFunc("/api/stats", s.protectDashboard(s.dashboardStats, false)).Methods(http.MethodGet)
 	s.registerMedia(d)
+	s.registerDashboardPWA(d)
 	d.HandleFunc("/api/workers/{worker}/settings", s.protectDashboard(s.dashboardWorkerSettings, false)).Methods(http.MethodPut)
 	d.HandleFunc("/", s.protectDashboard(s.serveDashboard, true)).Methods(http.MethodGet)
 	assets, _ := fs.Sub(dashboardAssets, "dashboard")
-	for _, name := range []string{"app.js", "login.js", "media.js", "styles.css", "media.css", "icon.svg"} {
-		d.Handle("/"+name, http.StripPrefix("/dashboard/", http.FileServer(http.FS(assets)))).Methods(http.MethodGet)
+	for _, name := range dashboardPublicAssets {
+		d.Handle("/"+name, http.StripPrefix("/dashboard/", dashboardPublicFileServer(http.FS(assets), name))).Methods(http.MethodGet)
 	}
 }
 
@@ -49,7 +50,7 @@ func dashboardHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		next.ServeHTTP(w, r)
 	})
 }

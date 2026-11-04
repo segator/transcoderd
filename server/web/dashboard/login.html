@@ -4,6 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0e14" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="TranscoderD" />
+    <link rel="manifest" href="/dashboard/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/dashboard/apple-touch-icon.png" />
+    <script src="/dashboard/pwa.js" defer></script>
     <meta name="description" content="Centro de operaciones de TranscoderD" />
     <title>Acceder · TranscoderD</title>
     <link rel="icon" href="/dashboard/icon.svg" type="image/svg+xml" />
@@ -72,6 +83,21 @@
               Entrar al dashboard <span aria-hidden="true">↗</span>
             </button>
           </form>
+          <button
+            id="pwa-install"
+            class="button subtle pwa-install"
+            type="button"
+            hidden
+          >
+            Instalar app</button
+          ><button
+            id="pwa-update"
+            class="button subtle pwa-update"
+            type="button"
+            hidden
+          >
+            Actualización lista · Recargar
+          </button>
           <p class="session-note">
             Sesión privada de 12 horas. El token no se guarda en el navegador.
           </p>

@@ -4,6 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0e14" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="TranscoderD" />
+    <link rel="manifest" href="/dashboard/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/dashboard/apple-touch-icon.png" />
+    <script src="/dashboard/pwa.js" defer></script>
     <meta
       name="description"
       content="Progreso, compresión y control de workers de TranscoderD"
@@ -63,6 +74,7 @@
           <button
             class="icon-button"
             id="logout"
+            data-logout
             aria-label="Cerrar sesión"
             title="Cerrar sesión"
           >
@@ -77,6 +89,31 @@
           Workspace <span>/</span> <strong id="breadcrumb-view">Resumen</strong>
         </div>
         <div class="topbar-right">
+          <button
+            id="mobile-logout"
+            data-logout
+            class="icon-button mobile-logout"
+            type="button"
+            aria-label="Cerrar sesión"
+            title="Cerrar sesión"
+          >
+            ↪
+          </button>
+          <button
+            id="pwa-install"
+            class="button subtle pwa-install"
+            type="button"
+            hidden
+          >
+            Instalar app</button
+          ><button
+            id="pwa-update"
+            class="button subtle pwa-update"
+            type="button"
+            hidden
+          >
+            Actualización lista · Recargar
+          </button>
           <span class="live-status" id="connection"
             ><span class="status-dot"></span>En directo</span
           ><span class="topbar-divider"></span

@@ -680,14 +680,16 @@
     refresh();
   });
   $("refresh").addEventListener("click", refresh);
-  $("logout").addEventListener("click", async () => {
-    try {
-      await api("logout", { method: "POST" });
-      window.location.replace("/dashboard/login");
-    } catch (e) {
-      showToast(e.message, true);
-    }
-  });
+  document.querySelectorAll("[data-logout]").forEach((button) =>
+    button.addEventListener("click", async () => {
+      try {
+        await api("logout", { method: "POST" });
+        window.location.replace("/dashboard/login");
+      } catch (e) {
+        showToast(e.message, true);
+      }
+    }),
+  );
   $("job-search").addEventListener("input", renderJobs);
   document.querySelectorAll("[data-filter]").forEach((button) =>
     button.addEventListener("click", () => {

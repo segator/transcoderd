@@ -20,6 +20,20 @@ permissions:
   packages: write
 
 jobs:
+  pwa-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: PWA cache/privacy lifecycle and worker activity tests
+        run: node --test server/web/dashboardPWA_test.cjs worker/dashboard/activity_test.js
+
   windows-unit:
     runs-on: windows-2025
     timeout-minutes: 15

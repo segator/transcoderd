@@ -202,3 +202,10 @@ The server exposes dashboard JSON/media APIs under `/dashboard/api/` and no dash
 ## Worker hardware resources
 
 `Ping.runtime.resources` is optional. It carries `sampledAt`, `hostname`, `os`, `architecture`, optional `cpu` (`percent` nullable, `cores`, `scope` host or processor-group), optional `memory` (`usedBytes`, `totalBytes`), `gpuStatus`, `driverVersion` and `gpus`. Each GPU includes UUID/name/PCI bus identity and nullable `percent`, `encoderPercent`, `decoderPercent`, `memoryUsedBytes`, `memoryTotalBytes`, `temperatureC`, `powerWatts` and `powerLimitWatts`. Zero is a measured value; null denotes unavailable. GPU status is available, unavailable or no-devices. The existing runtime JSON persistence and dashboard stats response retain the snapshot unchanged, without a migration or a new endpoint. See [resource semantics](../docs/worker-resources.md).
+
+
+## OIDC frontend browser boundary
+
+Token mode remains the compatible default. OIDC mode adds frontend-owned `GET /dashboard/auth/login` and `GET /dashboard/auth/callback`. Login redirects to the discovered provider with authorization code, state, nonce and PKCE S256; callback verifies the signed identity and optional groups before server-side API login. The callback URI always uses the configured public origin, never forwarded headers. The API wire protocol stays unchanged.
+
+OIDC browsers receive only encrypted `transcoderd_frontend` and transient `transcoderd_oidc_login` cookies; the former carries an opaque API-owned session for at most twelve hours and the latter expires after ten minutes. Both are HttpOnly SameSite=Lax and Secure under HTTPS. The proxy sends the recovered API session only; it discards browser bearer/legacy credentials and strips upstream cookies. POST `/dashboard/api/login` returns 403 in OIDC mode. Authenticated logout still uses POST `/dashboard/api/logout`, revokes the API session and clears the frontend cookie; it does not terminate the provider session. OIDC auth routes bypass service-worker interception and responses use no-store. The frontend API session endpoint remains 204/401.

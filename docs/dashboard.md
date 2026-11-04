@@ -1,6 +1,6 @@
 # TranscoderD operations dashboard
 
-The fleet dashboard runs in the separate `transcoderd-frontend` process/container. Open `http://<frontend>:8081/dashboard/` and log in with the dashboard token. TranscoderD serves only the API; it no longer serves dashboard HTML, scripts, icons or PWA assets. The initial default is `encoding123`, as requested; configure it independently from the worker API token:
+The fleet dashboard runs in the separate `transcoderd-frontend` process/container. Open `http://<frontend>:8081/dashboard/` and sign in with a single-user token (default mode) or configured OIDC provider. TranscoderD serves only the API; it no longer serves dashboard HTML, scripts, icons or PWA assets. The initial default is `encoding123`, as requested; configure it independently from the worker API token:
 
 ```yaml
 web:
@@ -10,9 +10,9 @@ web:
   dashboardToken: your-dashboard-token
 ```
 
-Or pass `--web.dashboardToken encoding123` to the server. The server exposes no additional management port, requires no frontend build, and loads no remote scripts/fonts. The dashboard has a separate authentication boundary for a future OIDC implementation. Worker API authentication continues using `web.token`.
+Or pass `--web.dashboardToken encoding123` to the server. The server exposes no additional management port, requires no frontend build, and loads no remote scripts/fonts. The frontend can alternatively use OIDC with Authentik; see [authentication and k3s deployment](frontend-authentication.md). Worker API authentication continues using `web.token`.
 
-Sessions last 12 hours and use an opaque HttpOnly SameSite=Strict cookie. Logout revokes the session; server restart revokes all sessions. When publishing the frontend through an HTTPS proxy, set `frontend.publicURL` to the HTTPS browser origin so cookies have Secure set. Route `/dashboard/` to the frontend, not to the API server. Keep `web.domain` pointing to the API origin used by workers. The dashboard does not require an external Sites deployment. The static token stays out of URLs, page source, browser storage, and request logs. Dashboard mutations require `X-Dashboard-Request: 1` and reject another Origin.
+In token mode, sessions last 12 hours and use an opaque HttpOnly SameSite=Strict cookie. OIDC uses a separate encrypted frontend cookie and is described in the authentication guide. Logout revokes the session; server restart revokes all sessions. When publishing the frontend through an HTTPS proxy, set `frontend.publicURL` to the HTTPS browser origin so cookies have Secure set. Route `/dashboard/` to the frontend, not to the API server. Keep `web.domain` pointing to the API origin used by workers. The dashboard does not require an external Sites deployment. The static token stays out of URLs, page source, browser storage, and request logs. Dashboard mutations require `X-Dashboard-Request: 1` and reject another Origin.
 
 
 ## Deploy on a separate host
@@ -37,7 +37,7 @@ docker run -d --name transcoderd-frontend --read-only --cap-drop=ALL \
   ghcr.io/segator/transcoderd:frontend-<version>
 ```
 
-No media volumes, PostgreSQL access, FFmpeg, worker token or dashboard token are configured on the frontend host. Only network access to the API is required; API HTTPS uses normal certificate verification. Use a protected network or HTTPS between hosts. The browser sends login, metadata, operations and videos to its frontend origin; the frontend streams only allowlisted dashboard API routes to the configured backend. Worker `/api/v1` routes cannot be reached through it. The API validates the static token and owns expiring sessions; the frontend forwards only the dashboard session cookie and preserves HttpOnly/SameSite restrictions. Logout and API restart revoke access. API unavailability returns an explicit error and never substitutes cached operational data.
+No media volumes, PostgreSQL access, FFmpeg or worker token are configured on the frontend host. Token mode needs no frontend credential. OIDC mode additionally requires a private API dashboard credential and OIDC/session secrets as described in the [authentication guide](frontend-authentication.md). Network access to the API is required, plus the identity provider in OIDC mode; API HTTPS uses normal certificate verification. Use a protected network or HTTPS between hosts. The browser sends login, metadata, operations and videos to its frontend origin; the frontend streams only allowlisted dashboard API routes to the configured backend. Worker `/api/v1` routes cannot be reached through it. The API validates dashboard credentials and owns expiring sessions; the frontend forwards only the dashboard session cookie and preserves HttpOnly/SameSite restrictions. Logout and API restart revoke access. API unavailability returns an explicit error and never substitutes cached operational data.
 
 Media discovery, filters, probes, reviewed intake, original byte ranges and compatible H.264/AAC conversion all run on the API host. Video bytes flow through the frontend without complete-file buffering or local storage. Closing playback cancels the backend request and preview. The frontend image runs as a nonroot user and contains no media toolchain. Its `/healthz` endpoint reports frontend liveness, independently of backend availability.
 

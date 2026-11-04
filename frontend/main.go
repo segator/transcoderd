@@ -33,6 +33,14 @@ func readOptions(args []string) (options, error) {
 	flags.String("frontend.listen", ":8081", "Frontend HTTP listen address")
 	flags.String("frontend.apiURL", "http://localhost:8080", "TranscoderD API origin")
 	flags.String("frontend.publicURL", "", "External frontend origin when behind a TLS reverse proxy")
+	flags.String("frontend.apiToken", "", "Private dashboard API login credential for OIDC mode")
+	flags.String("frontend.auth.mode", "token", "Browser authentication mode: token or oidc")
+	flags.String("frontend.auth.sessionKey", "", "Base64-encoded 32-byte OIDC session encryption key")
+	flags.String("frontend.auth.oidc.issuerURL", "", "OIDC issuer URL, including application path")
+	flags.String("frontend.auth.oidc.clientID", "", "OIDC confidential client ID")
+	flags.String("frontend.auth.oidc.clientSecret", "", "OIDC confidential client secret")
+	flags.StringSlice("frontend.auth.oidc.scopes", []string{"openid", "profile", "email"}, "OIDC scopes")
+	flags.StringSlice("frontend.auth.oidc.allowedGroups", nil, "Optional allowed ID-token groups (any match)")
 	flags.String("config", "", "Frontend YAML configuration file")
 	flags.Bool("version", false, "Print version information and exit")
 	if err := flags.Parse(args); err != nil {
@@ -56,6 +64,10 @@ func readOptions(args []string) (options, error) {
 	}
 	for key, name := range map[string]string{
 		"frontend.listen": "TR_FRONTEND_LISTEN", "frontend.apiURL": "TR_FRONTEND_API_URL", "frontend.publicURL": "TR_FRONTEND_PUBLIC_URL",
+		"frontend.apiToken": "TR_FRONTEND_API_TOKEN", "frontend.auth.mode": "TR_FRONTEND_AUTH_MODE", "frontend.auth.sessionKey": "TR_FRONTEND_AUTH_SESSION_KEY",
+		"frontend.auth.oidc.issuerURL": "TR_FRONTEND_AUTH_OIDC_ISSUER_URL", "frontend.auth.oidc.clientID": "TR_FRONTEND_AUTH_OIDC_CLIENT_ID",
+		"frontend.auth.oidc.clientSecret": "TR_FRONTEND_AUTH_OIDC_CLIENT_SECRET", "frontend.auth.oidc.scopes": "TR_FRONTEND_AUTH_OIDC_SCOPES",
+		"frontend.auth.oidc.allowedGroups": "TR_FRONTEND_AUTH_OIDC_ALLOWED_GROUPS",
 	} {
 		if err := v.BindEnv(key, name); err != nil {
 			return opts, err

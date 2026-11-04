@@ -28,6 +28,7 @@ test('activation removes only older dashboard caches',async()=>{
 test('private APIs, credentials, mutations, videos and unrelated origins bypass interception',()=>{
  const w=worker();const tests=[
   event('/dashboard/api/stats'),event('/dashboard/api/media/file/video'),event('/api/v1/worker/settings'),
+  event('/dashboard/auth/login',{mode:'navigate'}),event('/dashboard/auth/callback?code=private&state=private',{mode:'navigate'}),
   event('/dashboard/api/login',{method:'POST'}),event('/dashboard/styles.css',{method:'HEAD'}),
   event('/dashboard/styles.css?token=private'),event('/dashboard/styles.css',{headers:new Headers({Authorization:'Bearer private'})}),
   event('/dashboard/styles.css',{url:'https://another.test/dashboard/styles.css'}),event('/private-file.mkv')];

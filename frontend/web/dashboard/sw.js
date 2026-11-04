@@ -45,6 +45,7 @@ self.addEventListener("fetch", (event) => {
     url.origin !== self.location.origin ||
     !url.pathname.startsWith("/dashboard/") ||
     url.pathname.startsWith("/dashboard/api/") ||
+    url.pathname.startsWith("/dashboard/auth/") ||
     request.headers.has("Authorization")
   )
     return;

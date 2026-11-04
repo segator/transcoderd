@@ -6,7 +6,7 @@ This reference records the configuration accepted by the current binaries. The O
 
 Both binaries register CLI flags, read YAML through Viper, and enable environment lookup with the `TR_` prefix. Configuration files are searched in `/etc/transcoderd/`, `$HOME/.transcoderd/`, and the current directory. CLI flags override values read from the file. The application does not install a Viper environment-key replacer; nested environment variable spellings such as `TR_WORKER_FFMPEGCONFIG_VIDEOCRF` have not been established as a supported interface. Use YAML or CLI flags for nested values unless the mapping is verified.
 
-The `envconfig` struct tags are not consumed by the Viper setup. They document field intent, but are not evidence that the corresponding environment variable works. The two dashboard settings are explicit exceptions and bind `TR_WORKER_DASHBOARD_LISTEN_ADDRESS` and `TR_WORKER_DASHBOARD_TOKEN`.
+The `envconfig` struct tags are not consumed by the Viper setup. They document field intent, but are not evidence that the corresponding environment variable works. Dashboard settings explicitly bind `TR_WORKER_DASHBOARD_LISTEN_ADDRESS`, `TR_WORKER_DASHBOARD_TOKEN` and the server login credential `TR_WEB_DASHBOARD_TOKEN`.
 
 Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDeltaTime` is a number of seconds, not a duration string. `server.database.scheme` is passed as the PostgreSQL database name (`dbname`).
 
@@ -16,7 +16,7 @@ Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDelta
 | --- | --- | --- |
 | `web.port` | `8080` | Server HTTP listen port. |
 | `web.token` | `admin` | Bearer token for job and event control routes. |
-| `web.dashboardToken` | `encoding123` | Server-only static token for dashboard login, statistics and worker capacity controls. Separate from worker API credentials. |
+| `web.dashboardToken` | `encoding123` | API-owned dashboard login credential; token-mode user token or private OIDC frontend login credential. Explicit env TR_WEB_DASHBOARD_TOKEN. Separate from worker API credentials. |
 | `web.domain` | `http://localhost:8080` | Base URL used by workers for requests and media transfer. |
 | `updateCheckInterval` | `15m` | Minimum interval between release queries. |
 | `noUpdates` | `false` | Disable executable replacement. |
@@ -283,7 +283,7 @@ Runtime heartbeat data adds `paused`, `ramPaused`, `pauseMode`, `suspendedEncode
 
 ## Independent fleet frontend
 
-`transcoderd-frontend` serves all fleet HTML/assets/PWA content and proxies only dashboard APIs. TranscoderD serves no UI assets. The frontend has no server/database/media/tool initialization and needs API network access only. It uses its own YAML/CLI configuration with the same config.yaml search paths or an explicit `--config` file. CLI overrides environment and YAML.
+`transcoderd-frontend` serves all fleet HTML/assets/PWA content and proxies only dashboard APIs. TranscoderD serves no UI assets. The frontend has no server/database/media/tool initialization and needs network access to the API and optionally the OIDC provider. It uses its own YAML/CLI configuration with the same config.yaml search paths or an explicit `--config` file. CLI overrides environment and YAML.
 
 | Key | Default | Explicit environment | Effect |
 | --- | --- | --- | --- |
@@ -291,4 +291,13 @@ Runtime heartbeat data adds `paused`, `ramPaused`, `pauseMode`, `suspendedEncode
 | `frontend.apiURL` | `http://localhost:8080` | `TR_FRONTEND_API_URL` | Fixed TranscoderD API origin. |
 | `frontend.publicURL` | empty | `TR_FRONTEND_PUBLIC_URL` | External browser origin for mutation checks and Secure cookies behind TLS termination; unset uses direct request HTTP/TLS and Host, ignoring forwarded headers. |
 
-Both URL settings accept HTTP(S) origins without credentials, non-root paths, query or fragment. Browser requests remain same-origin through the frontend API proxy, including cookies, media ranges and streaming. Authentication/sessions, library state, FFmpeg and job operations remain on the API server. Worker local UI settings are unaffected. See [dashboard deployment](../docs/dashboard.md#deploy-on-a-separate-host).
+Both URL settings accept HTTP(S) origins without credentials, non-root paths, query or fragment. Browser requests remain same-origin through the frontend API proxy, including cookies, media ranges and streaming. API authentication/sessions, library state, FFmpeg and job operations remain on the API server. Optional OIDC browser login runs on the frontend. Worker local UI settings are unaffected. See [dashboard deployment](../docs/dashboard.md#deploy-on-a-separate-host).
+
+
+### Frontend authentication modes
+
+`frontend.auth.mode` defaults to `token`, preserving the API-owned single-user token login and twelve-hour session. In `oidc` mode, configure `frontend.apiToken` (matching API `web.dashboardToken`, at least 32 characters), `frontend.auth.sessionKey` (standard base64 of 32 random bytes), and `frontend.auth.oidc.issuerURL`, `clientID`, `clientSecret`. `scopes` defaults to `[openid, profile, email]`; openid is always requested. `allowedGroups` defaults to empty (provider application policy); a configured list requires any matching signed `groups` value. OIDC requires publicURL, secure provider/public endpoints (HTTP permitted only for loopback development), successful discovery and complete secrets; invalid settings fail startup without downgrade.
+
+Explicit frontend environment names are `TR_FRONTEND_AUTH_MODE`, `TR_FRONTEND_API_TOKEN`, `TR_FRONTEND_AUTH_SESSION_KEY`, `TR_FRONTEND_AUTH_OIDC_ISSUER_URL`, `TR_FRONTEND_AUTH_OIDC_CLIENT_ID`, `TR_FRONTEND_AUTH_OIDC_CLIENT_SECRET`, `TR_FRONTEND_AUTH_OIDC_SCOPES` and `TR_FRONTEND_AUTH_OIDC_ALLOWED_GROUPS`. Array environment/CLI values are comma-separated. Equivalent `--frontend.*` flags override environment and YAML. The server additionally binds `TR_WEB_DASHBOARD_TOKEN` with normal CLI precedence.
+
+The OIDC callback is `<frontend.publicURL>/dashboard/auth/callback`. Frontend replicas share the session key and API instance. API-owned sessions remain revocable; the browser's frontend cookie encrypts the opaque API session and never stores provider tokens or the API login credential. OIDC cookies are HttpOnly SameSite=Lax, with Secure for HTTPS; token-mode API cookies remain HttpOnly SameSite=Strict. Token fallback is disabled in OIDC mode. See [authentication, Authentik/Google and k3s examples](../docs/frontend-authentication.md).

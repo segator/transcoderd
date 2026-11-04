@@ -78,3 +78,8 @@ Local image verification also found the previous Docker loader assumed OCI archi
 ### Worker hardware monitoring (2026-11-04)
 
 `worker/resources/` samples OS-visible CPU/RAM and read-only NVIDIA metrics in the worker lifecycle. Optional model resources flow through existing heartbeat/runtime JSON into the independent frontend. Overview navigation selects worker details with bounded in-memory resource plots. Slot counts remain capacity, not utilization; unsupported sensors, CPU warm-up and stale samples stay explicit. No monitoring schema migration or frontend access to host counters is introduced.
+
+
+### Frontend OIDC and Kubernetes (2026-11-04)
+
+The frontend now owns optional OIDC browser login while API session validation/revocation remains server-owned. Token mode stays the compatibility default. `frontend/web/oidc.go` validates discovery, code/PKCE, state/nonce and signed identity/group claims, then encrypts the API session for interchangeable frontend replicas. OIDC mode refuses token/legacy-cookie fallback. The historical API-only frontend constraint now also permits identity-provider access and runtime auth secrets; media/database access remains unnecessary. Session/key/provider/logout limitations and k3s/Traefik examples are documented in `docs/frontend-authentication.md` and `deploy/kubernetes/frontend/`.

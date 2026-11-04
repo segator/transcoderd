@@ -6,6 +6,38 @@ import (
 	"testing"
 )
 
+func TestFrontendAuthEnvironmentAndCLI(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "frontend.yaml")
+	if err := os.WriteFile(file, []byte("frontend:\n  auth:\n    mode: token\n    oidc:\n      clientID: file-client\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{
+		"TR_FRONTEND_AUTH_MODE": "oidc", "TR_FRONTEND_API_TOKEN": "private-api-credential",
+		"TR_FRONTEND_AUTH_SESSION_KEY": "session-key", "TR_FRONTEND_AUTH_OIDC_ISSUER_URL": "https://auth.example/application/o/transcoderd/",
+		"TR_FRONTEND_AUTH_OIDC_CLIENT_ID": "env-client", "TR_FRONTEND_AUTH_OIDC_CLIENT_SECRET": "private-client-credential",
+		"TR_FRONTEND_AUTH_OIDC_SCOPES": "openid,profile,groups", "TR_FRONTEND_AUTH_OIDC_ALLOWED_GROUPS": "operators,admins",
+	} {
+		t.Setenv(key, value)
+	}
+	for _, mode := range []string{"oidc", "token"} {
+		args := []string{"--config", file}
+		if mode == "token" {
+			args = append(args, "--frontend.auth.mode=token", "--frontend.auth.oidc.clientID=cli-client")
+		}
+		opts, err := readOptions(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantClient := "env-client"
+		if mode == "token" {
+			wantClient = "cli-client"
+		}
+		if opts.Frontend.Auth.Mode != mode || opts.Frontend.Auth.OIDC.ClientID != wantClient || opts.Frontend.APIToken != "private-api-credential" || opts.Frontend.Auth.SessionKey != "session-key" || opts.Frontend.Auth.OIDC.ClientSecret != "private-client-credential" || opts.Frontend.Auth.OIDC.IssuerURL != "https://auth.example/application/o/transcoderd/" || len(opts.Frontend.Auth.OIDC.Scopes) != 3 || len(opts.Frontend.Auth.OIDC.AllowedGroups) != 2 {
+			t.Error("readOptions() did not apply auth environment bindings and CLI precedence")
+		}
+	}
+}
+
 func TestFrontendConfigurationPrecedence(t *testing.T) {
 	config := filepath.Join(t.TempDir(), "frontend.yaml")
 	if err := os.WriteFile(config, []byte("frontend:\n  listen: 127.0.0.1:8181\n  apiURL: https://api.file.test\n  publicURL: https://ui.file.test\n"), 0600); err != nil {

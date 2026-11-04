@@ -17,8 +17,7 @@ import (
 const dashboardCookie = "transcoderd_dashboard"
 const dashboardSessionLifetime = 12 * time.Hour
 
-// This boundary owns browser identity independently of dashboard data handlers,
-// so a future OIDC provider can replace login/session handling here.
+// This boundary owns API sessions independently of token or OIDC browser login.
 type dashboardAuth struct {
 	mu       sync.Mutex
 	sessions map[[32]byte]time.Time

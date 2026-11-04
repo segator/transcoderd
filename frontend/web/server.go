@@ -27,12 +27,14 @@ const sessionCookie = "transcoderd_dashboard"
 var ErrInvalidOrigin = errors.New("expected an HTTP(S) origin without credentials, path, query or fragment")
 
 type Config struct {
-	Listen    string `mapstructure:"listen"`
-	APIURL    string `mapstructure:"apiURL"`
-	PublicURL string `mapstructure:"publicURL"`
+	Listen    string     `mapstructure:"listen"`
+	APIURL    string     `mapstructure:"apiURL"`
+	PublicURL string     `mapstructure:"publicURL"`
+	APIToken  string     `mapstructure:"apiToken"`
+	Auth      AuthConfig `mapstructure:"auth"`
 }
 
-// Server depends exclusively on the remote HTTP API and its own embedded assets.
+// Server uses remote HTTP APIs and embedded assets without backend storage dependencies.
 type Server struct {
 	handler   http.Handler
 	api       *url.URL
@@ -40,6 +42,7 @@ type Server struct {
 	transport *http.Transport
 	client    *http.Client
 	proxy     *httputil.ReverseProxy
+	oidc      *oidcAuth
 }
 
 func parseOrigin(raw string) (*url.URL, error) {
@@ -71,6 +74,10 @@ func NewServer(config Config) (*Server, error) {
 	}
 	s.client = &http.Client{Transport: s.transport, Timeout: 5 * time.Second,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	if err := s.configureAuth(config); err != nil {
+		s.Close()
+		return nil, err
+	}
 	s.proxy = &httputil.ReverseProxy{
 		Transport: s.transport, FlushInterval: -1,
 		Rewrite: func(p *httputil.ProxyRequest) {
@@ -81,7 +88,7 @@ func NewServer(config Config) (*Server, error) {
 					p.Out.Header.Add(name, value)
 				}
 			}
-			copySession(p.Out, p.In)
+			s.copyCredentials(p.Out, p.In)
 		},
 		ModifyResponse: func(response *http.Response) error {
 			if response.StatusCode >= 300 && response.StatusCode < 400 && response.StatusCode != http.StatusNotModified {
@@ -89,6 +96,13 @@ func NewServer(config Config) (*Server, error) {
 			}
 			cookies := response.Cookies()
 			response.Header.Del("Set-Cookie")
+			if s.oidc != nil {
+				if response.Request.URL.Path == "/dashboard/api/logout" && response.StatusCode == http.StatusNoContent {
+					response.Header.Add("Set-Cookie", s.authCookie(response.Request, frontendSessionCookie, "", time.Unix(1, 0), -1, http.SameSiteLaxMode).String())
+				}
+				response.Header.Set("Cache-Control", "no-store")
+				return nil
+			}
 			for _, cookie := range cookies {
 				if cookie.Name != sessionCookie {
 					continue
@@ -115,6 +129,10 @@ func NewServer(config Config) (*Server, error) {
 	r.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodGet)
 	r.HandleFunc("/dashboard/", s.serveDashboard).Methods(http.MethodGet)
 	r.HandleFunc("/dashboard/login", s.serveLogin).Methods(http.MethodGet)
+	if s.oidc != nil {
+		r.HandleFunc("/dashboard/auth/login", s.oidcLogin).Methods(http.MethodGet)
+		r.HandleFunc("/dashboard/auth/callback", s.oidcCallback).Methods(http.MethodGet)
+	}
 	r.PathPrefix("/dashboard/api/").HandlerFunc(s.serveAPI)
 	d := r.PathPrefix("/dashboard/").Subrouter()
 	s.registerDashboardPWA(d)
@@ -213,6 +231,16 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Same-origin request required", http.StatusForbidden)
 		return
 	}
+	if s.oidc != nil {
+		if r.URL.Path == "/dashboard/api/login" {
+			http.Error(w, "Use single sign-on to sign in", http.StatusForbidden)
+			return
+		}
+		if _, err := s.oidcSession(r); err != nil {
+			http.Error(w, "Authentication required", http.StatusUnauthorized)
+			return
+		}
+	}
 	// Carry frontend TLS state across the private API hop without trusting headers.
 	if s.secure(r) {
 		r = r.WithContext(context.WithValue(r.Context(), secureContextKey{}, true))
@@ -229,8 +257,12 @@ func (s *Server) sessionStatus(r *http.Request) int {
 	if err != nil {
 		return http.StatusServiceUnavailable
 	}
-	copySession(req, r)
-	req.Header.Set("Authorization", r.Header.Get("Authorization"))
+	if s.oidc != nil {
+		if _, err := s.oidcSession(r); err != nil {
+			return http.StatusUnauthorized
+		}
+	}
+	s.copyCredentials(req, r)
 	response, err := s.client.Do(req)
 	if err != nil {
 		return http.StatusServiceUnavailable
@@ -257,6 +289,10 @@ func (s *Server) serveDashboard(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveLogin(w http.ResponseWriter, r *http.Request) {
 	if s.sessionStatus(r) == http.StatusNoContent {
 		http.Redirect(w, r, "/dashboard/", http.StatusSeeOther)
+		return
+	}
+	if s.oidc != nil {
+		serveDashboardHTML(w, "login-oidc.html")
 		return
 	}
 	serveDashboardHTML(w, "login.html")

@@ -34,7 +34,7 @@ func TestParseImageVersionAliases(t *testing.T) {
 }
 
 func TestImageTagsFor(t *testing.T) {
-	for _, component := range []string{"server", "worker"} {
+	for _, component := range []string{"server", "worker", "frontend"} {
 		t.Run(component, func(t *testing.T) {
 			got := imageTagsFor(
 				"ghcr.io/segator/transcoderd",

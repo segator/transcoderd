@@ -1,6 +1,8 @@
 # Media library and visual job loading
 
-Open **Biblioteca** in `/dashboard/` after logging in with the dashboard token (initial default `encoding123`). The server embeds the page and player; no frontend service, extension or Plex connection is needed. The same session protects directory listings, metadata and every video request.
+The fleet frontend runs separately and reaches the server through its API only. Mount source/output folders and install media tools on the API host; no media or database mounts belong on the frontend host. See [frontend deployment](dashboard.md#deploy-on-a-separate-host).
+
+Open **Library** in `/dashboard/` after logging in with the dashboard token (initial default `encoding123`). The independent frontend serves the page and player; all browsing, media delivery and intake run through the remote server API, without a Plex connection or frontend media mounts. The same session protects directory listings, metadata and every video request.
 
 ## Source and encoded libraries
 
@@ -24,9 +26,9 @@ The browser displays paths relative to the selected library. Traversal, hidden p
 
 1. Browse a source folder or enter its relative path. Choose whether to include subfolders.
 2. Apply an editable preset, or set path/name contains/excludes, size bounds in GiB, strict minimum width, strict total bitrate and comma-separated codec include/exclude lists. `0` disables a numeric threshold. Codec aliases `h265`/`x265` match `hevc`, and `x264` matches `h264`.
-3. Choose **Preparar vista previa**. The server scans asynchronously without creating jobs; progress, errors and truncation are visible. Cancel stops further analysis.
-4. Review the largest matching files first, play them if useful, and select individual eligible rows or **Seleccionar aptos**. Changing filters invalidates the selection and requires a fresh preview.
-5. Choose the maximum number of successfully created jobs and **Cargar selección**. Skipped/failed candidates do not consume that target. The server continues through the explicitly selected list until it reaches the target or exhausts that list. It reports each outcome.
+3. Choose **Prepare preview**. The server scans asynchronously without creating jobs; progress, errors and truncation are visible. Cancel stops further analysis.
+4. Review the largest matching files first, play them if useful, and select individual eligible rows or **Select eligible files**. Changing filters invalidates the selection and requires a fresh preview.
+5. Choose the maximum number of successfully created jobs and **Queue selection**. Skipped/failed candidates do not consume that target. The server continues through the explicitly selected list until it reaches the target or exhausts that list. It reports each outcome.
 
 By default existing queued/active/completed jobs, known completed outputs and files below the server minimum are ineligible. Advanced options permit explicit retries of failed/canceled source jobs; they reuse the job identity/history and current source metadata. Completed jobs cannot be force-requeued through the library. Before each submission the server rechecks path containment, size/mtime and current job state. Changed/missing files and newly existing jobs are skipped; other failures are reported without preventing the remaining selection from loading. Canceling a batch stops further submission; jobs already submitted remain queued.
 
@@ -48,7 +50,7 @@ Total bitrate means `file_size_bytes × 8 / duration_seconds / 1e6`, including a
 
 ## Embedded player
 
-Use **Ver** from the library, preview results or job tables. Job playback offers the existing source and completed output; when the source was removed, the output remains playable and the UI identifies the missing source. Unavailable files show a clear error. Separate legacy outputs are browsable even when no job record exists.
+Use **View** from the library, preview results or job tables. Job playback offers the existing source and completed output; when the source was removed, the output remains playable and the UI identifies the missing source. Unavailable files show a clear error. Separate legacy outputs are browsable even when no job record exists.
 
 **Compatible** is the default: the server streams temporary H.264/AAC fragmented MP4 at up to 1280×720/24 fps, with stereo audio, realtime input pacing and two video codec threads. The full-duration slider restarts the stream at the chosen second. Closing the dialog, disconnecting or server shutdown terminates FFmpeg; pausing for two seconds releases a compatible stream, and **Reanudar** restarts at the saved position. There are two simultaneous compatible streams by default, configurable through `web.previewMaxStreams`; an extra stream gets HTTP 429 after a short (up to 500 ms) slot-release grace period. Quick seek updates are coalesced before replacing the stream. FFmpeg with libx264/AAC and ffprobe must be present (included in the existing server image). A slow machine may still need fewer concurrent previews.
 

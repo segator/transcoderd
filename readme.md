@@ -6,11 +6,11 @@ TranscoderD reduces video-library storage with distributed video encoding.
 The worker defaults to AV1 on NVIDIA NVENC and also supports CPU SVT-AV1 and
 the legacy software HEVC profile.
 
-TranscoderD have a server and a worker application. The server will manage and schedule the jobs, the worker will do the actual encoding.
+TranscoderD has an API server that manages and schedules jobs, workers that perform encoding, and an independently deployed fleet frontend. The frontend needs only API network access; it does not mount media or connect to PostgreSQL.
 You can have as many workers you want, locally or remote in multiple machines.
 
 ## Features
-- Built-in authenticated dashboard with live progress, compression/storage charts, worker health, and independent CPU/GPU limits inside every worker
+- Independent authenticated fleet frontend (API-only access, no media mounts) with live progress, compression/storage charts, worker health, and independent CPU/GPU limits inside every worker
 - Encode AV1 with NVIDIA NVENC or CPU SVT-AV1; retain x265 HEVC as an explicit alternative
 - Convert audio to AAC for better compatibility.
 - Remove unwanted/duplicated audio tracks
@@ -57,8 +57,8 @@ docker run -d \
 
 ### Operations dashboard
 
-Open `http://<server>:8080/dashboard/` and enter the configured dashboard token
-(initial default: `encoding123`). The embedded dashboard shows live jobs,
+Run `transcoderd-frontend --frontend.apiURL=http://<server>:8080` on the UI host, then open `http://<frontend>:8081/dashboard/` and enter the configured dashboard token
+(initial default: `encoding123`). The separate frontend shows live jobs,
 verified space savings, throughput, failures, and CPU/GPU worker status. Its
 **Workers** view saves separate CPU and GPU limits for every worker without
 restart, allowing both encoders concurrently in one process. Zero disables that
@@ -166,8 +166,8 @@ Mage is the local command interface; it delegates builds, tests, image publicati
 ### Build
 
 ```bash
-mage build:all          # Build server and worker binaries
-mage docker:all         # Build server and worker Docker images
+mage build:all          # Build server, worker and frontend binaries
+mage docker:all         # Build server, worker and frontend Docker images
 mage docker:server      # Build only the server image
 mage docker:worker      # Build only the worker image
 ```

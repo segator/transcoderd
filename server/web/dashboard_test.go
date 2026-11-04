@@ -39,7 +39,7 @@ func TestDashboardAuthenticationAndCredentialSeparation(t *testing.T) {
 		name, method, path, token, body string
 		want                            int
 	}{
-		{name: "anonymous page", method: "GET", path: "/dashboard/", want: 303},
+		{name: "anonymous page", method: "GET", path: "/dashboard/", want: 404},
 		{name: "anonymous stats", method: "GET", path: "/dashboard/api/stats", want: 401},
 		{name: "anonymous write", method: "PUT", path: "/dashboard/api/workers/cpu/settings", body: `{"maxActiveJobs":0}`, want: 401},
 		{name: "worker token rejected", method: "GET", path: "/dashboard/api/stats", token: "test-token", want: 401},
@@ -63,7 +63,7 @@ func TestDashboardAuthenticationAndCredentialSeparation(t *testing.T) {
 	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/dashboard/" || cookie.MaxAge != 43200 {
 		t.Errorf("session cookie = %#v, want HttpOnly SameSiteStrict 12-hour dashboard cookie", cookie)
 	}
-	for _, path := range []string{"/dashboard/", "/dashboard/api/stats"} {
+	for _, path := range []string{"/dashboard/api/stats"} {
 		w := dashboardRequest(s, "GET", path, "", "", cookie)
 		if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("authenticated %s = %d, want 200 without caching", path, w.Code)
@@ -161,8 +161,8 @@ func TestDashboardWorkerLimitsAndValidation(t *testing.T) {
 	}
 	for _, asset := range []string{"app.js", "login.js", "styles.css"} {
 		w := dashboardRequest(s, "GET", "/dashboard/"+asset, "", "", nil)
-		if w.Code != 200 || w.Header().Get("Content-Security-Policy") == "" {
-			t.Errorf("embedded asset %s = %d, want 200 with security headers", asset, w.Code)
+		if w.Code != 404 {
+			t.Errorf("embedded asset %s = %d, want 404 on API-only backend", asset, w.Code)
 		}
 	}
 	if w := dashboardRequest(s, "GET", "/dashboard/index.html", "", "", nil); w.Code != 404 {

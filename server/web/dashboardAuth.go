@@ -55,14 +55,10 @@ func (s *Server) dashboardAuthenticated(r *http.Request) bool {
 	return false
 }
 
-func (s *Server) protectDashboard(handler http.HandlerFunc, page bool) http.HandlerFunc {
+func (s *Server) protectDashboard(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.dashboardAuthenticated(r) {
-			if page {
-				http.Redirect(w, r, "/dashboard/login", http.StatusSeeOther)
-			} else {
-				http.Error(w, "Authentication required", http.StatusUnauthorized)
-			}
+			http.Error(w, "Authentication required", http.StatusUnauthorized)
 			return
 		}
 		handler(w, r)

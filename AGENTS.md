@@ -16,10 +16,10 @@ Module name: `transcoder`. License: GPLv3.
 ## Build & Run Commands
 
 ```bash
-mage build:all          # Build server and worker binaries via Dagger
+mage build:all          # Build server, worker and frontend binaries via Dagger
 mage build:server       # Build only the server binary
 mage build:worker       # Build only the worker binary
-mage docker:all         # Build server and worker images via Dagger
+mage docker:all         # Build server, worker and frontend images via Dagger
 mage docker:server      # Build only the server image
 mage docker:worker      # Build only the worker image
 mage lint:fmt           # Format Go source
@@ -154,7 +154,8 @@ go test -tags=integration -v -timeout 5m ./integration/...
 cmd/            # Shared CLI config (pflag, viper, mapstructure)
 model/          # Domain types (Job, Event, Worker)
 helper/         # Utilities (command exec, concurrent collections, progress)
-server/         # Server binary
+frontend/       # Independent fleet frontend and dashboard API proxy
+server/         # API server binary
   config/       # Server config structs
   repository/   # PostgreSQL repository (interface + SQL impl + mock)
   scheduler/    # Job scheduling engine
@@ -186,6 +187,6 @@ Binaries are built with ldflags injecting version info:
 
 Mage targets use Dagger to build the `server` and `worker` images from a Debian runtime, a versioned FFmpeg builder (`builder-ffmpeg-9.0.2-av1`), and a versioned PGS/OCR builder. `mage docker:all` reuses published builders; `mage docker:ffmpeg` and `mage docker:pgs` build local builder tarballs, while `mage publish:ffmpeg` and `mage publish:pgs` publish them after verification. The default FFmpeg builder compiles FFmpeg 9.0.2 with software AV1, libaom, NVENC AV1, x265, and FDK AAC. When changing FFmpeg dependencies, update the builder tag/configuration in `magefiles/magefile.go`, validate and publish the new builder, and keep `openspec/specs/distribution/` and the FFmpeg configuration reference in sync. The approved AV1 NVENC profile is the worker default; SVT-AV1 and x265 are explicit choices. Read `openspec/CONFIGURATION.md` and the relevant active delta specs before changing these settings. RTX 5080 validation, benchmark boundaries, and the full-film command are recorded in `docs/av1-nvenc-validation.md`, `docs/av1-worker-profile-validation.md`, and `docs/av1-gpu-full-film-command.md`.
 Host driver/runtime requirements and CLI-only CPU/GPU worker examples are in `docs/worker-deployment.md`. Ordinary nodes select name, active-job count, and codec; encode concurrency inherits the active-job count unless explicitly overridden. The daily admission-window CLI is documented in `docs/worker-scheduling.md`. `docs/encoding-profiles.md` explains the production parameters, `docs/av1-worker-profile-validation.md` records the full server/worker movie test, and `docs/legacy-hevc-encoding.md` retains the historical benchmark command. Keep these operational references consistent with encoder defaults and image build gates.
-Images published to `ghcr.io/segator/transcoderd:{server,worker}-{version}`.
+Images published to `ghcr.io/segator/transcoderd:{server,worker,frontend}-{version}`. The frontend has no media mounts, database or media tools; it connects only to the API.
 
 Complete-film CPU/GPU benchmark methodology and metric boundaries are in `docs/av1-full-film-method.md`. Keep completed-film evidence distinct from short-scene projections, and compare compression at measured quality before selecting encoder defaults.

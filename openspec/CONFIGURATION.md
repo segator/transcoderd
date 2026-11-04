@@ -33,7 +33,7 @@ Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDelta
 | `server.database.password` | `postgres` | PostgreSQL password. |
 | `server.database.scheme` | `server` | PostgreSQL database name. |
 
-Job, event, and worker-settings control routes check `Authorization: Bearer <web.token>`. The media routes do not use that middleware; see `BASELINE.md`. The embedded dashboard lives at `/dashboard/` and uses `web.dashboardToken`, not `web.token`. Its browser session lasts 12 hours; logout or a server restart revokes it. See [dashboard operations](../docs/dashboard.md) for configuration, metric definitions, and worker rollout.
+Job, event, and worker-settings control routes check `Authorization: Bearer <web.token>`. The media routes do not use that middleware; see `BASELINE.md`. The independent frontend serves `/dashboard/` and forwards dashboard API calls to the server. The API uses `web.dashboardToken`, not `web.token`. Its browser session lasts 12 hours; logout or a server restart revokes it. See [dashboard operations](../docs/dashboard.md) for configuration, metric definitions, and worker rollout.
 
 ### Example server YAML
 
@@ -280,3 +280,15 @@ RAM pause retains memory, GPU allocations, occupied encode slots and open output
 Local HTTP `POST /api/worker/max-jobs` accepts either legacy `maxJobs` or the atomic `cpuJobs`/`gpuJobs` pair (total at most 1024); missing, mixed or incomplete settings are rejected. Local CLI `control set-encoder-jobs CPU GPU` shares the same server persistence. Settings writes complete before local runtime changes. Managed startup restores server overrides and keeps local service defaults when absent. Last committed writes win; worker polls and heartbeats run approximately every five seconds, fleet refresh every five seconds, local browser refresh every two seconds.
 
 Runtime heartbeat data adds `paused`, `ramPaused`, `pauseMode`, `suspendedEncodes`, `finishing`, `draining`, `managedProfile` and bounded `jobs` entries (`id`, `phase`, `state`, `individuallyPaused`, `pausedByWorker`). These observations do not overwrite desired limits. RAM and individual holds survive capacity changes. Queue stop holds pending encodes; maintenance/finish allows accepted work to drain without reopening admission. Windows supervised profiles retain their encoder class and support up to 64 slots each; incompatible fleet pair writes return 400. See `docs/dashboard.md`.
+
+## Independent fleet frontend
+
+`transcoderd-frontend` serves all fleet HTML/assets/PWA content and proxies only dashboard APIs. TranscoderD serves no UI assets. The frontend has no server/database/media/tool initialization and needs API network access only. It uses its own YAML/CLI configuration with the same config.yaml search paths or an explicit `--config` file. CLI overrides environment and YAML.
+
+| Key | Default | Explicit environment | Effect |
+| --- | --- | --- | --- |
+| `frontend.listen` | `:8081` | `TR_FRONTEND_LISTEN` | Independent HTTP listener. |
+| `frontend.apiURL` | `http://localhost:8080` | `TR_FRONTEND_API_URL` | Fixed TranscoderD API origin. |
+| `frontend.publicURL` | empty | `TR_FRONTEND_PUBLIC_URL` | External browser origin for mutation checks and Secure cookies behind TLS termination; unset uses direct request HTTP/TLS and Host, ignoring forwarded headers. |
+
+Both URL settings accept HTTP(S) origins without credentials, non-root paths, query or fragment. Browser requests remain same-origin through the frontend API proxy, including cookies, media ranges and streaming. Authentication/sessions, library state, FFmpeg and job operations remain on the API server. Worker local UI settings are unaffected. See [dashboard deployment](../docs/dashboard.md#deploy-on-a-separate-host).

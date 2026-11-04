@@ -17,7 +17,7 @@ The specs state observable behavior and the configuration values that affect it.
 | `persistence` | `server/repository/repository.go`, `server/repository/resources/database/` |
 | `maintenance-and-recovery` | `server/scheduler/scheduler.go`, `worker/job/job.go`, `worker/worker/executor.go` |
 | `self-update` | `update/update.go`, `update/managed/`, `cmd/windows-service/updates_windows.go`, `server/web/web.go`, `worker/worker/coordinator.go` |
-| `operations-dashboard` | `server/web/dashboard*`, `server/repository/dashboard.go`, `model/dashboard.go`, `worker/worker/coordinator.go` |
+| `operations-dashboard` | `frontend/`, `server/web/dashboard*`, `server/repository/dashboard.go`, `model/dashboard.go`, `worker/worker/coordinator.go` |
 
 ## Known implementation gaps
 
@@ -68,3 +68,9 @@ The dashboard branch was integrated with main through 884c371, including the sha
 ### Installable dashboard PWA (2026-11-04)
 
 `server/web/dashboardPWA.go` versions the scoped worker and allowlisted embedded public assets by content; the dashboard/login metadata and branded icons support installation. Offline navigation receives only the generic reconnect page. Neither authenticated HTML nor APIs/media/credentials enter CacheStorage, and background mutations are never replayed. `dashboardPWA_test.go` and Node lifecycle tests cover HTTP/auth and cache boundaries; real Chromium verifies installability, offline/reconnect/logout and update behavior. Investigation also found that the mobile sidebar hid the only logout button; the PWA change adds a mobile topbar logout action. Runtime fallbacks use non-creating cache lookups so an old in-flight worker cannot resurrect its deleted cache after activation.
+
+### Independent fleet frontend (2026-11-04)
+
+The operator changed the deployment requirement after the embedded UI implementation: the frontend host has API network access only. This is an intentional superseding architecture change, not an undocumented regression. `frontend/` now owns fleet assets, PWA and a restricted streaming proxy; `server/web/` owns dashboard/session/media APIs without frontend assets. Earlier embedded-server verification remains historical. The worker-local UI stays separate from fleet hosting. Frontend configuration and build/image targets are documented in the configuration and dashboard references.
+
+Local image verification also found the previous Docker loader assumed OCI archives create a role:latest tag, although docker load returned an untagged image ID. Application image exports now use the pinned Dagger SDK host-image export with each requested tag, retaining the OCI archive fallback. This restores the documented usable local image tags for the new frontend and existing roles.

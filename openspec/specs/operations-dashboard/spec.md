@@ -7,11 +7,11 @@ Provide authenticated fleet monitoring and individual worker capacity controls u
 ## Requirements
 
 ### Requirement: Dashboard authentication
-The server SHALL serve a login page at `/dashboard/login` and protect the dashboard and its data and controls with a separate static `web.dashboardToken`, default `encoding123`. Login SHALL create an expiring HttpOnly SameSite browser session. The dashboard token SHALL NOT authorize worker API routes.
+The independent frontend SHALL serve `/dashboard/login` and private dashboard pages. The server SHALL authenticate dashboard API requests using separate static `web.dashboardToken`, default `encoding123`, and expose authenticated `GET /dashboard/api/session` returning 204 or 401. Login SHALL create an expiring HttpOnly SameSite browser session. The dashboard token SHALL NOT authorize worker API routes.
 
 #### Scenario: Anonymous access
 - **WHEN** an unauthenticated visitor opens the dashboard or requests its data
-- **THEN** the page redirects to login and data requests return HTTP 401 without operational data
+- **THEN** the frontend page redirects to login and server data/session requests return HTTP 401 without operational data
 
 #### Scenario: Valid login and logout
 - **WHEN** a visitor supplies the configured dashboard token
@@ -77,7 +77,7 @@ Worker heartbeats SHALL include observed queue/RAM holds, suspended encode count
 - **THEN** local worker controls and Windows profile status show the observed limits without restarting
 
 ### Requirement: Installable operations dashboard
-The server SHALL expose an embedded application manifest with stable dashboard identity, dashboard-scoped standalone launch, branded 192px/512px and maskable icons, theme metadata and Apple touch icon. Login and dashboard pages SHALL link installation metadata. Where supported, installation controls SHALL follow browser availability and disappear after installation. Installation SHALL retain normal server authentication.
+The independent frontend SHALL expose an embedded application manifest with stable dashboard identity, dashboard-scoped standalone launch, branded 192px/512px and maskable icons, theme metadata and Apple touch icon. Login and dashboard pages SHALL link installation metadata. Where supported, installation controls SHALL follow browser availability and disappear after installation. Installation SHALL retain normal server authentication.
 
 #### Scenario: Launch installed application
 - **WHEN** an installed dashboard opens without a valid session
@@ -96,7 +96,7 @@ A service worker scoped to /dashboard/ SHALL persist only an explicit allowlist 
 
 #### Scenario: Logout while service worker controls the page
 - **WHEN** an operator logs out and reopens the dashboard online
-- **THEN** server authentication still redirects to login and API requests return unauthorized
+- **THEN** the frontend still redirects to login using server session validation and API requests return unauthorized
 
 ### Requirement: Content-versioned PWA updates
 The service worker and its public cache SHALL update with embedded content changes, remove only obsolete dashboard caches and preserve other applications' caches. An updated worker SHALL not force navigation or interrupt editing, intake or playback. The UI SHALL offer an explicit reload when an update is ready.
@@ -119,3 +119,22 @@ The operations dashboard SHALL use English for application-provided navigation, 
 #### Scenario: User media names
 - **WHEN** a filename or worker name contains another language
 - **THEN** the UI preserves that value while presenting surrounding application text in English
+
+### Requirement: Independent frontend runtime
+The frontend SHALL run separately with API network access only, serve all fleet HTML/assets/PWA content and proxy only dashboard API routes. The server SHALL serve no frontend pages/assets. Authentication, media filesystem access, probing, preview conversion, queue operations and telemetry SHALL stay on the server. The frontend SHALL require no media mounts, database or encoding tools.
+
+#### Scenario: Frontend on another host
+- **WHEN** the frontend has only network access to the configured TranscoderD API
+- **THEN** login, statistics, worker controls, library exploration, reviewed intake and playback work without filesystem access on the frontend
+
+#### Scenario: Seek and close playback
+- **WHEN** an authenticated operator seeks original media or disconnects compatible playback through the frontend
+- **THEN** byte-range responses are preserved and cancellation reaches server preview work without storing or buffering the complete video on the frontend
+
+#### Scenario: API unavailable
+- **WHEN** the server cannot validate a session or serve an API request
+- **THEN** the frontend returns an explicit unavailable response without private HTML, fabricated data or cached API results
+
+#### Scenario: Proxy boundary
+- **WHEN** a client requests worker APIs, arbitrary paths, another upstream or a cross-origin mutation
+- **THEN** the frontend rejects the request without forwarding it; an upstream redirect does not escape the configured API origin

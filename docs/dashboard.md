@@ -1,19 +1,47 @@
 # TranscoderD operations dashboard
 
-The server embeds its dashboard and all assets. Open `http://<server>:8080/dashboard/` (the server root redirects there) and log in with the dashboard token. The initial default is `encoding123`, as requested; configure it independently from the worker API token:
+The fleet dashboard runs in the separate `transcoderd-frontend` process/container. Open `http://<frontend>:8081/dashboard/` and log in with the dashboard token. TranscoderD serves only the API; it no longer serves dashboard HTML, scripts, icons or PWA assets. The initial default is `encoding123`, as requested; configure it independently from the worker API token:
 
 ```yaml
 web:
   port: 8080
-  domain: https://transcoder.example.com
+  domain: http://transcoder-api.internal:8080
   token: your-worker-api-token
   dashboardToken: your-dashboard-token
 ```
 
 Or pass `--web.dashboardToken encoding123` to the server. The server exposes no additional management port, requires no frontend build, and loads no remote scripts/fonts. The dashboard has a separate authentication boundary for a future OIDC implementation. Worker API authentication continues using `web.token`.
 
-Sessions last 12 hours and use an opaque HttpOnly SameSite=Strict cookie. Logout revokes the session; server restart revokes all sessions. When publishing through an HTTPS proxy, set `web.domain` to the HTTPS public origin so cookies have Secure set. Keep the request Host header as the public host and forward `/dashboard/` on the same origin. The dashboard does not require an external Sites deployment. The static token stays out of URLs, page source, browser storage, and request logs. Dashboard mutations require `X-Dashboard-Request: 1` and reject another Origin.
+Sessions last 12 hours and use an opaque HttpOnly SameSite=Strict cookie. Logout revokes the session; server restart revokes all sessions. When publishing the frontend through an HTTPS proxy, set `frontend.publicURL` to the HTTPS browser origin so cookies have Secure set. Route `/dashboard/` to the frontend, not to the API server. Keep `web.domain` pointing to the API origin used by workers. The dashboard does not require an external Sites deployment. The static token stays out of URLs, page source, browser storage, and request logs. Dashboard mutations require `X-Dashboard-Request: 1` and reject another Origin.
 
+
+## Deploy on a separate host
+
+```bash
+mage build:frontend
+./dist/transcoderd-frontend \
+  --frontend.listen=:8081 \
+  --frontend.apiURL=http://transcoder-api.internal:8080 \
+  --frontend.publicURL=https://transcoder.example.com
+```
+
+Point the public HTTPS reverse proxy at the frontend port. Set `frontend.publicURL` to the actual browser origin when TLS terminates there; client-supplied forwarded host/scheme headers are ignored. API/public URL settings accept HTTP(S) origins only, without credentials, non-root paths, query or fragments. The default API origin is `http://localhost:8080`; the default listener is `:8081`; an empty public URL derives the direct HTTP/TLS request origin. YAML uses `frontend.listen`, `frontend.apiURL` and `frontend.publicURL`; explicit environment names are `TR_FRONTEND_LISTEN`, `TR_FRONTEND_API_URL` and `TR_FRONTEND_PUBLIC_URL`. `--config /etc/transcoderd/frontend.yaml` selects a file, otherwise the usual config.yaml search paths apply. CLI overrides environment and YAML.
+
+The separately published image is `ghcr.io/segator/transcoderd:frontend-<version>` (`mage docker:frontend` builds it locally). Example on the frontend host:
+
+```bash
+docker run -d --name transcoderd-frontend --read-only --cap-drop=ALL \
+  --security-opt=no-new-privileges -p 8081:8081 \
+  -e TR_FRONTEND_API_URL=http://transcoder-api.internal:8080 \
+  -e TR_FRONTEND_PUBLIC_URL=https://transcoder.example.com \
+  ghcr.io/segator/transcoderd:frontend-<version>
+```
+
+No media volumes, PostgreSQL access, FFmpeg, worker token or dashboard token are configured on the frontend host. Only network access to the API is required; API HTTPS uses normal certificate verification. Use a protected network or HTTPS between hosts. The browser sends login, metadata, operations and videos to its frontend origin; the frontend streams only allowlisted dashboard API routes to the configured backend. Worker `/api/v1` routes cannot be reached through it. The API validates the static token and owns expiring sessions; the frontend forwards only the dashboard session cookie and preserves HttpOnly/SameSite restrictions. Logout and API restart revoke access. API unavailability returns an explicit error and never substitutes cached operational data.
+
+Media discovery, filters, probes, reviewed intake, original byte ranges and compatible H.264/AAC conversion all run on the API host. Video bytes flow through the frontend without complete-file buffering or local storage. Closing playback cancels the backend request and preview. The frontend image runs as a nonroot user and contains no media toolchain. Its `/healthz` endpoint reports frontend liveness, independently of backend availability.
+
+For migration, assign separate API and frontend hostnames, upgrade the API and start the frontend. Keep workers pointed at the API origin. If an older deployment used one hostname for both UI and worker requests, update worker `web.domain` to the API hostname before moving the old dashboard hostname to the frontend. Existing server-side UI URLs now return 404; sign in again on the frontend origin. Local worker/Windows tray dashboards remain worker-local and are independent of this fleet frontend.
 ## Independent CPU/GPU limits inside each worker
 
 1. Upgrade the server first; it applies migrations 007 (telemetry) and 008 (independent limits) automatically.
@@ -34,7 +62,7 @@ Existing rows without a pair keep their single-limit startup behavior. Positive 
 
 ## Media playback and visual intake
 
-The **Biblioteca** view browses source folders and optional read-only output roots, filters and previews candidates, loads reviewed selections with progress/cancellation, and plays available files directly or through a compatible preview. **Ver** in job tables opens available source/completed output assets. See [Media library and visual job loading](media-library.md) for roots, presets matching the Unraid scripts, resource limits and the API. Migration 009 adds the fingerprinted metadata cache.
+The **Library** view browses source folders and optional read-only output roots, filters and previews candidates, loads reviewed selections with progress/cancellation, and plays available files directly or through a compatible preview. **View** in job tables opens available source/completed output assets. See [Media library and visual job loading](media-library.md) for roots, presets matching the Unraid scripts, resource limits and the API. Migration 009 adds the fingerprinted metadata cache.
 
 ## What the charts measure
 
@@ -75,12 +103,12 @@ Windows continues supervising separate named CPU/GPU profiles (for example `pc-c
 
 ## Install as a PWA
 
-The server dashboard is an installable Progressive Web App. Open `/dashboard/`, then choose **Instalar app** when your browser offers it, or use the browser's app-install menu. On iPhone/iPad use Safari's **Share → Add to Home Screen**. The installed app launches in its own window with TranscoderD branding and uses the same token/session login as the website. Installation does not require an additional service or port.
+The independent frontend is an installable Progressive Web App. Open `/dashboard/`, then choose **Install app** when your browser offers it, or use the browser's app-install menu. On iPhone/iPad use Safari's **Share → Add to Home Screen**. The installed app launches in its own window with TranscoderD branding and uses the same token/session login as the website. Installation uses the frontend service; it does not expose an additional browser port.
 
 Use HTTPS for a deployed installation. For local review `http://localhost:18080/dashboard/` works without a certificate; localhost/loopback is the development exception to the secure-origin requirement. Browser installation availability varies; unsupported browsers keep the normal website experience. See [MDN's installation requirements](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable).
 
-The service worker is scoped to `/dashboard/`. Its persistent cache contains only an explicit list of public build assets: scripts/styles, manifest, icons and the generic offline page. It never stores the authenticated dashboard HTML, login responses, cookies/tokens, statistics, worker/job records, mutations or video bytes. Opening the app offline shows **Volver a conectar**, rather than private historical data. Monitoring, video playback and management require the live server. Failed requests are not replayed when connectivity returns; reconnecting checks the session again. Mobile layouts retain a visible logout control.
+The service worker is scoped to `/dashboard/`. Its persistent cache contains only an explicit list of public build assets: scripts/styles, manifest, icons and the generic offline page. It never stores the authenticated dashboard HTML, login responses, cookies/tokens, statistics, worker/job records, mutations or video bytes. Opening the app offline shows **Reconnect**, rather than private historical data. Monitoring, video playback and management require the live server. Failed requests are not replayed when connectivity returns; reconnecting checks the session again. Mobile layouts retain a visible logout control.
 
-Changed embedded assets produce a new content-derived worker/cache version. Activation removes only older caches belonging to this dashboard. Updates do not force a reload during edits, playback or intake: use **Actualización lista · Recargar** when convenient. No push notifications or background job submission are enabled.
+Changed embedded assets produce a new content-derived worker/cache version. Activation removes only older caches belonging to this dashboard. Updates do not force a reload during edits, playback or intake: use **Update ready · Reload** when convenient. No push notifications or background job submission are enabled.
 
-For the local UI review prepared alongside this change, the server is running at `http://localhost:18080/dashboard/` with token `encoding123`. That preview uses synthetic workers/job statistics and test clips, independently of production. Its in-memory edits reset on preview restart; the production server keeps its existing PostgreSQL persistence.
+For the local UI review prepared alongside this change, the frontend is running at `http://localhost:18080/dashboard/`, forwarding only API calls to a separate local backend with token `encoding123`. That preview uses synthetic workers/job statistics and test clips, independently of production. Its in-memory edits reset on preview restart; the production server keeps its existing PostgreSQL persistence.

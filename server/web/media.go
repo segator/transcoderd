@@ -22,16 +22,16 @@ func (s *Server) registerMedia(r *mux.Router) {
 	if backend, ok := s.scheduler.(library.Backend); ok {
 		s.library = library.New(backend, s.config.MediaRoots, s.config.PreviewMaxStreams)
 	}
-	r.HandleFunc("/api/media/roots", s.protectDashboard(s.mediaRoots, false)).Methods("GET")
-	r.HandleFunc("/api/media/browse", s.protectDashboard(s.mediaBrowse, false)).Methods("GET")
-	r.HandleFunc("/api/media/info/{id}", s.protectDashboard(s.mediaInfo, false)).Methods("GET")
-	r.HandleFunc("/api/media/file/{id}", s.protectDashboard(s.mediaOriginal, false)).Methods("GET", "HEAD")
-	r.HandleFunc("/api/media/preview/{id}", s.protectDashboard(s.mediaPreview, false)).Methods("GET")
-	r.HandleFunc("/api/media/jobs/{id}", s.protectDashboard(s.mediaJobAssets, false)).Methods("GET")
-	r.HandleFunc("/api/media/scans", s.protectDashboard(s.mediaStartScan, false)).Methods("POST")
-	r.HandleFunc("/api/media/batches", s.protectDashboard(s.mediaStartBatch, false)).Methods("POST")
-	r.HandleFunc("/api/media/operations/{id}", s.protectDashboard(s.mediaOperation, false)).Methods("GET")
-	r.HandleFunc("/api/media/operations/{id}", s.protectDashboard(s.mediaCancel, false)).Methods("DELETE")
+	r.HandleFunc("/api/media/roots", s.protectDashboard(s.mediaRoots)).Methods("GET")
+	r.HandleFunc("/api/media/browse", s.protectDashboard(s.mediaBrowse)).Methods("GET")
+	r.HandleFunc("/api/media/info/{id}", s.protectDashboard(s.mediaInfo)).Methods("GET")
+	r.HandleFunc("/api/media/file/{id}", s.protectDashboard(s.mediaOriginal)).Methods("GET", "HEAD")
+	r.HandleFunc("/api/media/preview/{id}", s.protectDashboard(s.mediaPreview)).Methods("GET")
+	r.HandleFunc("/api/media/jobs/{id}", s.protectDashboard(s.mediaJobAssets)).Methods("GET")
+	r.HandleFunc("/api/media/scans", s.protectDashboard(s.mediaStartScan)).Methods("POST")
+	r.HandleFunc("/api/media/batches", s.protectDashboard(s.mediaStartBatch)).Methods("POST")
+	r.HandleFunc("/api/media/operations/{id}", s.protectDashboard(s.mediaOperation)).Methods("GET")
+	r.HandleFunc("/api/media/operations/{id}", s.protectDashboard(s.mediaCancel)).Methods("DELETE")
 }
 
 func mediaJSON(w http.ResponseWriter, value any) {

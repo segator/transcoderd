@@ -8,7 +8,7 @@ import (
 )
 
 func TestDashboardPWAManifestAndPublicAssets(t *testing.T) {
-	s := newWorkerSettingsTestServer(t)
+	s := newTestFrontend(t)
 	w := dashboardRequest(s, "GET", "/dashboard/manifest.webmanifest", "", "", nil)
 	if w.Code != 200 || w.Header().Get("Content-Type") != "application/manifest+json" {
 		t.Fatalf("manifest = %d %q", w.Code, w.Header().Get("Content-Type"))
@@ -65,7 +65,7 @@ func TestDashboardPWAManifestAndPublicAssets(t *testing.T) {
 }
 
 func TestDashboardPWAWorkerVersionScopeAndAuth(t *testing.T) {
-	s := newWorkerSettingsTestServer(t)
+	s := newTestFrontend(t)
 	w := dashboardRequest(s, "GET", "/dashboard/sw.js", "", "", nil)
 	body := w.Body.String()
 	if w.Code != 200 || !strings.Contains(w.Header().Get("Content-Type"), "javascript") || w.Header().Get("Service-Worker-Allowed") != "/dashboard/" || w.Header().Get("Cache-Control") != "no-store" {

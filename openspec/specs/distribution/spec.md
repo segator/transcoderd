@@ -7,18 +7,18 @@ Define the separately built server and worker executables and images, including 
 ## Requirements
 
 ### Requirement: Separate Go binaries
-The build SHALL produce `transcoderd-server` and `transcoderd-worker` executables with application name, version, commit, and build date injected at build time.
+The build SHALL produce `transcoderd-server`, `transcoderd-worker` and `transcoderd-frontend` executables with application name, version, commit, and build date injected at build time.
 
 #### Scenario: Build both binaries
-- **WHEN** the Go build target for both applications runs
-- **THEN** `dist/transcoderd-server` and `dist/transcoderd-worker` are produced
+- **WHEN** the Go build target for all applications runs
+- **THEN** `dist/transcoderd-server`, `dist/transcoderd-worker` and `dist/transcoderd-frontend` are produced
 
 #### Scenario: Request binary version
-- **WHEN** either binary is run with `--version`
+- **WHEN** any application binary is run with `--version`
 - **THEN** it prints version information and exits
 
 ### Requirement: Separate container targets
-The Docker build SHALL expose `server` and `worker` targets with their corresponding binaries as entry points. The worker image SHALL include FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract data required by the media pipeline.
+The Docker build SHALL expose `server`, `worker` and `frontend` targets with their corresponding binaries as entry points. The worker image SHALL include FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract data required by the media pipeline.
 
 #### Scenario: Server image
 - **WHEN** the `server` target is built
@@ -28,12 +28,16 @@ The Docker build SHALL expose `server` and `worker` targets with their correspon
 - **WHEN** the `worker` target is built
 - **THEN** its entry point runs `transcoderd-worker` with the bundled media tools available
 
+#### Scenario: Frontend image
+- **WHEN** the frontend target is built
+- **THEN** its entry point runs transcoderd-frontend independently with CA certificates and no media tools or media/database mounts
+
 ### Requirement: Versioned image tags
-Publishing SHALL tag server and worker images with their role and requested version under `ghcr.io/segator/transcoderd`.
+Publishing SHALL tag server, worker and frontend images with their role and requested version under `ghcr.io/segator/transcoderd`.
 
 #### Scenario: Versioned publish
-- **WHEN** both images are published for a version
-- **THEN** `server-<version>` and `worker-<version>` tags are available
+- **WHEN** all application images are published for a version
+- **THEN** `server-<version>`, `worker-<version>` and `frontend-<version>` tags are available
 
 #### Scenario: Release aliases retain the canonical application version
 - **WHEN** a release image is published under full, minor, and major version tags

@@ -419,7 +419,7 @@ func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update
 			Handler: rtr,
 		},
 	}
-	webServer.registerDashboard(rtr)
+	webServer.registerDashboardAPI(rtr)
 	rtr.Handle("/api/v1/job/", webServer.AuthFunc(webServer.addJobs)).Methods("POST")
 	rtr.Handle("/api/v1/jobs/queued", webServer.AuthFunc(webServer.listQueuedJobs)).Methods("GET")
 	rtr.Handle("/api/v1/job/request", webServer.AuthFunc(webServer.requestJob)).Methods("GET")
@@ -558,5 +558,5 @@ func webError(writer http.ResponseWriter, err error, code int) bool {
 	return false
 }
 
-// ServeHTTP allows the embedded server routes to be mounted by another HTTP host.
+// ServeHTTP exposes the API routes for HTTP hosting and integration tests.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.srv.Handler.ServeHTTP(w, r) }

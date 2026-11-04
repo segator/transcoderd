@@ -32,7 +32,7 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - name: PWA cache/privacy lifecycle and worker activity tests
-        run: node --test server/web/dashboardPWA_test.cjs worker/dashboard/activity_test.js
+        run: node --test frontend/web/dashboardPWA_test.cjs worker/dashboard/activity_test.js
 
   windows-unit:
     runs-on: windows-2025
@@ -55,7 +55,7 @@ jobs:
           }
       - name: Native update and administration unit tests
         shell: pwsh
-        run: go test -v -timeout 2m ./update/managed ./cmd/windows-service ./cmd/windows-update-manifest ./worker/control ./worker/desktop ./worker/worker ./worker/step
+        run: go test -v -timeout 2m ./update/managed ./cmd/windows-service ./cmd/windows-update-manifest ./worker/control ./worker/desktop ./worker/worker ./worker/step ./frontend/...
 
   ci:
     runs-on: transcoderd

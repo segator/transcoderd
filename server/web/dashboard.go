@@ -2,10 +2,8 @@ package web
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,31 +15,18 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-//go:embed dashboard/*
-var dashboardAssets embed.FS
-
-func (s *Server) registerDashboard(r *mux.Router) {
+func (s *Server) registerDashboardAPI(r *mux.Router) {
 	s.dashboard = &dashboardAuth{sessions: make(map[[32]byte]time.Time)}
-	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/dashboard/", http.StatusSeeOther)
-	}).Methods(http.MethodGet)
-	r.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/dashboard/", http.StatusSeeOther)
-	}).Methods(http.MethodGet)
 	d := r.PathPrefix("/dashboard/").Subrouter()
 	d.Use(dashboardHeaders)
-	d.HandleFunc("/login", s.serveDashboardLogin).Methods(http.MethodGet)
 	d.HandleFunc("/api/login", s.dashboardLogin).Methods(http.MethodPost)
-	d.HandleFunc("/api/logout", s.protectDashboard(s.dashboardLogout, false)).Methods(http.MethodPost)
-	d.HandleFunc("/api/stats", s.protectDashboard(s.dashboardStats, false)).Methods(http.MethodGet)
+	d.HandleFunc("/api/logout", s.protectDashboard(s.dashboardLogout)).Methods(http.MethodPost)
+	d.HandleFunc("/api/session", s.protectDashboard(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})).Methods(http.MethodGet)
+	d.HandleFunc("/api/stats", s.protectDashboard(s.dashboardStats)).Methods(http.MethodGet)
 	s.registerMedia(d)
-	s.registerDashboardPWA(d)
-	d.HandleFunc("/api/workers/{worker}/settings", s.protectDashboard(s.dashboardWorkerSettings, false)).Methods(http.MethodPut)
-	d.HandleFunc("/", s.protectDashboard(s.serveDashboard, true)).Methods(http.MethodGet)
-	assets, _ := fs.Sub(dashboardAssets, "dashboard")
-	for _, name := range dashboardPublicAssets {
-		d.Handle("/"+name, http.StripPrefix("/dashboard/", dashboardPublicFileServer(http.FS(assets), name))).Methods(http.MethodGet)
-	}
+	d.HandleFunc("/api/workers/{worker}/settings", s.protectDashboard(s.dashboardWorkerSettings)).Methods(http.MethodPut)
 }
 
 func dashboardHeaders(next http.Handler) http.Handler {
@@ -53,28 +38,6 @@ func dashboardHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		next.ServeHTTP(w, r)
 	})
-}
-
-func (s *Server) serveDashboardLogin(w http.ResponseWriter, r *http.Request) {
-	if s.dashboardAuthenticated(r) {
-		http.Redirect(w, r, "/dashboard/", http.StatusSeeOther)
-		return
-	}
-	serveDashboardHTML(w, "login.html")
-}
-
-func (s *Server) serveDashboard(w http.ResponseWriter, r *http.Request) {
-	serveDashboardHTML(w, "index.html")
-}
-
-func serveDashboardHTML(w http.ResponseWriter, name string) {
-	b, err := dashboardAssets.ReadFile("dashboard/" + name)
-	if err != nil {
-		http.Error(w, "Dashboard asset unavailable", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(b)
 }
 
 func (s *Server) dashboardStats(w http.ResponseWriter, r *http.Request) {

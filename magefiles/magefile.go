@@ -4,7 +4,7 @@
 //
 // Usage:
 //
-//	mage build:all       # Build server + worker Go binaries
+//	mage build:all       # Build server + worker + frontend Go binaries
 //	mage test:unit       # Run unit tests with coverage
 //	mage test:e2e        # Run end-to-end tests
 //	mage lint:check      # Run golangci-lint
@@ -210,7 +210,7 @@ func runGoTest(ctx context.Context, args []string) error {
 // Build contains targets for compiling Go binaries.
 type Build mg.Namespace
 
-// All builds both server and worker Go binaries into dist/ via Dagger.
+// All builds server, worker and frontend Go binaries into dist/ via Dagger.
 func (Build) All(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
@@ -219,7 +219,7 @@ func (Build) All(ctx context.Context) error {
 	defer client.Close()
 
 	src := projectSource(client)
-	for _, component := range []string{"server", "worker"} {
+	for _, component := range []string{"server", "worker", "frontend"} {
 		if err := buildBinaryWith(ctx, client, src, component); err != nil {
 			return err
 		}
@@ -235,6 +235,16 @@ func (Build) Server(ctx context.Context) error {
 	}
 	defer client.Close()
 	return buildBinaryWith(ctx, client, projectSource(client), "server")
+}
+
+// Frontend builds the independent frontend binary.
+func (Build) Frontend(ctx context.Context) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+	return buildBinaryWith(ctx, client, projectSource(client), "frontend")
 }
 
 // Worker builds the worker binary into dist/transcoderd-worker via Dagger.
@@ -498,7 +508,7 @@ func (Lint) Fmt(ctx context.Context) error {
 // Docker contains targets for building container images locally.
 type Docker mg.Namespace
 
-// All builds both server and worker Docker images via Dagger.
+// All builds server, worker and frontend Docker images via Dagger.
 func (Docker) All(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
@@ -507,10 +517,12 @@ func (Docker) All(ctx context.Context) error {
 	defer client.Close()
 
 	src := projectSource(client)
-	if err := buildContainerImage(ctx, client, src, "server"); err != nil {
-		return err
+	for _, component := range []string{"server", "worker", "frontend"} {
+		if err := buildContainerImage(ctx, client, src, component); err != nil {
+			return err
+		}
 	}
-	return buildContainerImage(ctx, client, src, "worker")
+	return nil
 }
 
 // Server builds the server Docker image via Dagger.
@@ -521,6 +533,16 @@ func (Docker) Server(ctx context.Context) error {
 	}
 	defer client.Close()
 	return buildContainerImage(ctx, client, projectSource(client), "server")
+}
+
+// Frontend builds the independent frontend image without media tools.
+func (Docker) Frontend(ctx context.Context) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+	return buildContainerImage(ctx, client, projectSource(client), "frontend")
 }
 
 // Worker builds the worker Docker image via Dagger.
@@ -588,7 +610,7 @@ func (Docker) Pgs(ctx context.Context) error {
 // Publish contains targets for pushing container images to the registry.
 type Publish mg.Namespace
 
-// All pushes all images (server, worker, ffmpeg builder, pgs builder).
+// All pushes all images (server, worker, frontend, ffmpeg builder, pgs builder).
 func (Publish) All(ctx context.Context) error {
 	p := Publish{}
 	if err := p.Ffmpeg(ctx); err != nil {
@@ -600,7 +622,7 @@ func (Publish) All(ctx context.Context) error {
 	return p.App(ctx)
 }
 
-// App pushes both server and worker images via Dagger.
+// App pushes server, worker and frontend images via Dagger.
 func (Publish) App(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
@@ -613,7 +635,7 @@ func (Publish) App(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, component := range []string{"server", "worker"} {
+	for _, component := range []string{"server", "worker", "frontend"} {
 		ctr, err := containerImage(ctx, client, src, component)
 		if err != nil {
 			return err
@@ -762,12 +784,8 @@ func buildContainerImage(ctx context.Context, client *dagger.Client, src *dagger
 		}
 		fmt.Printf("Exported %s → %s\n", tag, tarPath)
 
-		if err := runCmd(ctx, "docker", "load", "-i", tarPath); err != nil {
-			fmt.Printf("Warning: docker load failed (Docker may not be available): %v\n", err)
-		} else {
-			if err := runCmd(ctx, "docker", "tag", component+":latest", tag); err != nil {
-				fmt.Printf("Warning: docker tag failed: %v\n", err)
-			}
+		if err := ctr.ExportImage(ctx, tag); err != nil {
+			fmt.Printf("Warning: local image load failed; OCI archive is available at %s: %v\n", tarPath, err)
 		}
 	}
 	return nil
@@ -784,6 +802,14 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 			"./" + component + "/main.go",
 		}).
 		File("/output/transcoderd-" + component)
+
+	if component == "frontend" {
+		return client.Container().From("debian:trixie-slim").
+			WithExec([]string{"sh", "-c", "apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*"}).
+			WithFile("/app/transcoderd-frontend", goBinary).
+			WithUser("65532:65532").WithExposedPort(8081).
+			WithEntrypoint([]string{"/app/transcoderd-frontend"}), nil
+	}
 
 	ffmpegBins := ffmpegBuilderImage(client)
 

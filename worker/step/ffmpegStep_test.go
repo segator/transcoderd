@@ -1,11 +1,15 @@
 package step
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +17,26 @@ import (
 	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
 )
+
+const ffmpegCapturePathEnv = "TRANSCODERD_TEST_FFMPEG_ARGS"
+
+func TestMain(m *testing.M) {
+	// A renamed copy of this native binary captures FFmpeg arguments before the
+	// testing package parses flags. Ordinary test invocations always run m.Run.
+	name := filepath.Base(os.Args[0])
+	if path := os.Getenv(ffmpegCapturePathEnv); path != "" && (name == "ffmpeg" || name == "ffmpeg.exe") {
+		raw, err := json.Marshal(os.Args[1:])
+		if err == nil {
+			err = os.WriteFile(path, raw, 0o600)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(24)
+		}
+		os.Exit(23)
+	}
+	os.Exit(m.Run())
+}
 
 func TestFFMPEGGeneratorVideoProfiles(t *testing.T) {
 	tests := []struct {
@@ -55,14 +79,26 @@ func TestFFMPEGGeneratorVideoProfiles(t *testing.T) {
 }
 
 func TestFFMPEGExecutionUsesPinnedProfileForEveryOption(t *testing.T) {
-	dir := t.TempDir()
-	argsPath := filepath.Join(dir, "arguments")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ENCODER_TEST_ARGS\"\nexit 23\n"
-	if err := os.WriteFile(filepath.Join(dir, "ffmpeg"), []byte(script), 0o700); err != nil {
+	dir := filepath.Join(t.TempDir(), "encoder fixture")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "ffmpeg"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), binary, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("ENCODER_TEST_ARGS", argsPath)
 	tests := []struct {
 		name             string
 		fallback, pinned config.FFMPEGConfig
@@ -73,16 +109,26 @@ func TestFFMPEGExecutionUsesPinnedProfileForEveryOption(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			j := &job.Context{WorkingDir: dir, EncodeConfig: &tt.pinned, Source: &job.VideoData{FilePath: filepath.Join(dir, "source.mkv"), FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{Id: 0, Duration: time.Minute, FrameRate: 24}}}}
+			argsPath := filepath.Join(t.TempDir(), "arguments.json")
+			t.Setenv(ffmpegCapturePathEnv, argsPath)
+			j := &job.Context{WorkingDir: dir, EncodeConfig: &tt.pinned, Source: &job.VideoData{FilePath: filepath.Join(dir, "source [prueba ñ].mkv"), FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{Id: 0, Duration: time.Minute, FrameRate: 24}}}}
 			executor := &FFMPEGStepExecutor{ffmpegConfig: &tt.fallback}
-			if err := executor.ffmpeg(t.Context(), &mockLogger{}, j, make(chan ffmpegProgress, 1)); err == nil {
-				t.Fatal("capture fixture did not terminate FFmpeg as expected")
+			err := executor.ffmpeg(t.Context(), &mockLogger{}, j, make(chan ffmpegProgress, 1))
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 23 {
+				t.Fatalf("FFmpeg capture exit = %v, want fixture exit 23", err)
 			}
 			raw, err := os.ReadFile(argsPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+			var args []string
+			if err := json.Unmarshal(raw, &args); err != nil {
+				t.Fatal(err)
+			}
+			if !containsSequence(args, []string{"-i", j.Source.FilePath}) {
+				t.Errorf("source path was not preserved as one argument: %v", args)
+			}
 			for _, want := range tt.want {
 				if !slices.Contains(args, want) {
 					t.Errorf("pinned invocation missing %q: %v", want, args)

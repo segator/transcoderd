@@ -109,7 +109,9 @@ x265, AAC, probing, subtitle extraction and OCR.
 ## Maintenance
 
 The scheduled stale-issue workflow and Dependabot auto-merge workflow remain
-active. The unused `act` event JSON and an unconsumed Dependabot metadata step
+active. Checkout, upload/download artifacts and stale actions use verified
+Node-24 releases, compatible with the observed runner 2.338.2. Maintenance
+permissions are explicit. The unused `act` event JSON and an unconsumed Dependabot metadata step
 were removed. `build/tools/actionlint` with `.github/actionlint.yaml` recognizes
 the custom `transcoderd` runner label; release-source Python tests and Mage tests
 cover source guards, compiler budgets and publication separation.

@@ -2,7 +2,7 @@
 
 ## 1. Workflow orchestration
 
-- [x] 1.1 Move Windows artifact builds and lint into `ci`, preserve native and release/debug gates, add PR-only supersession cancellation, remove confirmed unused workflow pieces and document the resulting graph; verify Actions syntax and release-source tests.
+- [x] 1.1 Move Windows artifact builds and lint into `ci`, preserve native and release/debug gates, add PR-only supersession cancellation, refresh deprecated action runtimes, remove confirmed unused workflow pieces and document the resulting graph; verify Actions syntax and release-source tests.
 
 ## 2. Dependency compilation
 

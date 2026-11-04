@@ -5,9 +5,12 @@ on:
 
 jobs:
   stale:
+    permissions:
+      issues: write
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v9
+      - uses: actions/stale@v11.0.0
         with:
           stale-issue-message: "This issue is stale because it has been open 120 days with no activity. Remove stale label or comment or this will be closed in 30 days."
           days-before-stale: 120

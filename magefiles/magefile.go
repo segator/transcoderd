@@ -33,7 +33,7 @@ import (
 
 var (
 	imageName           = envOrDefault("IMAGE_NAME", "ghcr.io/segator/transcoderd")
-	ffmpegBuilderTag    = envOrDefault("FFMPEG_BUILDER_TAG", "builder-ffmpeg-9.0.2-av1")
+	ffmpegBuilderTag    = envOrDefault("FFMPEG_BUILDER_TAG", "builder-ffmpeg-9.0.2-av1-svt-4.3.0")
 	pgsBuilderTag       = envOrDefault("PGS_BUILDER_TAG", "builder-pgs")
 	githubCLIVersion    = "2.103.0"
 	projectVersion      = ""
@@ -870,6 +870,11 @@ func ffmpegBuilderImage(client *dagger.Client) *dagger.Container {
 // buildFFmpegBuilderImage builds the same FFmpeg toolchain as the published image.
 // Base: CUDA 13.3.1 on Ubuntu 24.04 with FFmpeg 9.0.2 (~50min).
 func buildFFmpegBuilderImage(client *dagger.Client) *dagger.Container {
+	return rebuildFFmpegSVT(client, "4.3.0")
+}
+
+// Retain the original graph as the shared dependency base and 4.2.0 rollback.
+func buildFFmpegBaselineImage(client *dagger.Client) *dagger.Container {
 	return client.Container().
 		From("nvidia/cuda:13.3.1-devel-ubuntu24.04").
 		WithEnvVariable("DEBIAN_FRONTEND", "noninteractive").

@@ -69,7 +69,7 @@ func init() {
 	pflag.Int("worker.ffmpegConfig.threads", 0, "FFmpeg thread count (0 lets FFmpeg decide)")
 	pflag.String("worker.ffmpegConfig.extraArgs", "", "FFMPEG Extra Args")
 	pflag.Int("worker.verifyDeltaTime", 60, "FFMPEG Verify Delta Time in seconds, is the max range of time that the video can be different from the original, if is superior then the video is marked as invalid")
-	pflag.Int("worker.ffmpegConfig.videoCRF", 0, "SVT-AV1 or x265 CRF; defaults to 25 or 21")
+	pflag.Int("worker.ffmpegConfig.videoCRF", 0, "SVT-AV1 or x265 CRF; defaults to 26 or 21")
 	pflag.Duration("worker.startAfter", 0, "Legacy daily admission start as a duration since midnight, e.g. 8h")
 	pflag.Duration("worker.stopAfter", 0, "Legacy daily admission end as a duration since midnight, e.g. 22h")
 	pflag.String("worker.schedule.timeZone", "Local", "Admission timezone (IANA name, e.g. Europe/Madrid)")

@@ -49,10 +49,17 @@ validation; the full-film pilot was SDR 1080p.
 
 ## AV1 CPU: selectable SVT-AV1
 
+The Linux builder and Windows bundle pin **SVT-AV1 4.3.0** behind FFmpeg 9.0.2.
+The [version comparison](av1-svt-4-3-comparison.md) first isolated the library
+change at CRF25. The selected **preset 4 / CRF26** profile then used 14.3–16.0%
+fewer video bytes than SVT 4.2.0 / CRF25 on three 24-second excerpts, with mean
+VMAF reductions of 0.286–0.363 point. The smaller files come with this measured
+quality trade-off; these scenes do not establish whole-film quality.
+
 ```text
 -threads 0
 -filter:v "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease"
--pix_fmt yuv420p10le -c:v libsvtav1 -preset 4 -crf 25
+-pix_fmt yuv420p10le -c:v libsvtav1 -preset 4 -crf 26
 ```
 
 `yuv420p10le` is planar 10-bit 4:2:0. `libsvtav1` performs AV1 encoding on CPU.
@@ -61,7 +68,7 @@ are faster. CRF controls quality/bit allocation separately, with lower values
 generally producing larger, higher-quality output. Changing the preset can
 change quality at the same CRF, so compare at similar measured quality.
 
-The time/size balanced default is preset **4 / CRF25**.
+The time/size balanced default is preset **4 / CRF26**.
 Presets **3, 5, and 6 are also selectable** through `videoPreset` (quoted
 as a YAML string), and `videoCRF` is independently configurable. SVT manages
 its own internal parallelism; automatic FFmpeg threading does not imply every
@@ -73,8 +80,8 @@ trade-offs and balanced alternatives. A fixed CRF is not a promise that every
 title meets the p5 VMAF target. CPU and GPU quality values are different scales;
 equal numeric CRF/CQ settings are not a fair comparison.
 
-Three representative 15-second clips were compared at the prior defaults and
-the new candidates. CQ38 produced 24.6–48.6% smaller video segments, with p5
+An earlier comparison used three representative 15-second clips and the
+previous CRF25 CPU candidate. CQ38 produced 24.6–48.6% smaller video segments, with p5
 VMAF changes of -0.13 to -2.37. SVT CRF25 produced 18.4–31.9% smaller
 segments, with p5 changes of -0.48 to -1.37. These are short-scene measurements,
 not a promise for all titles; difficult grain and motion can behave differently.

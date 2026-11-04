@@ -234,8 +234,9 @@ startup profile as its preferred encoder. A single upgraded worker can run CPU a
 ## What the build pipeline does
 
 Mage and Dagger build the application images from a Debian runtime and two
-versioned builder images. `builder-ffmpeg-9.0.2-av1` contains FFmpeg 9.0.2 with
-`libsvtav1`, `libaom-av1`, `av1_nvenc`, x265, and `libfdk_aac`. The separate PGS
+versioned builder images. `builder-ffmpeg-9.0.2-av1-svt-4.3.0` contains FFmpeg
+9.0.2 with SVT-AV1 4.3.0 (`libsvtav1`), `libaom-av1`, `av1_nvenc`, x265, and
+`libfdk_aac`. The separate PGS
 builder supplies .NET/OCR binaries and language data. The server and worker
 images copy the needed files from those builders. An NVIDIA GPU is not needed
 to compile these images.

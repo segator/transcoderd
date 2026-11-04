@@ -10,7 +10,7 @@ func TestIndependentProfilesKeepApprovedDefaultsAndOverrides(t *testing.T) {
 	}
 	cpuVideo, _ := cpu.ResolveVideoSettings()
 	gpuVideo, _ := gpu.ResolveVideoSettings()
-	if cpuVideo.Codec != AV1SVT || cpuVideo.CRF != 25 || cpuVideo.Preset != "4" || cpu.ExtraArgs != "" || cpu.AudioCodec != "aac" || cpu.Threads != 4 {
+	if cpuVideo.Codec != AV1SVT || cpuVideo.CRF != 26 || cpuVideo.Preset != "4" || cpu.ExtraArgs != "" || cpu.AudioCodec != "aac" || cpu.Threads != 4 {
 		t.Errorf("CPU secondary = %+v / %+v", cpu, cpuVideo)
 	}
 	if gpuVideo.CQ != 40 || gpuVideo.Preset != "p6" || gpu.ExtraArgs != "-hwaccel cuda" {

@@ -12,6 +12,9 @@ $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;" + $env:PATH
 $env:PATHEXT = '.COM;.EXE;.BAT;.CMD'
 $run = Join-Path $env:TEMP ('TranscoderD prueba pel' + [char]0xed + 'cula ' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $run | Out-Null
+# Control commands must target only this test's worker, even on a machine with
+# an existing standalone or supervised installation.
+$env:TRANSCODERD_CONTROL_PIPE = '\\.\pipe\transcoderd-e2e-' + [guid]::NewGuid().ToString('N')
 $install = Join-Path $run 'bundle con espacios'
 Copy-Item -LiteralPath $Bundle -Destination $install -Recurse
 $worker = Join-Path $install 'transcoderd-worker.exe'

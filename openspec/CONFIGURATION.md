@@ -75,7 +75,7 @@ server:
 | `worker.ffmpegConfig.videoPreset` | Empty | Profile default: NVENC `p7`, SVT `4`, x265 `medium`. A supplied value must be valid for the selected encoder. |
 | `worker.ffmpegConfig.videoCQ` | `0` (profile default) | NVENC CQ; zero selects `38`. Invalid with CPU or x265. |
 | `worker.ffmpegConfig.videoQMax` | `0` (profile default) | NVENC maximum QP; zero selects `100`. Paired with `-qmin 0`. Invalid with CPU or x265. |
-| `worker.ffmpegConfig.videoCRF` | `0` (profile default) | SVT CRF `25` or x265 CRF `21` when omitted. Invalid with NVENC. |
+| `worker.ffmpegConfig.videoCRF` | `0` (profile default) | SVT CRF `26` or x265 CRF `21` when omitted. Invalid with NVENC. |
 | `worker.ffmpegConfig.videoProfile` | Empty | x265 `main10` when omitted. Invalid with AV1. |
 | `worker.ffmpegConfig.audioCodec` | `libfdk_aac` | Audio encoder passed per selected stream as `-c:a:N`. |
 | `worker.ffmpegConfig.audioVBR` | `5` | Audio quality passed per selected stream as `-vbr`. |
@@ -143,12 +143,12 @@ The video portion is one of:
 AV1 GPU: -pix_fmt p010le -c:v av1_nvenc -preset p7 -tune uhq -rc vbr
          -cq 38 -b:v 0 -multipass fullres -bf 4 -b_ref_mode middle
          -split_encode_mode disabled -qmin 0 -qmax 100
-AV1 CPU: -pix_fmt yuv420p10le -c:v libsvtav1 -preset 4 -crf 25
+AV1 CPU: -pix_fmt yuv420p10le -c:v libsvtav1 -preset 4 -crf 26
 HEVC:    -pix_fmt yuv420p10le -c:v libx265 -crf 21
          -profile:v main10 -preset medium
 ```
 
-The output is probed, hashed with SHA-256, and measured in bytes. Duration verification uses `worker.verifyDeltaTime`; an encoded MKV larger than its source is rejected before upload. No VMAF prepass or automatic retry is required. Current defaults are the fixed GPU p7/UHQ/CQ38 profile and SVT preset 4 / CRF25; neither guarantees a p5 VMAF target for every title. Three representative 15-second clips showed 18–49% smaller video outputs at these candidate settings, with p5 VMAF changes from -0.13 to -2.37 for NVENC and -0.48 to -1.37 for SVT. Grain, motion, resolution, source codec, and scene complexity change the result; short clips do not predict every full film.
+The output is probed, hashed with SHA-256, and measured in bytes. Duration verification uses `worker.verifyDeltaTime`; an encoded MKV larger than its source is rejected before upload. No VMAF prepass or automatic retry is required. Current defaults are the fixed GPU p7/UHQ/CQ38 profile and SVT preset 4 / CRF26; neither guarantees a p5 VMAF target for every title. On three 24-second film excerpts, SVT-AV1 4.3.0 / CRF26 used 14.3–16.0% fewer video bytes than 4.2.0 / CRF25, with mean VMAF reductions of 0.286–0.363 point. Grain, motion, resolution and scene complexity affect the result; short clips do not establish full-film quality. See the [version/profile comparison](../docs/av1-svt-4-3-comparison.md).
 
 ### Example worker YAML
 
@@ -174,13 +174,22 @@ worker:
     parallelJobs: 2
 ```
 
-For a CPU worker set `videoCodec: libsvtav1`; the default is preset `4` / CRF `25`. Set `parallelJobs: 1` if a single SVT encode should have the CPU to itself. For x265 rollback set `videoCodec: libx265`, `videoPreset: medium`, `videoProfile: main10`, and `videoCRF: 21`. Remove NVENC-only `videoCQ` and `videoQMax` from either alternative profile. The separate `worker.threads` flag does not drive FFmpeg. The worker image supplies FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract assets.
+For a CPU worker set `videoCodec: libsvtav1`; the default is preset `4` / CRF `26`. Set `parallelJobs: 1` if a single SVT encode should have the CPU to itself. For x265 rollback set `videoCodec: libx265`, `videoPreset: medium`, `videoProfile: main10`, and `videoCRF: 21`. Remove NVENC-only `videoCQ` and `videoQMax` from either alternative profile. The separate `worker.threads` flag does not drive FFmpeg. The worker image supplies FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract assets.
+
+The bundled FFmpeg remains version 9.0.2; Linux and Windows pin SVT-AV1 4.3.0
+for `libsvtav1`. The CPU profile remains preset 4 / CRF26. The offline version
+comparison and its time/size/quality boundaries are recorded in
+[`docs/av1-svt-4-3-comparison.md`](../docs/av1-svt-4-3-comparison.md).
+
+Explicit CRF25 remains supported. New SVT jobs save the resolved CRF in their
+profile snapshot; saved legacy SVT profiles with CRF0 retain the previous
+CRF25 value on resume.
 
 ### Independent CPU and GPU limits per worker
 
 The server stores an optional atomic `cpuJobs`/`gpuJobs` pair under each stable worker name. A pair overrides single-limit admission: CPU 2 and GPU 3 allow two CPU and three GPU encodes concurrently in one worker process, plus one bounded preparation/verification pipeline job. Each class drains on decrease; zero disables new unassigned work for that class, and both zero hold admission and queued encode starts while running/downstream work finishes. Pinned restored jobs retain their class/profile and can use bounded drain capacity on a disabled class. Workers synchronize about every five seconds, including while paused. Legacy clients without the independent-encoder capability read aggregate zero when a pair exists, preventing them from assigning the sum to their only encoder.
 
-The preferred startup profile remains `worker.ffmpegConfig`. The other class defaults to SVT-AV1 preset 4/CRF25 or NVENC p7/CQ38, retaining shared audio/thread settings and omitting the other class's quality flags and extraArgs. Optional YAML-only `worker.cpuFFmpegConfig` and `worker.gpuFFmpegConfig` override the corresponding profiles; a CPU profile accepts libsvtav1/libx265 and a GPU profile accepts av1_nvenc. Empty profile videoCodec selects that class's default. Invalid combinations fail startup. The server's dashboard controls concurrency, not profile quality.
+The preferred startup profile remains `worker.ffmpegConfig`. The other class defaults to SVT-AV1 preset 4/CRF26 or NVENC p7/CQ38, retaining shared audio/thread settings and omitting the other class's quality flags and extraArgs. Optional YAML-only `worker.cpuFFmpegConfig` and `worker.gpuFFmpegConfig` override the corresponding profiles; a CPU profile accepts libsvtav1/libx265 and a GPU profile accepts av1_nvenc. Empty profile videoCodec selects that class's default. Invalid combinations fail startup. The server's dashboard controls concurrency, not profile quality.
 
 ```yaml
 worker:
@@ -192,7 +201,7 @@ worker:
   cpuFFmpegConfig:
     videoCodec: libsvtav1
     videoPreset: "4"
-    videoCRF: 25
+    videoCRF: 26
   gpuFFmpegConfig:
     videoCodec: av1_nvenc
     videoPreset: p7

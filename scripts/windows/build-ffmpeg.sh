@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Windows x64 production encoders. Versions match ffmpeg-build-script v9.0.10.
+# Windows x64 encoders: ffmpeg-build-script v9.0.10 pins with SVT-AV1 4.3.0.
 set -euo pipefail
 script_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 stage=$1

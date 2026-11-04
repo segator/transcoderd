@@ -72,7 +72,7 @@ func (c *FFMPEGConfig) ResolveVideoSettings() (VideoSettings, error) {
 		}
 		crf := c.VideoCRF
 		if crf == 0 {
-			crf = 25
+			crf = 26
 		}
 		if crf < 1 || crf > 63 {
 			return VideoSettings{}, fmt.Errorf("libsvtav1 videoCRF must be 1 through 63, got %d", crf)

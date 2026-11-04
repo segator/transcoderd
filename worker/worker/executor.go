@@ -709,6 +709,13 @@ func (e *JobExecutor) pinEncoderProfile(j *job.Context, kind string) error {
 		if config.EncoderKind(video.Codec) != kind {
 			return fmt.Errorf("saved encoder profile does not match %s slot", kind)
 		}
+		if video.Codec == config.AV1SVT && j.EncodeConfig.VideoCRF == 0 {
+			// Older snapshots stored the omitted CRF as zero while the default
+			// was 25. Keep accepted work at its previous quality after upgrades.
+			saved := *j.EncodeConfig
+			saved.VideoCRF = 25
+			j.EncodeConfig = &saved
+		}
 		j.EncodeKind = kind
 		return nil
 	}
@@ -721,6 +728,13 @@ func (e *JobExecutor) pinEncoderProfile(j *job.Context, kind string) error {
 		profile = cpu
 	}
 	copy := *profile
+	video, err := profile.ResolveVideoSettings()
+	if err != nil {
+		return fmt.Errorf("resolve selected encoder profile: %w", err)
+	}
+	if video.Codec == config.AV1SVT {
+		copy.VideoCRF = video.CRF
+	}
 	j.EncodeKind, j.EncodeConfig = kind, &copy
 	return nil
 }

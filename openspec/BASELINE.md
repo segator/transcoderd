@@ -83,3 +83,8 @@ Local image verification also found the previous Docker loader assumed OCI archi
 ### Frontend OIDC and Kubernetes (2026-11-04)
 
 The frontend now owns optional OIDC browser login while API session validation/revocation remains server-owned. Token mode stays the compatibility default. `frontend/web/oidc.go` validates discovery, code/PKCE, state/nonce and signed identity/group claims, then encrypts the API session for interchangeable frontend replicas. OIDC mode refuses token/legacy-cookie fallback. The historical API-only frontend constraint now also permits identity-provider access and runtime auth secrets; media/database access remains unnecessary. Session/key/provider/logout limitations and k3s/Traefik examples are documented in `docs/frontend-authentication.md` and `deploy/kubernetes/frontend/`.
+
+
+### SVT CRF default and saved profiles (2026-11-04)
+
+Before `lower-svt-default-crf-26`, profile pinning copied omitted SVT CRF as zero, so persisted jobs could resolve against a later binary default. This disagreed with the immutable per-job profile contract. The change stores the resolved CRF for new SVT profiles and restores legacy zero snapshots as CRF25, the default present when profile persistence was introduced (c98e80d). Explicit saved overrides remain unchanged. Disk round-trip regression tests cover new CRF26 work, old implicit CRF25 work and explicit qualities across later startup configuration changes. The selected CRF26 default is based on the recorded short-scene size/quality trade-off, not a new quality guarantee.

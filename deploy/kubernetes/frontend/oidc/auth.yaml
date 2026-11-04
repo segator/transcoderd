@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: transcoderd-frontend
+data:
+  TR_FRONTEND_AUTH_MODE: "oidc"
+  TR_FRONTEND_AUTH_OIDC_ISSUER_URL: "https://auth.example.com/application/o/transcoderd/"
+  TR_FRONTEND_AUTH_OIDC_CLIENT_ID: "replace-with-authentik-client-id"
+  TR_FRONTEND_AUTH_OIDC_SCOPES: "openid,profile,email"
+  TR_FRONTEND_AUTH_OIDC_ALLOWED_GROUPS: "transcoderd-operators"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcoderd-frontend
+spec:
+  template:
+    spec:
+      containers:
+        - name: frontend
+          env:
+            - name: TR_FRONTEND_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: transcoderd-frontend-auth
+                  key: api-token
+            - name: TR_FRONTEND_AUTH_SESSION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: transcoderd-frontend-auth
+                  key: session-key
+            - name: TR_FRONTEND_AUTH_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: transcoderd-frontend-auth
+                  key: client-secret

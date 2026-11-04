@@ -6,7 +6,7 @@ This reference records the configuration accepted by the current binaries. The O
 
 Both binaries register CLI flags, read YAML through Viper, and enable environment lookup with the `TR_` prefix. Configuration files are searched in `/etc/transcoderd/`, `$HOME/.transcoderd/`, and the current directory. CLI flags override values read from the file. The application does not install a Viper environment-key replacer; nested environment variable spellings such as `TR_WORKER_FFMPEGCONFIG_VIDEOCRF` have not been established as a supported interface. Use YAML or CLI flags for nested values unless the mapping is verified.
 
-The `envconfig` struct tags are not consumed by the Viper setup. They document field intent, but are not evidence that the corresponding environment variable works. The two dashboard settings are explicit exceptions and bind `TR_WORKER_DASHBOARD_LISTEN_ADDRESS` and `TR_WORKER_DASHBOARD_TOKEN`.
+The `envconfig` struct tags are not consumed by the Viper setup. They document field intent, but are not evidence that the corresponding environment variable works. Dashboard settings explicitly bind `TR_WORKER_DASHBOARD_LISTEN_ADDRESS`, `TR_WORKER_DASHBOARD_TOKEN` and the server login credential `TR_WEB_DASHBOARD_TOKEN`.
 
 Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDeltaTime` is a number of seconds, not a duration string. `server.database.scheme` is passed as the PostgreSQL database name (`dbname`).
 
@@ -16,6 +16,7 @@ Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDelta
 | --- | --- | --- |
 | `web.port` | `8080` | Server HTTP listen port. |
 | `web.token` | `admin` | Bearer token for job and event control routes. |
+| `web.dashboardToken` | `encoding123` | API-owned dashboard login credential; token-mode user token or private OIDC frontend login credential. Explicit env TR_WEB_DASHBOARD_TOKEN. Separate from worker API credentials. |
 | `web.domain` | `http://localhost:8080` | Base URL used by workers for requests and media transfer. |
 | `updateCheckInterval` | `15m` | Minimum interval between release queries. |
 | `noUpdates` | `false` | Disable executable replacement. |
@@ -32,7 +33,7 @@ Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDelta
 | `server.database.password` | `postgres` | PostgreSQL password. |
 | `server.database.scheme` | `server` | PostgreSQL database name. |
 
-The four control routes (`POST /api/v1/job/`, `DELETE /api/v1/job/{jobid}`, `GET /api/v1/job/request`, and `POST /api/v1/event`) check `Authorization: Bearer <web.token>`. The media routes do not use that middleware; see `BASELINE.md`.
+Job, event, and worker-settings control routes check `Authorization: Bearer <web.token>`. The media routes do not use that middleware; see `BASELINE.md`. The independent frontend serves `/dashboard/` and forwards dashboard API calls to the server. The API uses `web.dashboardToken`, not `web.token`. Its browser session lasts 12 hours; logout or a server restart revokes it. See [dashboard operations](../docs/dashboard.md) for configuration, metric definitions, and worker rollout.
 
 ### Example server YAML
 
@@ -86,7 +87,7 @@ server:
 | `worker.schedule.windows` | Empty list | OR of `Days@HH:MM-HH:MM` intervals for new requests; start inclusive, end exclusive. |
 | `--schedule` | No windows | Repeatable `HH:MM-HH:MM` or `Days@HH:MM-HH:MM` CLI shortcut using the process timezone; overrides YAML windows when supplied. |
 
-`worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered but does not control FFmpeg. With no nested `threads` value, the command asks FFmpeg for `-threads 0`. SVT-AV1 also manages its own internal parallelism. `worker.maxActiveJobs` is the default simultaneous encode target. The worker may accept at most one additional end-to-end job beyond the effective encode target, so download and preparation can run ahead and verification/upload can overlap encoding without an unbounded queue. Each non-FFmpeg phase (download, MKV extraction, PGS, verification, and upload) has one job consumer. The optional `worker.ffmpegConfig.parallelJobs` value sets only the initial encode target; zero inherits `worker.maxActiveJobs`. A positive runtime `control set-max-jobs N` changes the encode target and the bounded admission ceiling together and persists the desired value in the server database under `worker.name`. Use zero to stop new requests and queued encodes, and a positive value to resume. For standalone workers the server value overrides the startup flag after restart; Windows service profiles keep their locally configured limits. Before any value has been saved, the startup configuration applies. Setting zero retains the last positive encode target for Resume, but holds queued encodes while active encodes follow `worker.pauseMode` and downstream work finishes. The updater's temporary maintenance drain permits all accepted work to finish and is not persisted. Lowering a positive target does not interrupt running encodes; queued encodes wait for an available slot. `control status` reports `max_jobs` and the separate `admitted_limit`. This is a concurrency limit, not a promise of linearly higher throughput.
+`worker.threads` and `worker.ffmpegConfig.threads` are different fields. The former is registered but does not control FFmpeg. With no nested `threads` value, the command asks FFmpeg for `-threads 0`. SVT-AV1 also manages its own internal parallelism. `worker.maxActiveJobs` is the default simultaneous encode target. The worker may accept at most one additional end-to-end job beyond the effective encode target, so download and preparation can run ahead and verification/upload can overlap encoding without an unbounded queue. Each non-FFmpeg phase (download, MKV extraction, PGS, verification, and upload) has one job consumer. The optional `worker.ffmpegConfig.parallelJobs` value sets only the initial encode target; zero inherits `worker.maxActiveJobs`. A positive runtime `control set-max-jobs N` changes the encode target and the bounded admission ceiling together and persists the desired value in the server database under `worker.name`. Use zero to stop new requests and queued encodes, and a positive value to resume. For standalone workers the server value overrides the startup flag after restart; Windows service profiles also restore stored server limits and keep their local defaults when absent. Before any value has been saved, the startup configuration applies. Setting zero retains the last positive encode target for Resume, but holds queued encodes while active encodes follow `worker.pauseMode` and downstream work finishes. The updater's temporary maintenance drain permits all accepted work to finish and is not persisted. Lowering a positive target does not interrupt running encodes; queued encodes wait for an available slot. `control status` reports `max_jobs` and the separate `admitted_limit`. This is a concurrency limit, not a promise of linearly higher throughput.
 
 The worker image bundles FFmpeg 9.0.2 with `libsvtav1`, `libaom-av1`, and `av1_nvenc`. The default now requires an NVIDIA GPU available to the worker container. On Linux, configure the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) and pass `--gpus all`; WSL2 may require the validated `/dev/dxg` driver mounts described in [the RTX 5080 validation](../docs/av1-nvenc-validation.md). For CPU-only workers select `libsvtav1` explicitly. Invalid combinations fail at worker startup, before accepting jobs. The exact approved full-film argument vector is in [the pilot record](../docs/av1-gpu-full-film-command.md).
 
@@ -175,6 +176,31 @@ worker:
 
 For a CPU worker set `videoCodec: libsvtav1`; the default is preset `4` / CRF `25`. Set `parallelJobs: 1` if a single SVT encode should have the CPU to itself. For x265 rollback set `videoCodec: libx265`, `videoPreset: medium`, `videoProfile: main10`, and `videoCRF: 21`. Remove NVENC-only `videoCQ` and `videoQMax` from either alternative profile. The separate `worker.threads` flag does not drive FFmpeg. The worker image supplies FFmpeg, ffprobe, mkvextract, .NET, PgsToSrt, and Tesseract assets.
 
+### Independent CPU and GPU limits per worker
+
+The server stores an optional atomic `cpuJobs`/`gpuJobs` pair under each stable worker name. A pair overrides single-limit admission: CPU 2 and GPU 3 allow two CPU and three GPU encodes concurrently in one worker process, plus one bounded preparation/verification pipeline job. Each class drains on decrease; zero disables new unassigned work for that class, and both zero hold admission and queued encode starts while running/downstream work finishes. Pinned restored jobs retain their class/profile and can use bounded drain capacity on a disabled class. Workers synchronize about every five seconds, including while paused. Legacy clients without the independent-encoder capability read aggregate zero when a pair exists, preventing them from assigning the sum to their only encoder.
+
+The preferred startup profile remains `worker.ffmpegConfig`. The other class defaults to SVT-AV1 preset 4/CRF25 or NVENC p7/CQ38, retaining shared audio/thread settings and omitting the other class's quality flags and extraArgs. Optional YAML-only `worker.cpuFFmpegConfig` and `worker.gpuFFmpegConfig` override the corresponding profiles; a CPU profile accepts libsvtav1/libx265 and a GPU profile accepts av1_nvenc. Empty profile videoCodec selects that class's default. Invalid combinations fail startup. The server's dashboard controls concurrency, not profile quality.
+
+```yaml
+worker:
+  name: mixed-5080
+  ffmpegConfig:
+    videoCodec: av1_nvenc
+    audioCodec: libfdk_aac
+    audioVBR: 5
+  cpuFFmpegConfig:
+    videoCodec: libsvtav1
+    videoPreset: "4"
+    videoCRF: 25
+  gpuFFmpegConfig:
+    videoCodec: av1_nvenc
+    videoPreset: p7
+    videoCQ: 38
+```
+
+Save `{"cpuJobs":2,"gpuJobs":3}` from the dashboard settings API or its Workers form. A missing pair preserves legacy startup settings. A positive local `control set-max-jobs N` clears a pair and returns to N slots on the preferred startup encoder. GPU slots require the NVIDIA runtime; no automatic backend fallback is performed. Per-job profile snapshots preserve encoder choice after restart.
+
 ### Separate CPU and GPU workers
 
 Run two worker instances using the same server URL, credential, and schedule.
@@ -232,6 +258,12 @@ explain each FFmpeg parameter, including audio and the CPU preset alternatives.
 
 The OCR language is derived from each subtitle stream's language metadata. The worker maps common two- and three-letter codes for several languages and otherwise passes through the source code; an empty language falls back to English.
 
+
+### Dashboard media libraries and previews
+
+The server source library is `server.scheduler.sourcePath` and remains the only queueable root. `web.mediaRoots` is an optional map of named read-only absolute roots; it defaults to empty. Example `web.mediaRoots.encoded: /target` or `--web.mediaRoots encoded=/target` exposes an existing output mount. IDs use lowercase ASCII letters/digits/underscore/hyphen, up to 32 characters; `source` is reserved. Invalid entries are ignored. Missing roots are labeled unavailable. `web.previewMaxStreams` defaults to 2; values below 1 use 2. Compatible playback uses bounded H.264/AAC conversion up to 720p, independently of worker encode slots. Original streaming supports byte ranges. Every media endpoint uses dashboard auth.
+
+Scans default to 1000 probe candidates (allowed 1–5000), two probe slots with 15-second timeouts, and a 100000-video discovery ceiling. Batches require completed reviewed selections and a 1–5000 successful-job target. At most two operations run, at most eight are retained, completed handles expire after 30 minutes, and operations time out after two hours. Metadata persists in migration 009. See `docs/media-library.md` for all filter semantics, defaults, rooted playback and jvdivx mount examples.
 ## RAM pause control
 
 The dashboard has two independent controls: **Stop after current / Resume queue** holds admission and queued encode starts while active encodes finish; **Pause encodes / Resume encodes** suspends owned CPU/GPU encoding processes immediately in RAM. Releasing one preserves the other and individual holds.
@@ -241,3 +273,31 @@ The dashboard has two independent controls: **Stop after current / Resume queue*
 For standalone compatibility, `worker.pauseMode` remains `finish` by default and legacy `control set-max-jobs N` retains its zero-limit policy. The explicit actions are independent of that policy. Standalone live RAM actions last until worker exit unless the startup preference is supplied in configuration.
 
 RAM pause retains memory, GPU allocations, occupied encode slots and open output files. It cannot preserve encoder state across worker exit, shutdown or reboot. The server assignment timeout remains in force. Maintenance releases live RAM and individual holds before draining accepted work without changing saved desktop preferences.
+
+
+### Worker UI synchronization
+
+Local HTTP `POST /api/worker/max-jobs` accepts either legacy `maxJobs` or the atomic `cpuJobs`/`gpuJobs` pair (total at most 1024); missing, mixed or incomplete settings are rejected. Local CLI `control set-encoder-jobs CPU GPU` shares the same server persistence. Settings writes complete before local runtime changes. Managed startup restores server overrides and keeps local service defaults when absent. Last committed writes win; worker polls and heartbeats run approximately every five seconds, fleet refresh every five seconds, local browser refresh every two seconds.
+
+Runtime heartbeat data adds `paused`, `ramPaused`, `pauseMode`, `suspendedEncodes`, `finishing`, `draining`, `managedProfile` and bounded `jobs` entries (`id`, `phase`, `state`, `individuallyPaused`, `pausedByWorker`). These observations do not overwrite desired limits. RAM and individual holds survive capacity changes. Queue stop holds pending encodes; maintenance/finish allows accepted work to drain without reopening admission. Windows supervised profiles retain their encoder class and support up to 64 slots each; incompatible fleet pair writes return 400. See `docs/dashboard.md`.
+
+## Independent fleet frontend
+
+`transcoderd-frontend` serves all fleet HTML/assets/PWA content and proxies only dashboard APIs. TranscoderD serves no UI assets. The frontend has no server/database/media/tool initialization and needs network access to the API and optionally the OIDC provider. It uses its own YAML/CLI configuration with the same config.yaml search paths or an explicit `--config` file. CLI overrides environment and YAML.
+
+| Key | Default | Explicit environment | Effect |
+| --- | --- | --- | --- |
+| `frontend.listen` | `:8081` | `TR_FRONTEND_LISTEN` | Independent HTTP listener. |
+| `frontend.apiURL` | `http://localhost:8080` | `TR_FRONTEND_API_URL` | Fixed TranscoderD API origin. |
+| `frontend.publicURL` | empty | `TR_FRONTEND_PUBLIC_URL` | External browser origin for mutation checks and Secure cookies behind TLS termination; unset uses direct request HTTP/TLS and Host, ignoring forwarded headers. |
+
+Both URL settings accept HTTP(S) origins without credentials, non-root paths, query or fragment. Browser requests remain same-origin through the frontend API proxy, including cookies, media ranges and streaming. API authentication/sessions, library state, FFmpeg and job operations remain on the API server. Optional OIDC browser login runs on the frontend. Worker local UI settings are unaffected. See [dashboard deployment](../docs/dashboard.md#deploy-on-a-separate-host).
+
+
+### Frontend authentication modes
+
+`frontend.auth.mode` defaults to `token`, preserving the API-owned single-user token login and twelve-hour session. In `oidc` mode, configure `frontend.apiToken` (matching API `web.dashboardToken`, at least 32 characters), `frontend.auth.sessionKey` (standard base64 of 32 random bytes), and `frontend.auth.oidc.issuerURL`, `clientID`, `clientSecret`. `scopes` defaults to `[openid, profile, email]`; openid is always requested. `allowedGroups` defaults to empty (provider application policy); a configured list requires any matching signed `groups` value. OIDC requires publicURL, secure provider/public endpoints (HTTP permitted only for loopback development), successful discovery and complete secrets; invalid settings fail startup without downgrade.
+
+Explicit frontend environment names are `TR_FRONTEND_AUTH_MODE`, `TR_FRONTEND_API_TOKEN`, `TR_FRONTEND_AUTH_SESSION_KEY`, `TR_FRONTEND_AUTH_OIDC_ISSUER_URL`, `TR_FRONTEND_AUTH_OIDC_CLIENT_ID`, `TR_FRONTEND_AUTH_OIDC_CLIENT_SECRET`, `TR_FRONTEND_AUTH_OIDC_SCOPES` and `TR_FRONTEND_AUTH_OIDC_ALLOWED_GROUPS`. Array environment/CLI values are comma-separated. Equivalent `--frontend.*` flags override environment and YAML. The server additionally binds `TR_WEB_DASHBOARD_TOKEN` with normal CLI precedence.
+
+The OIDC callback is `<frontend.publicURL>/dashboard/auth/callback`. Frontend replicas share the session key and API instance. API-owned sessions remain revocable; the browser's frontend cookie encrypts the opaque API session and never stores provider tokens or the API login credential. OIDC cookies are HttpOnly SameSite=Lax, with Secure for HTTPS; token-mode API cookies remain HttpOnly SameSite=Strict. Token fallback is disabled in OIDC mode. See [authentication, Authentik/Google and k3s examples](../docs/frontend-authentication.md).

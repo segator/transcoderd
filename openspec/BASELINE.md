@@ -17,6 +17,7 @@ The specs state observable behavior and the configuration values that affect it.
 | `persistence` | `server/repository/repository.go`, `server/repository/resources/database/` |
 | `maintenance-and-recovery` | `server/scheduler/scheduler.go`, `worker/job/job.go`, `worker/worker/executor.go` |
 | `self-update` | `update/update.go`, `update/managed/`, `cmd/windows-service/updates_windows.go`, `server/web/web.go`, `worker/worker/coordinator.go` |
+| `operations-dashboard` | `frontend/`, `server/web/dashboard*`, `server/repository/dashboard.go`, `model/dashboard.go`, `worker/worker/coordinator.go` |
 
 ## Known implementation gaps
 
@@ -30,6 +31,7 @@ These observations are not normative requirements. They need separate fixes or e
 - Several entries in the accepted-extension list include trailing spaces, so ordinary `.mov`, `.ogx`, `.asf`, and `.vob` files fail the extension check; matching is also case-sensitive.
 - Job intake joins the submitted `sourcePath` with the media root but does not reject traversal segments or verify that the resolved path remains inside the root.
 - Viper enables a `TR_` environment prefix, but does not configure a nested-key replacer. The `envconfig` struct tags are not read by the Viper setup, so nested environment-variable spellings are not a verified interface.
+- Historical notification/presence columns are naive SQL timestamps. Before the dashboard change, notification and presence writes used server local time while progress used database session time. The dashboard change normalizes new monitoring writes and timeout comparisons to UTC, but cannot infer or rewrite the timezone of old rows. Historical dashboards on previously non-UTC deployments may require an explicit operator-led timestamp correction.
 
 ## Resolved implementation discrepancies
 
@@ -41,9 +43,43 @@ These observations are not normative requirements. They need separate fixes or e
 
 ## Verification boundary
 
+Dashboard investigation identified two pre-existing contract discrepancies: main job-dispatch specs still described the prefetch-free admission ceiling and local-only persisted controls even though completed active deltas `keep-encoder-prefetched` and `persist-worker-job-limit` describe shipped code. Those deltas remain separate changes; dashboard capacity displays follow the implemented encode-target-plus-two ceiling. The dashboard change explicitly supersedes the local-only operator restriction while keeping the worker listener local. It also fixes the worker lookup's obsolete `queue_name` scan, which disagreed with migration 003 and would break reads after the additive telemetry migration; PostgreSQL regression coverage verifies that lookup.
+
 `openspec validate --all --strict` checks document structure. Go unit tests cover parts of scheduling, media inspection, context persistence, and steps. PostgreSQL integration tests and Docker end-to-end tests use the `integration` build tag. Structural validation does not prove behavior; each future code change needs tests for the scenarios it affects.
+
+
+### Media library and reviewed intake (2026-11-03)
+
+`server/library/` implements rooted discovery, metadata caching, bounded scan/load operations and compatible/original playback; `server/web/media.go` exposes authenticated dashboard routes. Migration 009 persists fingerprinted probes. The source root is queueable and optional `web.mediaRoots` are read-only. See `docs/media-library.md` for inspected Unraid script provenance and mount examples. Legacy Plex-only metadata type selection is intentionally replaced by filesystem discovery within operator-selected folders.
+
+Investigation found `SQLRepository.WithTransaction` previously committed callback failures and could hide commit errors because its deferred closure observed an unchanged local error. The media-library change fixes rollback/commit propagation and includes real PostgreSQL callback-rollback and deferred-constraint commit-failure tests. Per-file intake is serialized across dashboard and legacy requests to prevent duplicate creation within one scheduler process; trusted reviewed probes avoid a second unrooted probe. Existing legacy recursive job intake has its own extension/filter semantics; the new rooted library does not silently rewrite those contracts.
 - Complete Windows upgrades previously assumed the configured workspace was outside the installation tree, although desktop configuration accepted nested paths. The mandatory updater change rejects those paths (including existing junction aliases) during configuration and bootstrap before Setup can replace files; existing affected installations must choose an external workspace before bootstrap.
 
 - Consecutive managed Windows updates exposed stale completed-journal recovery clearing a newer pending target after downloading it, falsely reporting success and reopening admission. The coordinator now requires matching pending release and signed candidate identity before clearing a completed barrier; regression coverage retains newer targets through drain and installation.
 
 - Manual Windows Setup previously invoked the installed helper and aborted at the first busy CPU profile, potentially leaving GPU admission open. Setup now uses its extracted helper to hold both profiles and wait for accepted work before replacement. Immediate service preparation also drains/checks both profiles and rejects missing configured workers.
+
+
+### Worker UI synchronization and current main integration (2026-11-03)
+
+The dashboard branch was integrated with main through 884c371, including the shared worker UI, Windows service and queue/RAM controls. Main changed the pipeline buffer from two to one and operator zero from draining all queued encodes to holding queued starts. The synchronization change reconciles those observable contracts explicitly; archived earlier evidence remains historical. It also replaces managed startup's unconditional server overwrite with existing-override restoration, with read-only fallback to local defaults for an empty store. Local pair writes persist first, and worker polling serializes with local controls. RAM toggles previously reset independent limits through the single-limit setter; they now preserve the pair and individual holds. Fleet telemetry records queue/RAM/job/maintenance observations separately from desired settings. `worker/worker/dashboardSync_test.go` exercises real local HTTP -> worker API -> repository -> heartbeat -> fleet data and the reverse direction.
+
+
+### Installable dashboard PWA (2026-11-04)
+
+`server/web/dashboardPWA.go` versions the scoped worker and allowlisted embedded public assets by content; the dashboard/login metadata and branded icons support installation. Offline navigation receives only the generic reconnect page. Neither authenticated HTML nor APIs/media/credentials enter CacheStorage, and background mutations are never replayed. `dashboardPWA_test.go` and Node lifecycle tests cover HTTP/auth and cache boundaries; real Chromium verifies installability, offline/reconnect/logout and update behavior. Investigation also found that the mobile sidebar hid the only logout button; the PWA change adds a mobile topbar logout action. Runtime fallbacks use non-creating cache lookups so an old in-flight worker cannot resurrect its deleted cache after activation.
+
+### Independent fleet frontend (2026-11-04)
+
+The operator changed the deployment requirement after the embedded UI implementation: the frontend host has API network access only. This is an intentional superseding architecture change, not an undocumented regression. `frontend/` now owns fleet assets, PWA and a restricted streaming proxy; `server/web/` owns dashboard/session/media APIs without frontend assets. Earlier embedded-server verification remains historical. The worker-local UI stays separate from fleet hosting. Frontend configuration and build/image targets are documented in the configuration and dashboard references.
+
+Local image verification also found the previous Docker loader assumed OCI archives create a role:latest tag, although docker load returned an untagged image ID. Application image exports now use the pinned Dagger SDK host-image export with each requested tag, retaining the OCI archive fallback. This restores the documented usable local image tags for the new frontend and existing roles.
+
+### Worker hardware monitoring (2026-11-04)
+
+`worker/resources/` samples OS-visible CPU/RAM and read-only NVIDIA metrics in the worker lifecycle. Optional model resources flow through existing heartbeat/runtime JSON into the independent frontend. Overview navigation selects worker details with bounded in-memory resource plots. Slot counts remain capacity, not utilization; unsupported sensors, CPU warm-up and stale samples stay explicit. No monitoring schema migration or frontend access to host counters is introduced.
+
+
+### Frontend OIDC and Kubernetes (2026-11-04)
+
+The frontend now owns optional OIDC browser login while API session validation/revocation remains server-owned. Token mode stays the compatibility default. `frontend/web/oidc.go` validates discovery, code/PKCE, state/nonce and signed identity/group claims, then encrypts the API session for interchangeable frontend replicas. OIDC mode refuses token/legacy-cookie fallback. The historical API-only frontend constraint now also permits identity-provider access and runtime auth secrets; media/database access remains unnecessary. Session/key/provider/logout limitations and k3s/Traefik examples are documented in `docs/frontend-authentication.md` and `deploy/kubernetes/frontend/`.

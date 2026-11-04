@@ -76,6 +76,7 @@ type Worker struct {
 	Ip        string
 	QueueName string
 	LastSeen  time.Time
+	Runtime   *WorkerRuntime
 }
 
 type JobEvent struct {
@@ -120,6 +121,7 @@ type TaskEventType struct {
 
 type PingEventType struct {
 	Event
+	Runtime *WorkerRuntime `json:"runtime,omitempty"`
 }
 
 type TaskProgressStatus string
@@ -179,11 +181,12 @@ type JobRequestError struct {
 	Error string `json:"error"`
 }
 type JobRequest struct {
-	SourcePath     string `json:"sourcePath"`
-	ForceCompleted bool   `json:"forceCompleted"`
-	ForceFailed    bool   `json:"forceFailed"`
-	ForceCanceled  bool   `json:"forceCanceled"`
-	ForceAssigned  bool   `json:"forceAssigned"`
+	SourceProbe    *MediaProbe `json:"-"`
+	SourcePath     string      `json:"sourcePath"`
+	ForceCompleted bool        `json:"forceCompleted"`
+	ForceFailed    bool        `json:"forceFailed"`
+	ForceCanceled  bool        `json:"forceCanceled"`
+	ForceAssigned  bool        `json:"forceAssigned"`
 	SourceSize     int64
 	TargetPath     string
 }

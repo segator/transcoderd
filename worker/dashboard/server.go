@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"transcoder/model"
 	"transcoder/version"
 	"transcoder/worker/control"
 
@@ -58,21 +59,48 @@ func Start(address, token string, worker admissionController) (*Server, error) {
 	}))
 	mux.HandleFunc("POST /api/worker/max-jobs", authorize(token, func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			MaxJobs int `json:"maxJobs"`
+			MaxJobs *int `json:"maxJobs"`
+			CPUJobs *int `json:"cpuJobs"`
+			GPUJobs *int `json:"gpuJobs"`
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1024)
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MaxJobs < 0 || req.MaxJobs > 1024 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"maxJobs must be an integer between 0 and 1024"}`, http.StatusBadRequest)
 			return
 		}
-		setLimit := worker.PersistMaxActiveJobs
-		if controller, ok := worker.(interface{ PersistAdmissionLimit(int) error }); ok {
-			setLimit = controller.PersistAdmissionLimit
-		}
-		if err := setLimit(req.MaxJobs); err != nil {
-			http.Error(w, `{"error":"worker could not apply the admission limit"}`, http.StatusConflict)
+		settings := model.WorkerSettings{MaxActiveJobs: req.MaxJobs, CPUJobs: req.CPUJobs, GPUJobs: req.GPUJobs}
+		if err := settings.ValidateWrite(); err != nil {
+			http.Error(w, `{"error":"supply maxJobs or both non-negative cpuJobs and gpuJobs"}`, 400)
 			return
 		}
+		var err error
+		if settings.Independent() {
+			controller, ok := worker.(interface{ PersistEncoderLimits(int, int) error })
+			if !ok {
+				http.Error(w, `{"error":"independent encoder controls unavailable"}`, http.StatusServiceUnavailable)
+				return
+			}
+			if *req.CPUJobs > 1024 || *req.GPUJobs > 1024 || *req.CPUJobs+*req.GPUJobs > 1024 {
+				http.Error(w, `{"error":"encoder total must not exceed 1024"}`, 400)
+				return
+			}
+			err = controller.PersistEncoderLimits(*req.CPUJobs, *req.GPUJobs)
+		} else {
+			if *req.MaxJobs > 1024 {
+				http.Error(w, `{"error":"maxJobs must not exceed 1024"}`, 400)
+				return
+			}
+			setLimit := worker.PersistMaxActiveJobs
+			if controller, ok := worker.(interface{ PersistAdmissionLimit(int) error }); ok {
+				setLimit = controller.PersistAdmissionLimit
+			}
+			err = setLimit(*req.MaxJobs)
+		}
+		if err != nil {
+			http.Error(w, `{"error":"worker could not persist and apply the limit"}`, http.StatusConflict)
+			return
+		}
+
 		writeJSON(w, statusResponse{Configured: true, Running: true, Version: version.Version, Worker: worker.AdmissionStatus()})
 	}))
 	for _, action := range []string{"pause", "resume"} {
@@ -169,3 +197,6 @@ func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(value)
 }
+
+// Addr returns the bound address, including the selected ephemeral port.
+func (s *Server) Addr() net.Addr { return s.listener.Addr() }

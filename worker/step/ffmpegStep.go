@@ -87,7 +87,11 @@ func (f *FFMPEGStepExecutor) ffmpegProgressRoutine(ctx context.Context, job *job
 
 func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledLogger, jobContext *job.Context, ffmpegProgressChan chan<- ffmpegProgress) error {
 	defer close(ffmpegProgressChan)
-	ffmpegGenerator := &FFMPEGGenerator{Config: f.ffmpegConfig}
+	profile := f.ffmpegConfig
+	if jobContext.EncodeConfig != nil {
+		profile = jobContext.EncodeConfig
+	}
+	ffmpegGenerator := &FFMPEGGenerator{Config: profile}
 	ffmpegGenerator.setInputFilters(jobContext)
 	if err := ffmpegGenerator.setVideoFilters(jobContext.Source.FFProbeData); err != nil {
 		return err
@@ -136,7 +140,7 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 	encodedFilePath := fmt.Sprintf("%s-encoded.%s", strings.TrimSuffix(sourceFileName, filepath.Ext(sourceFileName)), "mkv")
 	targetPath := filepath.Join(jobContext.WorkingDir, encodedFilePath)
 
-	ffmpegArguments := ffmpegGenerator.buildArguments(uint8(f.ffmpegConfig.Threads), f.ffmpegConfig.ExtraArgs, targetPath)
+	ffmpegArguments := ffmpegGenerator.buildArguments(uint8(profile.Threads), profile.ExtraArgs, targetPath)
 	ffmpegCommand := command.NewCommand(helper.GetFFmpegPath(), ffmpegArguments...).SetPauseController(f.pauseController, jobContext.JobId.String())
 	logger.Cmdf("FFMPEG Command: %s", ffmpegCommand.GetFullCommand())
 	ffmpegCommand = ffmpegCommand.

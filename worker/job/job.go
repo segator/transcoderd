@@ -10,17 +10,20 @@ import (
 	"github.com/google/uuid"
 
 	"transcoder/model"
+	"transcoder/worker/config"
 	"transcoder/worker/ffmpeg"
 )
 
 type Context struct {
-	JobId            uuid.UUID         `json:"job_id"`
-	EventId          int               `json:"event_id"`
-	WorkingDir       string            `json:"working_dir"`
-	LastEvent        *ContextEvent     `json:"last_event"`
-	Source           *VideoData        `json:"source"`
-	Target           *VideoData        `json:"target"`
-	TargetMediaProbe *model.MediaProbe `json:"target_media_probe,omitempty"`
+	JobId            uuid.UUID            `json:"job_id"`
+	EventId          int                  `json:"event_id"`
+	WorkingDir       string               `json:"working_dir"`
+	LastEvent        *ContextEvent        `json:"last_event"`
+	Source           *VideoData           `json:"source"`
+	Target           *VideoData           `json:"target"`
+	TargetMediaProbe *model.MediaProbe    `json:"target_media_probe,omitempty"`
+	EncodeKind       string               `json:"encode_kind,omitempty"`
+	EncodeConfig     *config.FFMPEGConfig `json:"encode_config,omitempty"`
 	mu               sync.Mutex
 }
 

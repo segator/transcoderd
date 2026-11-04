@@ -303,3 +303,40 @@ func TestSeparateRAMPauseCommandsDoNotChangeLimits(t *testing.T) {
 		}
 	}
 }
+
+func (f *fakeController) PersistEncoderLimits(cpu, gpu int) error {
+	if cpu < 0 || gpu < 0 || cpu > int(^uint(0)>>1)-gpu {
+		return os.ErrInvalid
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status.CPUJobs, f.status.GPUJobs = cpu, gpu
+	f.status.IndependentEncoders = true
+	f.status.MaxActiveJobs = cpu + gpu
+	f.status.Accepting = cpu+gpu > 0
+	return nil
+}
+func TestIndependentEncoderCLIAndValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pair.sock")
+	state := &fakeController{}
+	server, err := Start(path, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	var output bytes.Buffer
+	if err := runCLI([]string{"set-encoder-jobs", "2", "3"}, &output, path); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "CPU=2 GPU=3") {
+		t.Fatalf("pair CLI output = %s", output.String())
+	}
+	for _, args := range [][]string{{"set-encoder-jobs", "-1", "3"}, {"set-encoder-jobs", "2"}, {"set-encoder-jobs", "x", "2"}} {
+		if err := runCLI(args, &bytes.Buffer{}, path); err == nil {
+			t.Errorf("invalid pair accepted: %v", args)
+		}
+	}
+	if s := state.AdmissionStatus(); s.CPUJobs != 2 || s.GPUJobs != 3 {
+		t.Fatalf("invalid command changed limits: %+v", s)
+	}
+}

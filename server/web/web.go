@@ -14,7 +14,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
 	"transcoder/model"
+	"transcoder/server/library"
 	"transcoder/server/scheduler"
 	"transcoder/update"
 
@@ -29,6 +31,8 @@ type Server struct {
 	ctx           context.Context
 	activeTracker *ActiveTracker
 	updater       *update.Updater
+	dashboard     *dashboardAuth
+	library       *library.Library
 }
 
 func (s *Server) listQueuedJobs(writer http.ResponseWriter, request *http.Request) {
@@ -67,13 +71,7 @@ func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-type workerSettingsRequest struct {
-	MaxActiveJobs *int `json:"maxActiveJobs"`
-}
-
-type workerSettingsResponse struct {
-	MaxActiveJobs *int `json:"maxActiveJobs"`
-}
+type workerSettingsRequest = model.WorkerSettings
 
 func workerNameFromRequest(request *http.Request) string {
 	return strings.TrimSpace(request.Header.Get("workerName"))
@@ -85,12 +83,18 @@ func (s *Server) getWorkerSettings(writer http.ResponseWriter, request *http.Req
 		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), http.StatusBadRequest)
 		return
 	}
-	max, err := s.scheduler.GetWorkerMaxActiveJobs(s.ctx, workerName)
+	settings, err := s.scheduler.GetWorkerSettings(request.Context(), workerName)
 	if webError(writer, err, http.StatusInternalServerError) {
 		return
 	}
 	writer.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(writer).Encode(workerSettingsResponse{MaxActiveJobs: max}); err != nil {
+	if settings.Independent() && request.Header.Get("workerCapabilities") != model.IndependentEncoderCapability {
+		// Old clients would apply the aggregate to their only encoder. Drain them
+		// safely until upgraded instead of violating the configured class limits.
+		zero := 0
+		settings.MaxActiveJobs = &zero
+	}
+	if err := json.NewEncoder(writer).Encode(settings); err != nil {
 		log.Errorf("Error writing worker settings response: %v", err)
 	}
 }
@@ -103,15 +107,20 @@ func (s *Server) setWorkerSettings(writer http.ResponseWriter, request *http.Req
 	}
 	defer request.Body.Close()
 	var settings workerSettingsRequest
-	if err := json.NewDecoder(request.Body).Decode(&settings); err != nil {
+	if err := decodeDashboardJSON(writer, request, &settings); err != nil {
 		webError(writer, fmt.Errorf("invalid worker settings: %w", err), http.StatusBadRequest)
 		return
 	}
-	if settings.MaxActiveJobs == nil || *settings.MaxActiveJobs < 0 {
-		webError(writer, fmt.Errorf("maxActiveJobs must be a non-negative integer"), http.StatusBadRequest)
+	if err := settings.ValidateWrite(); err != nil {
+		webError(writer, err, http.StatusBadRequest)
 		return
 	}
-	if err := s.scheduler.SetWorkerMaxActiveJobs(s.ctx, workerName, *settings.MaxActiveJobs); webError(writer, err, http.StatusInternalServerError) {
+	if err := s.scheduler.SetWorkerSettings(request.Context(), workerName, settings); err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, scheduler.ErrInvalidWorkerSettings) {
+			code = http.StatusBadRequest
+		}
+		webError(writer, err, code)
 		return
 	}
 	writer.WriteHeader(http.StatusNoContent)
@@ -378,9 +387,12 @@ func (s *Server) checksum(writer http.ResponseWriter, request *http.Request) {
 }
 
 type Config struct {
-	Port   int    `mapstructure:"port" envconfig:"WEB_PORT"`
-	Token  string `mapstructure:"token" envconfig:"WEB_TOKEN"`
-	Domain string `mapstructure:"domain" envconfig:"WEB_DOMAIN"`
+	Port              int               `mapstructure:"port" envconfig:"WEB_PORT"`
+	Token             string            `mapstructure:"token" envconfig:"WEB_TOKEN"`
+	Domain            string            `mapstructure:"domain" envconfig:"WEB_DOMAIN"`
+	DashboardToken    string            `mapstructure:"dashboardToken"`
+	MediaRoots        map[string]string `mapstructure:"mediaRoots"`
+	PreviewMaxStreams int               `mapstructure:"previewMaxStreams"`
 }
 
 type ActiveTracker struct {
@@ -407,6 +419,7 @@ func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update
 			Handler: rtr,
 		},
 	}
+	webServer.registerDashboardAPI(rtr)
 	rtr.Handle("/api/v1/job/", webServer.AuthFunc(webServer.addJobs)).Methods("POST")
 	rtr.Handle("/api/v1/jobs/queued", webServer.AuthFunc(webServer.listQueuedJobs)).Methods("GET")
 	rtr.Handle("/api/v1/job/request", webServer.AuthFunc(webServer.requestJob)).Methods("GET")
@@ -458,6 +471,9 @@ func (s *Server) Run(wg *sync.WaitGroup, ctx context.Context) {
 	wg.Add(1)
 	go func() {
 		<-ctx.Done()
+		if s.library != nil {
+			s.library.Close()
+		}
 		log.Info("Stopping WebServer...")
 		s.stop(ctx)
 		wg.Done()
@@ -541,3 +557,6 @@ func webError(writer http.ResponseWriter, err error, code int) bool {
 	}
 	return false
 }
+
+// ServeHTTP exposes the API routes for HTTP hosting and integration tests.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.srv.Handler.ServeHTTP(w, r) }

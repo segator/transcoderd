@@ -32,6 +32,9 @@ func (r *jobRegistry) set(jobContext *job.Context, phase model.NotificationType,
 	if r.codec != nil {
 		codec = r.codec.VideoCodec
 	}
+	if jobContext.EncodeConfig != nil {
+		codec = jobContext.EncodeConfig.VideoCodec
+	}
 	item := control.JobState{JobID: jobContext.JobId.String(), Phase: string(phase), State: state, Codec: codec, Profile: encoderProfile(codec)}
 	if jobContext.Source != nil {
 		item.Name = jobContext.Source.OriginalName

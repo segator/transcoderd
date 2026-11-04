@@ -13,23 +13,27 @@ import (
 
 // InMemoryRepository implementa Repository en memoria para tests
 type InMemoryRepository struct {
-	mu            sync.RWMutex
-	jobs          map[string]*model.Job
-	events        map[string][]*model.TaskEventType
-	progress      map[string]*model.TaskProgressType
-	workers       map[string]*model.Worker
-	workerMaxJobs map[string]int
-	jobsByPath    map[string]*model.Job
+	mu                  sync.RWMutex
+	jobs                map[string]*model.Job
+	events              map[string][]*model.TaskEventType
+	progress            map[string]*model.TaskProgressType
+	workers             map[string]*model.Worker
+	workerMaxJobs       map[string]int
+	workerEncoderLimits map[string]model.WorkerSettings
+	mediaProbes         map[string]cachedMediaProbe
+	jobsByPath          map[string]*model.Job
 }
 
 func NewInMemoryRepository() *InMemoryRepository {
 	return &InMemoryRepository{
-		jobs:          make(map[string]*model.Job),
-		events:        make(map[string][]*model.TaskEventType),
-		progress:      make(map[string]*model.TaskProgressType),
-		workers:       make(map[string]*model.Worker),
-		workerMaxJobs: make(map[string]int),
-		jobsByPath:    make(map[string]*model.Job),
+		jobs:                make(map[string]*model.Job),
+		events:              make(map[string][]*model.TaskEventType),
+		progress:            make(map[string]*model.TaskProgressType),
+		workers:             make(map[string]*model.Worker),
+		workerMaxJobs:       make(map[string]int),
+		workerEncoderLimits: make(map[string]model.WorkerSettings),
+		mediaProbes:         make(map[string]cachedMediaProbe),
+		jobsByPath:          make(map[string]*model.Job),
 	}
 }
 
@@ -251,7 +255,8 @@ func (r *InMemoryRepository) PingServerUpdate(ctx context.Context, remoteAddr st
 	r.workers[ping.WorkerName] = &model.Worker{
 		Name:     ping.WorkerName,
 		Ip:       remoteAddr,
-		LastSeen: ping.EventTime,
+		LastSeen: time.Now().UTC(),
+		Runtime:  ping.Runtime,
 	}
 	return nil
 }
@@ -308,5 +313,6 @@ func (r *InMemoryRepository) SetWorkerMaxActiveJobs(ctx context.Context, name st
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.workerMaxJobs[name] = max
+	delete(r.workerEncoderLimits, name)
 	return nil
 }

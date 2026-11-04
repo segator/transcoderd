@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0e14" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="TranscoderD" />
+    <link rel="manifest" href="/dashboard/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/dashboard/apple-touch-icon.png" />
+    <script src="/dashboard/pwa.js" defer></script>
+    <meta name="description" content="TranscoderD operations center" />
+    <title>Sign in · TranscoderD</title>
+    <link rel="icon" href="/dashboard/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+  </head>
+  <body class="login-body">
+    <main class="login-layout">
+      <section class="login-story" aria-label="TranscoderD">
+        <a class="brand" href="/dashboard/"
+          ><span class="brand-mark" aria-hidden="true">t<span>d</span></span
+          ><span
+            >transcoder<span class="brand-d">D</span
+            ><small>OPERATIONS</small></span
+          ></a
+        >
+        <div class="login-copy">
+          <span class="eyebrow"
+            ><span class="status-dot"></span> DISTRIBUTED ENCODING</span
+          >
+          <h1>More stories. <br />Less space.</h1>
+          <p>
+            Your fleet activity, every job and the space you save. All in one place.
+          </p>
+          <div class="signal-art" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span
+            ><span></span><span></span><span></span><span></span><span></span
+            ><span></span><span></span><span></span><span></span><span></span
+            ><span></span><span></span><span></span><span></span><span></span
+            ><span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+        <p class="login-foot">
+          TRANSCODERD <span>CONTROL. CLARITY. EVERY FRAME.</span>
+        </p>
+      </section>
+      <section class="login-panel">
+        <div class="login-box">
+          <span class="lock-icon" aria-hidden="true">⌁</span
+          ><span class="eyebrow muted">PRIVATE ACCESS</span>
+          <h2>Welcome aboard.</h2>
+          <p>Sign in through your identity provider to open the operations center.</p>
+          <a id="oidc-login" class="button primary login-submit" href="/dashboard/auth/login">
+            Continue with single sign-on <span aria-hidden="true">↗</span>
+          </a>
+          <button
+            id="pwa-install"
+            class="button subtle pwa-install"
+            type="button"
+            hidden
+          >
+            Install app</button
+          ><button
+            id="pwa-update"
+            class="button subtle pwa-update"
+            type="button"
+            hidden
+          >
+            Update ready · Reload
+          </button>
+          <p class="session-note">
+            Private session up to 12 hours. Your identity provider handles sign-in.
+          </p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

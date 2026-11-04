@@ -112,6 +112,7 @@ mounts. See [GPU validation](av1-nvenc-validation.md).
 
 ## CLI-only CPU and GPU workers
 
+For a deployment using only one encoder class, the ordinary node-specific settings are
 ### Optional browser dashboard
 
 The same live worker dashboard can be served by a Linux or Docker worker. It is
@@ -221,6 +222,14 @@ change is saved. Use `control set-max-jobs 0` to pause new assignments and queue
 positive value to resume at that capacity. The command reports an error without
 changing the running limit if the server cannot save the value. The updater's
 temporary maintenance drain is process-local, allows accepted queued encodes to finish, and does not change the saved limit.
+
+The server's [operations dashboard](dashboard.md) also edits these per-worker
+limits. Upgraded workers poll persisted settings before every admission cycle,
+approximately every five seconds, including while paused, and report encoder
+and observed concurrency in heartbeats. Deploy the server before workers.
+The dashboard uses its own `--web.dashboardToken` (initial default
+`encoding123`), independently of the worker API token. Each worker keeps its
+startup profile as its preferred encoder. A single upgraded worker can run CPU and GPU jobs simultaneously using independent dashboard limits; two worker containers are optional.
 
 ## What the build pipeline does
 

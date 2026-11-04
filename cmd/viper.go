@@ -23,6 +23,9 @@ func ViperConfig(opts *CommandLineConfig) {
 	}
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix("TR")
+	if err := bindDashboardTokenEnvironment(viper.GetViper()); err != nil {
+		log.Panic(err)
+	}
 	if err := viper.BindEnv("worker.dashboard.listenAddress", "TR_WORKER_DASHBOARD_LISTEN_ADDRESS"); err != nil {
 		log.Panic(err)
 	}
@@ -62,6 +65,11 @@ func ViperConfig(opts *CommandLineConfig) {
 		log.SetLevel(log.InfoLevel)
 	}
 }
+
+func bindDashboardTokenEnvironment(v *viper.Viper) error {
+	return v.BindEnv("web.dashboardToken", "TR_WEB_DASHBOARD_TOKEN")
+}
+
 func decodeHook() viper.DecoderConfigOption {
 	return viper.DecodeHook(func(source reflect.Type, target reflect.Type, data interface{}) (interface{}, error) {
 		if source.Kind() != reflect.String {

@@ -141,5 +141,8 @@ func (c *Config) Validate() error {
 	if _, err := c.EncodeConfig.ResolveVideoSettings(); err != nil {
 		return err
 	}
+	if _, _, err := c.EncoderProfiles(); err != nil {
+		return err
+	}
 	return c.validateSchedule()
 }

@@ -365,6 +365,14 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 		combined.Progress = append(combined.Progress, profileStatus.Progress...)
 	}
 	if len(status.Profiles) > 0 {
+		if status.Settings != nil && !status.Pending && !s.maintenance && !s.shutdownPending && combined.MaxActiveJobs > 0 {
+			if cpu, ok := status.Profiles["cpu"]; ok {
+				status.Settings.CPUJobs = cpu.MaxActiveJobs
+			}
+			if gpu, ok := status.Profiles["gpu"]; ok {
+				status.Settings.GPUJobs = gpu.MaxActiveJobs
+			}
+		}
 		status.Worker = &combined
 	}
 	return status

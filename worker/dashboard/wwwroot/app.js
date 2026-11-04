@@ -4,6 +4,7 @@ document.body.classList.toggle('browser-host', !window.chrome?.webview);
 const pending = new Map();
 const jobPausePending = new Set();
 let sequence = 0, current = null, dirty = false, shownSetup = false, lastJobs = {cpu:0,gpu:2}, polling = false, selectedFilters = new Set(), lastBrowserLimit = 1, dashboardPromptAllowed = true;
+let limitDirty=false, limitSaving=false, lastBrowserPair=null;
 let configurationLocked = true, pendingUpdate = null;
 try { pendingUpdate = JSON.parse(localStorage.getItem('transcoderd.pending-update') || 'null'); } catch {}
 function lockConfiguration(locked) {
@@ -37,15 +38,15 @@ function renderUpdate(update) {
 }
 renderUpdate(); lockConfiguration(true);
 function request(command, data = {}) {
-  if (configurationLocked && ['stop-after-current','configure','set-max-jobs','pause-job','resume-job','pause-encodes','resume-encodes'].includes(command)) return Promise.reject(new Error('Configuration is locked until the mandatory update completes or service status is confirmed.'));
+  if (configurationLocked && ['stop-after-current','configure','set-max-jobs','set-encoder-jobs','pause-job','resume-job','pause-encodes','resume-encodes'].includes(command)) return Promise.reject(new Error('Configuration is locked until the mandatory update completes or service status is confirmed.'));
   return new Promise((resolve, reject) => {
     if (!window.chrome?.webview) {
       (async () => {
         let token = localStorage.getItem('transcoderd.dashboard.token');
         if (!token) { if (!dashboardPromptAllowed) throw new Error('A dashboard token is required. Click refresh to enter it.'); dashboardPromptAllowed = false; token = window.prompt('Enter the worker dashboard access token'); if (!token) throw new Error('A dashboard token is required. Click refresh to enter it.'); localStorage.setItem('transcoderd.dashboard.token', token); }
-        const url = command === 'status' ? '/api/status' : command === 'set-max-jobs' ? '/api/worker/max-jobs' : (command === 'pause-job' || command === 'resume-job') ? `/api/worker/jobs/${encodeURIComponent(data.jobId)}/${command === 'pause-job' ? 'pause' : 'resume'}` : (command === 'pause-encodes' || command === 'resume-encodes') ? `/api/worker/encodes/${command === 'pause-encodes' ? 'pause' : 'resume'}` : null;
+        const url = command === 'status' ? '/api/status' : (command === 'set-max-jobs' || command === 'set-encoder-jobs') ? '/api/worker/max-jobs' : (command === 'pause-job' || command === 'resume-job') ? `/api/worker/jobs/${encodeURIComponent(data.jobId)}/${command === 'pause-job' ? 'pause' : 'resume'}` : (command === 'pause-encodes' || command === 'resume-encodes') ? `/api/worker/encodes/${command === 'pause-encodes' ? 'pause' : 'resume'}` : null;
         if (!url) throw new Error('This action is only available in the Windows desktop app.');
-        const response = await fetch(url, {method:command === 'status' ? 'GET' : 'POST', headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/json'}, ...(command === 'status' ? {} : {body:JSON.stringify(command === 'set-max-jobs' ? {maxJobs:data.maxJobs ?? (data.cpuJobs + data.gpuJobs)} : {})})});
+        const response = await fetch(url, {method:command === 'status' ? 'GET' : 'POST', headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/json'}, ...(command === 'status' ? {} : {body:JSON.stringify(command === 'set-encoder-jobs' ? {cpuJobs:data.cpuJobs,gpuJobs:data.gpuJobs} : command === 'set-max-jobs' ? {maxJobs:data.maxJobs ?? (data.cpuJobs + data.gpuJobs)} : {})})});
         if (response.status === 401) { localStorage.removeItem('transcoderd.dashboard.token'); dashboardPromptAllowed = false; throw new Error('Invalid dashboard token. Click refresh to enter it again.'); }
         if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || `Dashboard request failed (${response.status}).`); }
         resolve(await response.json());
@@ -138,7 +139,15 @@ function render(status) {
     if (status.worker?.maxActiveJobs > 0) lastBrowserLimit = status.worker.maxActiveJobs;
     else if (status.worker?.maxEncodes > 0) lastBrowserLimit = status.worker.maxEncodes;
   }
-  const worker = status.worker, jobs = worker?.jobs || [], progress = worker?.progress || [];
+  const worker = status.worker;
+  if (!window.chrome?.webview && worker?.cpuJobs !== undefined) {
+   $('encoder-limits').hidden=false;
+   if (worker.cpuJobs+worker.gpuJobs>0) lastBrowserPair={cpuJobs:worker.cpuJobs,gpuJobs:worker.gpuJobs};
+   if (!limitDirty && !limitSaving) { $('local-cpu-jobs').value=worker.cpuJobs;$('local-gpu-jobs').value=worker.gpuJobs; }
+   $('encoder-limits-save').disabled=configurationLocked || limitSaving;
+   $('encoder-limits-status').textContent=limitDirty?'Unsaved changes. Save to synchronize with the server.':`Observed: CPU ${worker.cpuJobs} · GPU ${worker.gpuJobs}. Server changes refresh automatically.`;
+  }
+  const jobs = worker?.jobs || [], progress = worker?.progress || [];
   const admission = status.update?.pending ? 'Mandatory update' : !status.configured ? 'Service connected' : !worker ? 'Worker starting' : worker.ramPaused ? 'Paused in RAM' : worker.maxActiveJobs === 0 ? (worker.paused === false ? 'Finishing accepted work' : 'Queue stopped') : worker.withinSchedule === false ? 'Outside schedule' : worker.accepting ? (worker.maxAcceptedJobs > 0 && (worker.activeJobs + worker.reservedJobs) >= worker.maxAcceptedJobs ? 'At capacity' : 'Accepting jobs') : 'Waiting for settings';
   $('connection').className = 'connection online'; $('connection').innerHTML = `<i></i> ${admission}`;
   const isPaused = worker?.maxActiveJobs === 0;
@@ -204,7 +213,7 @@ $('toggle-pause').addEventListener('click', async () => {
  queueActionPending = true;
  const stopped = current?.worker?.maxActiveJobs === 0;
  try {
-  if (!window.chrome?.webview) render(await request('set-max-jobs',{maxJobs:stopped ? lastBrowserLimit : 0}));
+  if (!window.chrome?.webview) { if(lastBrowserPair) render(await request('set-encoder-jobs',stopped?lastBrowserPair:{cpuJobs:0,gpuJobs:0})); else render(await request('set-max-jobs',{maxJobs:stopped ? lastBrowserLimit : 0})); }
   else if (stopped) render(await request('set-max-jobs',{cpuJobs:lastJobs.cpu,gpuJobs:lastJobs.gpu}));
   else {
    const choice = await request('confirm-shutdown');
@@ -245,4 +254,13 @@ async function toggleEncodePause(jobId) {
 $('job-list').addEventListener('click', event => {
  const button = event.target.closest('[data-job-pause]');
  if (button && !button.disabled) toggleEncodePause(button.dataset.jobPause);
+});
+
+$('encoder-limits-form').addEventListener('input',()=>{limitDirty=true});
+$('encoder-limits-form').addEventListener('submit',async event=>{
+ event.preventDefault();if(configurationLocked||limitSaving)return;
+ const cpuJobs=Number($('local-cpu-jobs').value),gpuJobs=Number($('local-gpu-jobs').value);
+ if(!Number.isInteger(cpuJobs)||!Number.isInteger(gpuJobs)||cpuJobs<0||gpuJobs<0||cpuJobs+gpuJobs>1024){toast('Use non-negative integers, total no more than 1024.');return}
+ limitSaving=true;$('encoder-limits-save').disabled=true;
+ try{const status=await request('set-encoder-jobs',{cpuJobs,gpuJobs});limitDirty=false;render(status);toast('CPU/GPU limits saved on the server.')}catch(error){toast(error.message)}finally{limitSaving=false;$('encoder-limits-save').disabled=configurationLocked}
 });

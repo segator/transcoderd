@@ -18,6 +18,16 @@ var ErrJobNotPausable = errors.New("job has no active controllable encoding")
 const controlRequestTimeout = 15 * time.Second
 
 type AdmissionStatus struct {
+	CPUJobs             int  `json:"cpuJobs"`
+	GPUJobs             int  `json:"gpuJobs"`
+	ActiveCPUEncodes    int  `json:"activeCPUEncodes"`
+	ActiveGPUEncodes    int  `json:"activeGPUEncodes"`
+	CPUMaxEncodes       int  `json:"cpuMaxEncodes"`
+	GPUMaxEncodes       int  `json:"gpuMaxEncodes"`
+	IndependentEncoders bool `json:"independentEncoders"`
+	Finishing           bool `json:"finishing"`
+	Draining            bool `json:"draining"`
+
 	RAMPaused        bool           `json:"ramPaused"`
 	PauseMode        string         `json:"pauseMode"`
 	SuspendedEncodes int            `json:"suspendedEncodes"`
@@ -71,6 +81,8 @@ type AdmissionController interface {
 }
 
 type Request struct {
+	CPUJobs   *int   `json:"cpuJobs,omitempty"`
+	GPUJobs   *int   `json:"gpuJobs,omitempty"`
 	JobID     string `json:"jobId,omitempty"`
 	PauseMode string `json:"pauseMode,omitempty"`
 	Command   string `json:"command"`
@@ -177,6 +189,14 @@ func (s *Server) handle(conn net.Conn) {
 		} else {
 			result.Error = "independent admission control is unavailable"
 		}
+	case "set-encoder-jobs":
+		if p, ok := s.state.(interface{ PersistEncoderLimits(int, int) error }); ok && req.CPUJobs != nil && req.GPUJobs != nil {
+			if err := p.PersistEncoderLimits(*req.CPUJobs, *req.GPUJobs); err != nil {
+				result.Error = err.Error()
+			}
+		} else {
+			result.Error = "both encoder limits and independent encoder control are required"
+		}
 	case "set-max-jobs":
 		if err := s.state.PersistMaxActiveJobs(req.MaxJobs); err != nil {
 			result.Error = err.Error()
@@ -231,10 +251,23 @@ func ConfiguredPath() string {
 
 func runCLI(args []string, output io.Writer, socketPath string) error {
 	if len(args) == 0 {
-		return errors.New("usage: transcoderd-worker control status|set-max-jobs <N>|set-admission-limit <N>|pause-encodes|resume-encodes|set-pause-mode <finish|ram>|pause-job|resume-job <job UUID>")
+		return errors.New("usage: transcoderd-worker control status|set-encoder-jobs <CPU> <GPU>|set-max-jobs <N>|set-admission-limit <N>|pause-encodes|resume-encodes|set-pause-mode <finish|ram>|pause-job|resume-job <job UUID>")
 	}
 	req := Request{Command: args[0]}
 	switch req.Command {
+	case "set-encoder-jobs":
+		if len(args) != 3 {
+			return errors.New("usage: transcoderd-worker control set-encoder-jobs <CPU> <GPU>")
+		}
+		cpu, err := strconv.Atoi(args[1])
+		if err != nil || cpu < 0 {
+			return errors.New("CPU jobs must be a non-negative integer")
+		}
+		gpu, err := strconv.Atoi(args[2])
+		if err != nil || gpu < 0 || cpu > int(^uint(0)>>1)-gpu {
+			return errors.New("GPU jobs or encoder total is invalid")
+		}
+		req.CPUJobs, req.GPUJobs = &cpu, &gpu
 	case "status", "pause-encodes", "resume-encodes":
 		if len(args) != 1 {
 			return fmt.Errorf("usage: transcoderd-worker control %s", req.Command)
@@ -263,6 +296,10 @@ func runCLI(args []string, output io.Writer, socketPath string) error {
 	}
 	result, err := Call(socketPath, req)
 	if err != nil {
+		return err
+	}
+	if req.Command == "set-encoder-jobs" {
+		_, err = fmt.Fprintf(output, "CPU=%d GPU=%d; accepting=%t\n", result.Status.CPUJobs, result.Status.GPUJobs, result.Status.Accepting)
 		return err
 	}
 	if req.Command == "status" {

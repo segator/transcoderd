@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0e14" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="TranscoderD" />
+    <link rel="manifest" href="/dashboard/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/dashboard/apple-touch-icon.png" />
+    <script src="/dashboard/pwa.js" defer></script>
+    <meta
+      name="description"
+      content="TranscoderD progress, compression and worker controls"
+    />
+    <title>Operations · TranscoderD</title>
+    <link rel="icon" href="/dashboard/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+    <link rel="stylesheet" href="/dashboard/media.css" />
+    <script src="/dashboard/resources.js" defer></script>
+    <script src="/dashboard/app.js" defer></script>
+    <script src="/dashboard/media.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <aside class="sidebar">
+      <a class="brand" href="#overview"
+        ><span class="brand-mark" aria-hidden="true">t<span>d</span></span
+        ><span
+          >transcoder<span class="brand-d">D</span
+          ><small>OPERATIONS</small></span
+        ></a
+      >
+      <span class="nav-caption">WORKSPACE</span>
+      <nav aria-label="Main navigation">
+        <a href="#overview" data-view="overview" class="nav-link active"
+          ><span aria-hidden="true">◫</span>Overview<span class="nav-key"
+            >01</span
+          ></a
+        ><a href="#workers" data-view="workers" class="nav-link"
+          ><span aria-hidden="true">▤</span>Workers<span
+            id="nav-worker-count"
+            class="nav-count"
+            >—</span
+          ></a
+        ><a href="#jobs" data-view="jobs" class="nav-link"
+          ><span aria-hidden="true">▥</span>Jobs<span
+            id="nav-job-count"
+            class="nav-count"
+            >—</span
+          ></a
+        >
+        <a href="#library" data-view="library" class="nav-link"
+          ><span aria-hidden="true">▷</span>Library</a
+        >
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="fleet-mini">
+          <span class="eyebrow">FLEET STATUS</span
+          ><strong id="fleet-note">Connecting…</strong
+          ><span id="fleet-detail" class="muted"
+            >Waiting for server data</span
+          >
+          <div class="fleet-lights" id="fleet-lights" aria-hidden="true"></div>
+        </div>
+        <div class="sidebar-footer">
+          <span class="avatar">OP</span>
+          <div><strong>Operator</strong><small>Private session</small></div>
+          <button
+            class="icon-button"
+            id="logout"
+            data-logout
+            aria-label="Sign out"
+            title="Sign out"
+          >
+            ↪
+          </button>
+        </div>
+      </div>
+    </aside>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="breadcrumb">
+          Workspace <span>/</span> <strong id="breadcrumb-view">Overview</strong>
+        </div>
+        <div class="topbar-right">
+          <button
+            id="mobile-logout"
+            data-logout
+            class="icon-button mobile-logout"
+            type="button"
+            aria-label="Sign out"
+            title="Sign out"
+          >
+            ↪
+          </button>
+          <button
+            id="pwa-install"
+            class="button subtle pwa-install"
+            type="button"
+            hidden
+          >
+            Install app</button
+          ><button
+            id="pwa-update"
+            class="button subtle pwa-update"
+            type="button"
+            hidden
+          >
+            Update ready · Reload
+          </button>
+          <span class="live-status" id="connection"
+            ><span class="status-dot"></span>Live</span
+          ><span class="topbar-divider"></span
+          ><span class="muted" id="last-sync">Syncing…</span
+          ><button
+            class="icon-button"
+            id="refresh"
+            aria-label="Refresh data"
+            title="Refresh data"
+          >
+            ↻
+          </button>
+        </div>
+      </header>
+      <main id="main" tabindex="-1">
+        <div class="page-heading">
+          <div>
+            <span class="eyebrow">TRANSCODING CONTROL CENTER</span>
+            <h1 id="page-title">
+              Your fleet in motion<span class="accent">.</span>
+            </h1>
+            <p id="page-description">
+              Every job, every worker and every byte you save.
+            </p>
+          </div>
+          <div class="period-control">
+            <label for="period">Reporting period</label
+            ><select id="period">
+              <option value="24">Last 24 hours</option>
+              <option value="168" selected>Last 7 days</option>
+              <option value="720">Last 30 days</option>
+            </select>
+          </div>
+        </div>
+        <div id="error-banner" class="error-banner" role="alert" hidden></div>
+        <div id="loading" class="loading-state">
+          <span class="spinner"></span>Loading your fleet activity…
+        </div>
+        <div id="dashboard-content" hidden>
+          <section
+            id="overview-view"
+            class="view"
+            aria-label="Operations overview"
+          >
+            <div id="metrics" class="metric-grid"></div>
+            <div class="primary-grid">
+              <section class="panel throughput-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">THROUGHPUT</span>
+                    <h2>Your fleet throughput</h2>
+                    <p>Job outcomes over the selected period</p>
+                  </div>
+                  <span class="panel-tag" id="throughput-total">—</span>
+                </div>
+                <div class="chart-legend">
+                  <span><i class="legend-dot green"></i>Completed</span
+                  ><span><i class="legend-dot red"></i>Failed</span>
+                </div>
+                <div id="throughput-chart" class="chart-frame"></div>
+              </section>
+              <section class="panel savings-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">ALL-TIME IMPACT</span>
+                    <h2>More room for what comes next</h2>
+                  </div>
+                  <span class="panel-icon" aria-hidden="true">↙</span>
+                </div>
+                <div id="storage-impact"></div>
+                <p class="panel-footnote">
+                  Verified final sizes only. Storage savings do not measure visual quality.
+                </p>
+              </section>
+            </div>
+            <div class="analytics-grid">
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">RIGHT NOW</span>
+                    <h2>Your queue at a glance</h2>
+                  </div>
+                </div>
+                <div id="queue-chart"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">SPACE SAVED</span>
+                    <h2>Storage savings over time</h2>
+                    <p>Measured bytes per interval · selected period</p>
+                  </div>
+                </div>
+                <div id="savings-chart" class="chart-frame compact"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">COMPRESSION BY CODEC</span>
+                    <h2>From source to output</h2>
+                    <p>Weighted reduction · selected period</p>
+                  </div>
+                </div>
+                <div id="codec-chart"></div>
+              </section>
+            </div>
+            <div class="detail-grid">
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">TEAMWORK</span>
+                    <h2>Workers at a glance</h2>
+                    <p>Live resources · job outcomes in selected period</p>
+                  </div>
+                  <a href="#workers" class="text-link">Manage ↗</a>
+                </div>
+                <div id="worker-chart"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">RECENT ACTIVITY</span>
+                    <h2>What is happening</h2>
+                  </div>
+                  <span class="small muted">Live events</span>
+                </div>
+                <div id="activity-feed"></div>
+              </section>
+            </div>
+            <section class="panel jobs-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="eyebrow muted">IN PROGRESS</span>
+                  <h2>Jobs at a glance</h2>
+                  <p>
+                    Current phase progress · worker updates every ~15 s
+                  </p>
+                </div>
+                <a href="#jobs" class="text-link">View jobs ↗</a>
+              </div>
+              <div id="overview-jobs" class="table-wrap"></div>
+            </section>
+          </section>
+          <section
+            id="workers-view"
+            class="view"
+            aria-label="Worker management"
+            hidden
+          >
+            <div class="info-strip">
+              <span aria-hidden="true">ⓘ</span>
+              <p>
+                Each worker can encode on CPU and GPU at the same time. Both limits are saved together and applied without restarting.
+                <strong
+                  >0 disables that group; setting both to 0 pauses admission.</strong
+                >
+                Accepted jobs continue.
+              </p>
+            </div>
+            <div id="worker-detail-navigation" class="worker-detail-navigation" hidden><a href="#workers" class="text-link">← All workers</a></div>
+            <div id="worker-resource-detail" class="worker-resource-detail" hidden></div>
+            <div id="worker-cards" class="worker-grid"></div>
+          </section>
+          <section
+            id="jobs-view"
+            class="view"
+            aria-label="Job explorer"
+            hidden
+          >
+            <section class="panel jobs-panel">
+              <div class="job-filters">
+                <div
+                  class="filter-tabs"
+                  role="group"
+                  aria-label="Filter by status"
+                >
+                  <button data-filter="all" class="filter-tab active">
+                    All</button
+                  ><button data-filter="active" class="filter-tab">
+                    Active</button
+                  ><button data-filter="queued" class="filter-tab">
+                    Queued</button
+                  ><button data-filter="completed" class="filter-tab">
+                    Completed</button
+                  ><button data-filter="failed" class="filter-tab">
+                    Failed
+                  </button>
+                </div>
+                <label class="search-field"
+                  ><span aria-hidden="true">⌕</span
+                  ><input
+                    type="search"
+                    id="job-search"
+                    placeholder="Search files or workers…"
+                    aria-label="Search files, UUIDs or workers"
+                /></label>
+              </div>
+              <p class="table-note">
+                Up to 100 jobs: active jobs first, then queued jobs and recent results. Counters and charts cover the entire database.
+              </p>
+              <div id="job-list" class="table-wrap"></div>
+            </section>
+          </section>
+          <section
+            id="library-view"
+            class="view"
+            aria-label="Video library"
+            hidden
+          >
+            <div class="media-layout">
+              <section class="panel media-filter-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="eyebrow muted">FROM FILE TO QUEUE</span>
+                    <h2>Find your next batch</h2>
+                    <p>Review the results before adding jobs.</p>
+                  </div>
+                </div>
+                <form id="media-filters">
+                  <label for="media-root">Library</label
+                  ><select id="media-root">
+                    <option value="source">Source</option>
+                  </select>
+                  <label for="media-folder">Source folder</label>
+                  <div class="media-folder-input">
+                    <input
+                      id="media-folder"
+                      value="."
+                      placeholder="Relative folder"
+                    /><button
+                      type="button"
+                      id="media-open-folder"
+                      class="button"
+                      aria-label="Open folder"
+                    >
+                      ↗
+                    </button>
+                  </div>
+                  <label for="media-preset">Preset</label
+                  ><select id="media-preset">
+                    <option value="all">All videos</option>
+                    <option value="movies">Movies · high bitrate</option>
+                    <option value="series">TV shows · high bitrate</option>
+                  </select>
+                  <p class="media-help">
+                    Presets based on the Unraid scripts. All criteria can be edited.
+                  </p>
+                  <label for="media-contains">Path contains</label
+                  ><input
+                    id="media-contains"
+                    placeholder="Movies, TV shows or part of a name"
+                  />
+                  <label for="media-exclude">Exclude paths containing</label
+                  ><input
+                    id="media-exclude"
+                    placeholder="For example: extras"
+                  />
+                  <div class="media-field-pair">
+                    <div>
+                      <label for="media-width">Width greater than</label
+                      ><input
+                        id="media-width"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value="0"
+                      /><small>pixels · 0 disables the filter</small>
+                    </div>
+                    <div>
+                      <label for="media-bitrate">Bitrate greater than</label
+                      ><input
+                        id="media-bitrate"
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value="0"
+                      /><small>Mb/s · estimated total</small>
+                    </div>
+                  </div>
+                  <div class="media-field-pair">
+                    <div>
+                      <label for="media-min-size">Minimum size</label
+                      ><input
+                        id="media-min-size"
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value="0"
+                      /><small>GiB</small>
+                    </div>
+                    <div>
+                      <label for="media-max-size">Maximum size</label
+                      ><input
+                        id="media-max-size"
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value="0"
+                      /><small>GiB · 0 means unlimited</small>
+                    </div>
+                  </div>
+                  <label for="media-include-codecs">Only these codecs</label
+                  ><input
+                    id="media-include-codecs"
+                    placeholder="All · or h264, hevc, av1…"
+                  />
+                  <label for="media-exclude-codecs">Exclude codecs</label
+                  ><input
+                    id="media-exclude-codecs"
+                    placeholder="For example: hevc, av1"
+                  />
+                  <label class="media-check"
+                    ><input
+                      id="media-recursive"
+                      type="checkbox"
+                      checked
+                    />Include subfolders</label
+                  >
+                  <label class="media-check"
+                    ><input
+                      id="media-eligible-only"
+                      type="checkbox"
+                      checked
+                    />Only files eligible for queuing</label
+                  >
+                  <details class="media-advanced">
+                    <summary>Retries and limits</summary>
+                    <label class="media-check"
+                      ><input
+                        id="media-retry-failed"
+                        type="checkbox"
+                      />Retry failed jobs</label
+                    ><label class="media-check"
+                      ><input
+                        id="media-retry-canceled"
+                        type="checkbox"
+                      />Retry canceled jobs</label
+                    ><label for="media-candidate-limit"
+                      >Maximum candidates to scan</label
+                    ><input
+                      id="media-candidate-limit"
+                      type="number"
+                      min="1"
+                      max="5000"
+                      value="1000"
+                    />
+                    <p class="media-help">
+                      Largest files are prioritized. Existing jobs are skipped unless their retry option is selected.
+                    </p>
+                  </details>
+                  <button
+                    id="media-scan"
+                    class="button primary media-scan-button"
+                    type="submit"
+                  >
+                    Prepare preview <span aria-hidden="true">↗</span>
+                  </button>
+                </form>
+              </section>
+              <div class="media-main">
+                <div
+                  id="media-error"
+                  class="error-banner"
+                  role="alert"
+                  hidden
+                ></div>
+                <section class="panel media-browser-panel">
+                  <div class="panel-header">
+                    <div>
+                      <span class="eyebrow muted">EXPLORE BEFORE SELECTING</span>
+                      <h2>Your videos, one click away</h2>
+                    </div>
+                    <span class="panel-tag" id="media-file-count"
+                      >Loading…</span
+                    >
+                  </div>
+                  <div id="media-breadcrumb" class="media-breadcrumb"></div>
+                  <div id="media-files" class="table-wrap"></div>
+                  <div id="media-pagination" class="media-pagination"></div>
+                </section>
+                <section id="media-operation-panel" class="panel" hidden>
+                  <div class="panel-header">
+                    <div>
+                      <span class="eyebrow muted" id="media-operation-kind"
+                        >PREVIEW</span
+                      >
+                      <h2 id="media-operation-title">Scanning videos…</h2>
+                      <p id="media-operation-detail"></p>
+                    </div>
+                    <button
+                      id="media-cancel"
+                      class="button subtle"
+                      type="button"
+                    >
+                      Stop
+                    </button>
+                  </div>
+                  <div class="progress-track">
+                    <span id="media-progress"></span>
+                  </div>
+                  <p id="media-truncated" class="media-notice" hidden></p>
+                  <div id="media-operation-results"></div>
+                </section>
+                <section id="media-review-panel" class="panel" hidden>
+                  <div class="panel-header">
+                    <div>
+                      <span class="eyebrow muted">REVIEW YOUR SELECTION</span>
+                      <h2>Your matching files</h2>
+                      <p id="media-review-count"></p>
+                    </div>
+                    <button id="media-select-all" class="button" type="button">
+                      Select eligible files
+                    </button>
+                  </div>
+                  <p id="media-dirty" class="media-notice" hidden>
+                    Filters have changed. Prepare a new preview before adding jobs.
+                  </p>
+                  <div id="media-selection" class="table-wrap"></div>
+                  <div class="media-queue-bar">
+                    <div>
+                      <strong id="media-selected-count">0 selected</strong>
+                      <p id="media-selected-size" class="muted small"></p>
+                    </div>
+                    <label for="media-target"
+                      >Maximum job target<input
+                        id="media-target"
+                        type="number"
+                        min="1"
+                        max="5000"
+                        value="500" /></label
+                    ><button
+                      id="media-queue"
+                      class="button primary"
+                      disabled
+                      type="button"
+                    >
+                      Queue selection
+                    </button>
+                  </div>
+                  <p class="media-help">
+                    Only successfully queued jobs count toward the target. Changed, already queued or unavailable files appear in the results.
+                  </p>
+                </section>
+              </div>
+            </div>
+          </section>
+          <footer class="page-footer">
+            <span
+              ><span class="footer-mark" aria-hidden="true">◈</span> TranscoderD
+              <span class="muted">/ Operations</span></span
+            ><span
+              >Real data. Clear decisions.
+              <span class="muted">· Refreshes every 5 s</span></span
+            >
+          </footer>
+        </div>
+      </main>
+    </div>
+    <dialog id="media-player" class="media-player">
+      <div class="media-player-heading">
+        <div>
+          <span class="eyebrow muted">VIDEO PLAYER</span>
+          <h2 id="media-player-title">Video</h2>
+        </div>
+        <button
+          id="media-player-close"
+          type="button"
+          class="icon-button"
+          aria-label="Close player"
+        >
+          ×
+        </button>
+      </div>
+      <div
+        id="media-player-error"
+        class="error-banner"
+        role="alert"
+        hidden
+      ></div>
+      <video id="media-video" controls playsinline preload="none"></video>
+      <div class="media-timeline">
+        <span id="media-player-current">00:00</span
+        ><input
+          id="media-player-seek"
+          type="range"
+          min="0"
+          max="1"
+          step="1"
+          value="0"
+          disabled
+          aria-label="Position in the full video"
+        /><span id="media-player-duration">—</span>
+      </div>
+      <div class="media-player-controls">
+        <button id="media-player-toggle" class="button primary" type="button">
+          Play</button
+        ><label
+          >File<select
+            id="media-player-asset"
+            aria-label="Source or output"
+          ></select></label
+        ><label
+          >Mode<select id="media-player-mode">
+            <option value="compatible">Compatible · up to 720p</option>
+            <option value="original">Original · no conversion</option>
+          </select></label
+        >
+      </div>
+      <p id="media-player-info" class="media-help">
+        Loading video information…
+      </p>
+      <p class="media-help">
+        Compatible playback converts video and audio for your browser. The original file stays unchanged. Viewing the original quality requires a format your browser supports.
+      </p>
+    </dialog>
+    <div id="toast" class="toast" role="status" hidden></div>
+  </body>
+</html>

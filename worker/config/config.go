@@ -33,6 +33,8 @@ type FFMPEGConfig struct {
 }
 
 type Config struct {
+	CPUEncodeConfig *FFMPEGConfig    `mapstructure:"cpuFFmpegConfig"`
+	GPUEncodeConfig *FFMPEGConfig    `mapstructure:"gpuFFmpegConfig"`
 	RAMPaused       bool             `mapstructure:"ramPaused"`
 	PauseMode       string           `mapstructure:"pauseMode"`
 	TemporalPath    string           `mapstructure:"temporalPath" envconfig:"WORKER_TMP_PATH"`

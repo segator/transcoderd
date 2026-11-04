@@ -9,6 +9,30 @@ import (
 	"github.com/spf13/viper"
 )
 
+func TestDashboardTokenEnvironmentPrecedence(t *testing.T) {
+	t.Setenv("TR_WEB_DASHBOARD_TOKEN", "runtime-dashboard-secret")
+	v := viper.New()
+	if err := bindDashboardTokenEnvironment(v); err != nil {
+		t.Fatal(err)
+	}
+	v.SetDefault("web.dashboardToken", "encoding123")
+	flags := pflag.NewFlagSet("dashboard-env", pflag.ContinueOnError)
+	flags.String("web.dashboardToken", "encoding123", "")
+	if err := v.BindPFlags(flags); err != nil {
+		t.Fatal(err)
+	}
+	var cfg CommandLineConfig
+	if err := v.Unmarshal(&cfg); err != nil || cfg.Web == nil || cfg.Web.DashboardToken != "runtime-dashboard-secret" {
+		t.Fatal("dashboard environment secret was not decoded")
+	}
+	if err := flags.Parse([]string{"--web.dashboardToken=cli-dashboard-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Unmarshal(&cfg); err != nil || cfg.Web.DashboardToken != "cli-dashboard-secret" {
+		t.Fatal("dashboard CLI did not override environment")
+	}
+}
+
 func TestCommandLineConfigDefaults(t *testing.T) {
 	cfg := &CommandLineConfig{}
 	if cfg.NoUpdateMode {

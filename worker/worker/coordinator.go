@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"sync"
+	"transcoder/model"
 	"transcoder/update"
 	"transcoder/worker/console"
 	"transcoder/worker/serverclient"
@@ -59,7 +60,7 @@ func (q *ServerCoordinator) heartbeatRoutine(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(time.Second * 5):
-			if err := q.serverClient.PublishPingEvent(); err != nil {
+			if err := q.serverClient.PublishPingEvent(q.worker.RuntimeTelemetry()); err != nil {
 				q.logger.Errorf("Error Publishing Ping Event: %v", err)
 			}
 		}
@@ -75,6 +76,10 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(time.Second * 5):
+			if err := q.syncWorkerSettings(ctx); err != nil {
+				q.logger.Errorf("Error synchronizing worker capacity; skipping admission: %v", err)
+				continue
+			}
 			if q.worker.ReserveJobSlot() {
 				release, requireUpdate, err := q.updater.CheckForUpdate()
 				if err != nil {
@@ -119,32 +124,11 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 
 func (q *ServerCoordinator) loadPersistedWorkerSettings(ctx context.Context) bool {
 	for {
-		q.worker.settingsMu.Lock()
-		settingsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		var settings *serverclient.WorkerSettings
-		var err error
-		if q.worker.managedLimits {
-			// Synchronize service-owned limits without loading stale server overrides.
-			err = q.serverClient.SetWorkerMaxActiveJobs(settingsCtx, q.worker.AdmissionStatus().MaxActiveJobs)
-		} else {
-			settings, err = q.serverClient.GetWorkerSettings(settingsCtx)
-		}
-		cancel()
+		err := q.syncWorkerSettings(ctx)
 		if err == nil {
-			if settings != nil && settings.MaxActiveJobs != nil {
-				if err := q.worker.SetMaxActiveJobs(*settings.MaxActiveJobs); err != nil {
-					q.worker.settingsMu.Unlock()
-					q.logger.Errorf("Error applying persisted worker job limit: %v", err)
-					return false
-				}
-				q.logger.Logf("Applied persisted worker job limit %d", *settings.MaxActiveJobs)
-			}
-			q.worker.MarkWorkerSettingsResolved()
-			q.worker.settingsMu.Unlock()
 			return true
 		}
-		q.worker.settingsMu.Unlock()
-		q.logger.Errorf("Error synchronizing worker settings; job admission remains closed: %v", err)
+		q.logger.Errorf("Error loading persisted worker settings; job admission remains closed: %v", err)
 		timer := time.NewTimer(5 * time.Second)
 		select {
 		case <-ctx.Done():
@@ -153,6 +137,89 @@ func (q *ServerCoordinator) loadPersistedWorkerSettings(ctx context.Context) boo
 		case <-timer.C:
 		}
 	}
+}
+
+func (q *ServerCoordinator) syncWorkerSettings(ctx context.Context) error {
+	q.worker.settingsMu.Lock()
+	defer q.worker.settingsMu.Unlock()
+	settingsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	settings, err := q.serverClient.GetWorkerSettings(settingsCtx)
+	if err != nil {
+		return err
+	}
+	current := q.worker.AdmissionStatus()
+
+	// Service/maintenance holds must not be undone by periodic convergence.
+	if current.Finishing || current.Draining {
+		q.worker.MarkWorkerSettingsResolved()
+		return nil
+	}
+	// Avoid resetting an explicit startup parallelJobs override when no remote
+	// change occurred. Local controls use this same mutex and persist first.
+	if settings.Independent() {
+		current := q.worker.AdmissionStatus()
+		if !current.IndependentEncoders || current.CPUJobs != *settings.CPUJobs || current.GPUJobs != *settings.GPUJobs {
+			if err := q.worker.SetEncoderLimits(*settings.CPUJobs, *settings.GPUJobs); err != nil {
+				return err
+			}
+			q.logger.Logf("Applied server encoder limits CPU=%d GPU=%d", *settings.CPUJobs, *settings.GPUJobs)
+		}
+	} else if settings.MaxActiveJobs != nil {
+		current := q.worker.AdmissionStatus()
+		if current.MaxActiveJobs != *settings.MaxActiveJobs || (*settings.MaxActiveJobs > 0 && (current.MaxEncodes != *settings.MaxActiveJobs || current.IndependentEncoders)) {
+			if err := q.worker.SetMaxActiveJobs(*settings.MaxActiveJobs); err != nil {
+				return err
+			}
+			q.logger.Logf("Applied server worker job limit %d", *settings.MaxActiveJobs)
+		}
+	}
+	q.worker.MarkWorkerSettingsResolved()
+	return nil
+}
+
+func (e *JobExecutor) RuntimeTelemetry() *model.WorkerRuntime {
+	status := e.AdmissionStatus()
+	encoder, kind := "", "unknown"
+	if e.workerConfig.EncodeConfig != nil {
+		if video, err := e.workerConfig.EncodeConfig.ResolveVideoSettings(); err == nil {
+			encoder, kind = video.Codec, "cpu"
+			if encoder == "av1_nvenc" {
+				kind = "gpu"
+			}
+		}
+	}
+	switch {
+	case status.CPUJobs > 0 && status.GPUJobs > 0:
+		kind = "hybrid"
+	case status.CPUJobs > 0:
+		kind = "cpu"
+	case status.GPUJobs > 0:
+		kind = "gpu"
+	}
+	runtime := &model.WorkerRuntime{Encoder: encoder, Kind: kind, Accepting: status.Accepting,
+		WithinSchedule: status.WithinSchedule, ActiveJobs: status.ActiveJobs, ReservedJobs: status.ReservedJobs,
+		MaxActiveJobs: status.MaxActiveJobs, ActiveEncodes: status.ActiveEncodes, MaxEncodes: status.MaxEncodes,
+		CapacityVersion: 2, CPUJobs: status.CPUJobs, GPUJobs: status.GPUJobs,
+		ActiveCPUEncodes: status.ActiveCPUEncodes, ActiveGPUEncodes: status.ActiveGPUEncodes,
+		CPUMaxEncodes: status.CPUMaxEncodes, GPUMaxEncodes: status.GPUMaxEncodes,
+		Paused: status.Paused, RAMPaused: status.RAMPaused, PauseMode: status.PauseMode, SuspendedEncodes: status.SuspendedEncodes,
+		Finishing: status.Finishing, Draining: status.Draining, ManagedProfile: e.managedLimits}
+	if e.resources != nil {
+		runtime.Resources = e.resources.Snapshot()
+	}
+	for _, j := range status.Jobs {
+		runtime.Jobs = append(runtime.Jobs, model.WorkerJobRuntime{ID: j.JobID, Phase: j.Phase, State: j.State, IndividuallyPaused: j.IndividuallyPaused, PausedByWorker: j.PausedByWorker})
+	}
+	if cpu, gpu, err := e.workerConfig.EncoderProfiles(); err == nil {
+		if video, err := cpu.ResolveVideoSettings(); err == nil {
+			runtime.CPUEncoder = video.Codec
+		}
+		if video, err := gpu.ResolveVideoSettings(); err == nil {
+			runtime.GPUEncoder = video.Codec
+		}
+	}
+	return runtime
 }
 
 func waitForActiveJobs(ctx context.Context, activeJobs func() uint32, interval time.Duration) bool {

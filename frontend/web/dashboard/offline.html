@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0e14" />
+    <meta name="description" content="Reconnect to your TranscoderD server" />
+    <title>Offline · TranscoderD</title>
+    <link rel="icon" href="/dashboard/icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/dashboard/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/dashboard/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+  </head>
+  <body class="login-body">
+    <main class="offline-layout">
+      <a class="brand" href="/dashboard/"
+        ><span class="brand-mark" aria-hidden="true">t<span>d</span></span
+        ><span
+          >transcoder<span class="brand-d">D</span
+          ><small>OPERATIONS</small></span
+        ></a
+      >
+      <section class="panel offline-card" aria-labelledby="offline-title">
+        <span class="eyebrow">SERVER CONNECTION</span>
+        <h1 id="offline-title">Ready when<br />you reconnect.</h1>
+        <p>
+          Cannot connect to TranscoderD. Check your network and make sure the server is running.
+        </p>
+        <p class="muted">
+          Statistics, controls and videos need a connection. Jobs already on the server keep running.
+        </p>
+        <a class="button primary" href="/dashboard/"
+          >Reconnect <span aria-hidden="true">↗</span></a
+        >
+        <p class="media-help">
+          Your session will be checked when you reconnect.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

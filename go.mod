@@ -7,6 +7,8 @@ require (
 	github.com/asticode/go-astisub v0.45.0
 	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/blang/semver/v4 v4.0.0
+	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/go-retryablehttp v0.7.8
@@ -16,6 +18,7 @@ require (
 	github.com/sirupsen/logrus v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
+	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.49.0
 	gopkg.in/ini.v1 v1.67.3
 	gopkg.in/vansante/go-ffprobe.v2 v2.3.1

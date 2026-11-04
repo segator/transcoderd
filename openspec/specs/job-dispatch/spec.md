@@ -67,7 +67,7 @@ A worker SHALL admit at most its effective FFmpeg encode target plus one pipelin
 - **THEN** the worker does not request a job
 
 ### Requirement: Runtime worker admission controls
-Local controls SHALL persist operator limits before reporting success. Positive maxima SHALL set FFmpeg concurrency and resume queued encodes. Zero SHALL retain the positive target but stop requests and new encodes; active encodes SHALL use pauseMode and downstream work SHALL finish. Startup SHALL use server overrides for standalone workers and service-owned Windows limits. Maintenance draining SHALL finish accepted work without changing saved preferences. Controls SHALL remain local.
+Local controls SHALL persist operator limits before reporting success. Positive maxima SHALL update concurrency and resume queued encodes. Zero SHALL stop requests and new encodes while preserving targets; active encodes SHALL use pauseMode and downstream work SHALL finish. Startup SHALL honor persisted overrides or keep local defaults when no override exists. Maintenance draining SHALL finish accepted work without changing preferences. Controls SHALL remain local.
 
 #### Scenario: Read runtime admission status
 - **WHEN** an operator runs the local status command
@@ -133,11 +133,11 @@ The worker SHALL bound FFmpeg jobs by target and preserve per-job workspace, pro
 - **THEN** up to four accepted jobs can encode simultaneously
 
 #### Scenario: Desktop startup has stale server limits
-- **WHEN** a Windows service worker starts with four configured GPU slots and a higher old server maximum
-- **THEN** the service-owned limit is persisted before new requests, no more than four jobs encode at once, and restored work observes that limit
+- **WHEN** a Windows service worker starts with four configured GPU slots and a different persisted server maximum
+- **THEN** the persisted maximum is applied before new admission, while the local service default applies only if no override exists
 
 #### Scenario: Paused Windows startup
-- **WHEN** the Windows service restarts with its saved pause preference
+- **WHEN** the Windows service restarts with its saved pause preference and no newer desired resume has been saved
 - **THEN** restored queued encodes do not start until Resume or maintenance draining
 
 ### Requirement: Weekly admission schedule
@@ -212,6 +212,48 @@ A worker receiving an assignment SHALL create a per-job temporary directory, pub
 #### Scenario: Assignment received
 - **WHEN** the worker receives a job `id` and `eventID`
 - **THEN** it initializes the workspace, reports `Job/started`, and queues download
+
+### Requirement: Synchronize server-desired worker capacity
+A worker SHALL resolve its persisted per-name job limit before initial admission and before subsequent admission evaluations, including while paused. An absent override SHALL preserve startup or current local configuration. Failed synchronization SHALL prevent new job requests for that cycle while accepted work continues. The normal synchronization interval SHALL be approximately five seconds.
+
+#### Scenario: Remote positive change
+- **WHEN** an operator changes a worker's persisted limit to a positive value
+- **THEN** its next successful synchronization applies the admission and encode target without restarting or interrupting active encodes
+
+#### Scenario: Resume a paused worker
+- **WHEN** the worker is paused at zero and its persisted limit becomes positive
+- **THEN** it continues polling and resumes admission after synchronization if its schedule permits
+
+#### Scenario: Server unavailable
+- **WHEN** settings synchronization fails
+- **THEN** the worker skips new requests, keeps accepted work running, and retries on a later coordination cycle
+
+#### Scenario: Automatic update drain
+- **WHEN** an update causes the worker to drain active jobs
+- **THEN** the temporary zero remains local and synchronization does not reopen admission during that drain
+
+### Requirement: Independent CPU and GPU worker slots
+A persisted CPU/GPU pair SHALL override the single-limit policy for that worker. The worker SHALL bound each encoder class independently and admit at most their positive sum plus one pipeline job. One disabled class SHALL not accept new unassigned encodes. Disabling both SHALL stop new admission and queued encode starts while running encodes and downstream work finish. Lower positive limits SHALL not interrupt running work.
+
+#### Scenario: Both encoder classes are enabled
+- **WHEN** one worker has CPU limit 2 and GPU limit 3 and ready encoding jobs
+- **THEN** up to two CPU and three GPU encodes run concurrently within that process
+
+#### Scenario: Disable CPU while GPU remains enabled
+- **WHEN** an operator changes CPU to zero while leaving GPU positive
+- **THEN** active CPU encodes finish, new unassigned encodes use GPU slots, and GPU admission continues
+
+#### Scenario: Pause both classes
+- **WHEN** both desired limits become zero
+- **THEN** new admission and queued encode starts stop, running encodes finish, and pending encodes wait for Resume or maintenance draining
+
+#### Scenario: Restore pinned work on a disabled class
+- **WHEN** a saved CPU or GPU encode is restored while that class has desired zero
+- **THEN** it retains its pinned profile and uses bounded drain capacity when the global queue is open, while no new job is assigned to that class
+
+#### Scenario: Legacy startup or local control
+- **WHEN** no pair is stored or a positive legacy single-limit control replaces the pair
+- **THEN** the startup selected encoder and existing single-limit behavior apply
 
 ### Requirement: Read-only server queue view
 The server SHALL provide an authenticated read-only queue view containing the total number of queued jobs and at most the oldest 100 job identifiers, source file names, sizes, and queue times. Reading the view SHALL NOT assign jobs or change their order.
@@ -304,3 +346,32 @@ Explicit admission controls SHALL stop requests and queued encode starts while a
 #### Scenario: Startup RAM preference
 - **WHEN** worker.ramPaused is true at startup
 - **THEN** restored encodes and new assignments remain held until the explicit RAM control resumes; the default is false
+
+### Requirement: Bidirectional operator capacity synchronization
+Local web and CLI controls SHALL persist atomic CPU/GPU pairs before applying them. Local and fleet controls SHALL share per-name desired settings with last committed writes winning. Polling SHALL converge approximately every five seconds, including while paused. Failed writes SHALL leave runtime limits unchanged. Managed startup SHALL honor stored overrides and use local defaults only when absent.
+
+#### Scenario: Local change reaches fleet
+- **WHEN** an operator saves CPU 2 and GPU 3 from the worker UI
+- **THEN** the server stores that pair, the worker applies it, and fleet telemetry reports the observed pair
+
+#### Scenario: Managed restart after server change
+- **WHEN** a managed profile starts after a newer desired limit was saved on the server
+- **THEN** startup applies the stored value without overwriting it with an older service configuration
+
+### Requirement: Capacity changes preserve independent holds
+Changing limits SHALL preserve independent RAM and individual encoding holds. Queue stop at zero SHALL block assignment and queued FFmpeg starts while active/downstream work finishes. Maintenance and explicit finish holds SHALL survive settings polling. The accepted-job ceiling SHALL be the encoder target plus one pipeline job.
+
+#### Scenario: RAM pause and limit change
+- **WHEN** limits change while a worker is RAM-paused
+- **THEN** the new limits apply without clearing the RAM hold or individual holds
+
+#### Scenario: Maintenance or finish polling
+- **WHEN** persisted positive settings are polled during maintenance draining or explicit finishing
+- **THEN** no new admission opens and accepted work remains allowed to drain
+
+### Requirement: Supervised Windows encoder profiles
+Windows service profile workers SHALL retain their configured CPU or GPU class and a maximum of 64 slots. Fleet controls SHALL identify these profiles and reject enabling the other encoder class on the same profile. Standalone workers SHALL retain independent dual-class support.
+
+#### Scenario: CPU Windows profile limits
+- **WHEN** fleet controls save GPU slots on a supervised CPU profile
+- **THEN** the request is rejected without changing persisted limits and the GPU input is disabled in that profile's card

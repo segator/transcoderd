@@ -68,8 +68,12 @@ CI uses `mage docker:check` to evaluate application-image graphs without exporti
 multi-gigabyte media image archives or loading the runner's Docker daemon.
 Frontend checks inspect a small temporary OCI index containing Linux amd64 and
 arm64 and execute each runtime's version and health endpoints (with emulation
-for the foreign CPU). Frontend publication/archives contain both variants;
-local Docker loading selects the host-compatible variant. Dagger Services run
+for the foreign CPU). Foreign service smoke tests carry a static emulator from the pinned Dagger
+Engine image in a test-only container. This works without host binfmt setup;
+the published frontend images keep their original executable entrypoints and
+contain no emulator.
+Frontend publication/archives contain both variants; local Docker loading
+selects the host-compatible variant. Dagger Services run
 the CPU E2E directly. `mage docker:all` still exports distribution archives and
 loads local tags; release runs retain that export step.
 Explicit completion of an older tagged release uses its original `docker:all`

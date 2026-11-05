@@ -53,7 +53,11 @@ func checkFrontendImages(ctx context.Context, client *dagger.Client, images []*d
 		if !strings.Contains(version, projectVersion) {
 			return fmt.Errorf("frontend %s version = %q, want application version %q", platform, version, projectVersion)
 		}
-		status, err := httpClient.WithServiceBinding("frontend", image.AsService()).
+		service, err := frontendSmokeService(ctx, client, image, platform)
+		if err != nil {
+			return err
+		}
+		status, err := httpClient.WithServiceBinding("frontend", service).
 			WithExec([]string{"curl", "--fail", "--silent", "--show-error", "--output", "/dev/null", "--write-out", "%{http_code}", "http://frontend:8081/healthz"}).Stdout(ctx)
 		if err != nil {
 			return fmt.Errorf("frontend %s health check: %w", platform, err)
@@ -68,6 +72,28 @@ func checkFrontendImages(ctx context.Context, client *dagger.Client, images []*d
 		return err
 	}
 	return checkFrontendIndex(archive)
+}
+
+func frontendSmokeService(ctx context.Context, client *dagger.Client, image *dagger.Container, platform dagger.Platform) (*dagger.Service, error) {
+	native, err := client.DefaultPlatform(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if platform == native {
+		return image.AsService(), nil
+	}
+	// WithExec can inject QEMU automatically, but a service's init process
+	// cannot exec a foreign binary on hosts without binfmt registration.
+	// Use the pinned Engine's static emulator only in this test container;
+	// the published variants and their entrypoints remain untouched.
+	emulatorName := map[dagger.Platform]string{"linux/amd64": "x86_64", "linux/arm64": "aarch64"}[platform]
+	if emulatorName == "" {
+		return nil, fmt.Errorf("unsupported frontend smoke platform %q", platform)
+	}
+	emulator := client.Container().From("registry.dagger.io/engine:v0.20.6").
+		File("/usr/local/bin/buildkit-qemu-" + emulatorName)
+	return image.WithFile("/__frontend_smoke_qemu", emulator).
+		WithEntrypoint([]string{"/__frontend_smoke_qemu", "/app/transcoderd-frontend"}).AsService(), nil
 }
 
 func checkFrontendELF(path, platform string) error {

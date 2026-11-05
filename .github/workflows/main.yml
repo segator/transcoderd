@@ -1,19 +1,13 @@
-name: Build and Push
+name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       release_tag:
         description: 'Complete missing Windows assets for an existing stable release from its exact tag'
-        type: string
-        required: false
-        default: ''
-      windows_debug_artifact_run:
-        description: 'Reuse Windows fixtures from this run for isolated test debugging; never publishes a release'
         type: string
         required: false
         default: ''
@@ -24,89 +18,50 @@ permissions:
   pull-requests: write
   packages: write
 
+# Superseded PR commits cannot publish releases. Never cancel a main/release
+# run, including another invocation completing missing Windows assets.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  release-source:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
+  ci:
+    runs-on: transcoderd
+    timeout-minutes: 90
+    env:
+      # Aggregate C/C++ budget on the shared 16-core Dagger Engine.
+      WINDOWS_BUILD_JOBS: '16'
     outputs:
+      release_tag: ${{ steps.release.outputs.tag_name || steps.source.outputs.release_tag }}
+      release_publish: ${{ steps.release.outputs.release_created == 'true' || steps.source.outputs.release_tag != '' }}
       source_ref: ${{ steps.source.outputs.source_ref }}
       source_sha: ${{ steps.source.outputs.source_sha }}
-      release_tag: ${{ steps.source.outputs.release_tag }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Test release source guards
-        run: python3 -m unittest discover -s scripts/release -v
-      - name: Resolve immutable release source
-        id: source
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-          WINDOWS_DEBUG_RUN: ${{ inputs.windows_debug_artifact_run }}
-        run: python3 scripts/release/resolve_release.py
-
-  pwa-tests:
-    needs: release-source
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release-source.outputs.source_ref }}
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - name: PWA cache/privacy lifecycle and worker activity tests
-        run: node --test frontend/web/dashboardPWA_test.cjs frontend/web/resources_test.cjs worker/dashboard/activity_test.js
-
-  windows-unit:
-    needs: release-source
-    runs-on: windows-2025
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release-source.outputs.source_ref }}
-      - uses: actions/setup-go@v6
-        with:
-          go-version: 1.26.10
-          cache-dependency-path: go.sum
-      - name: Validate installer test network isolation
-        shell: pwsh
-        run: |
-          . ./scripts/windows/test-network.ps1
-          $name = 'TranscoderD-Network-Probe-' + [guid]::NewGuid().ToString('N')
-          try {
-            New-InstallerTestNetworkIsolation -Name $name -Program "$env:SystemRoot\System32\notepad.exe" | Out-Null
-          } finally {
-            Remove-NetFirewallRule -Name $name -ErrorAction SilentlyContinue
-          }
-      - name: Native update and administration unit tests
-        shell: pwsh
-        run: go test -v -timeout 2m ./update/managed ./cmd/windows-service ./cmd/windows-update-manifest ./worker/control ./worker/desktop ./worker/worker ./worker/step ./worker/resources ./frontend/...
-
-  ci:
-    needs: release-source
-    runs-on: transcoderd
-    outputs:
-      project_version: ${{ steps.artifact_version.outputs.version }}
-      release_created: ${{ steps.release.outputs.release_created }}
-      release_tag: ${{ steps.release.outputs.tag_name || needs.release-source.outputs.release_tag }}
-      release_publish: ${{ steps.release.outputs.release_created == 'true' || needs.release-source.outputs.release_tag != '' }}
-      source_ref: ${{ needs.release-source.outputs.source_ref }}
-      source_sha: ${{ needs.release-source.outputs.source_sha }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release-source.outputs.source_ref }}
+      - uses: actions/checkout@v7.0.1
       - uses: dagger/dagger-for-github@v8.4.1
         with:
           version: 0.20.6
       - uses: ./.github/actions/setup-mage
+
+      - name: Prepare current CI tooling
+        run: mage -compile "$RUNNER_TEMP/transcoderd-ci"
+
+      - name: Test guards and resolve immutable release source
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: '"$RUNNER_TEMP/transcoderd-ci" release:source'
+
+      - name: Checkout validated tagged source
+        if: steps.source.outputs.source_ref != ''
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ steps.source.outputs.source_ref }}
+
+      - name: Test build tooling
+        working-directory: magefiles
+        run: go test ./...
 
       - name: Verify Windows release signing key
         if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
@@ -128,14 +83,17 @@ jobs:
         run: echo "PROJECT_VERSION=v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}" >> "$GITHUB_ENV"
 
       - name: Set existing release version
-        if: needs.release-source.outputs.release_tag != ''
+        if: steps.source.outputs.release_tag != ''
         env:
-          RELEASE_TAG: ${{ needs.release-source.outputs.release_tag }}
+          RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
         run: echo "PROJECT_VERSION=$RELEASE_TAG" >> "$GITHUB_ENV"
 
-      - name: Record artifact version
-        id: artifact_version
-        run: echo "version=${PROJECT_VERSION:-$(cat version.txt)-dev}" >> "$GITHUB_OUTPUT"
+      - name: Lint Linux and Windows
+        run: mage lint:check lint:windows
+
+      - name: Frontend PWA, resource and worker activity tests
+        # The saved tooling remains available when source is an older release.
+        run: '"$RUNNER_TEMP/transcoderd-ci" test:web'
 
       - name: Test
         run: mage test:unit
@@ -143,12 +101,43 @@ jobs:
       - name: Build
         run: mage build:all
 
-      - name: Build Containers
-        run: mage docker:all
+      - name: Validate Linux container images
+        # Tagged source predates docker:check; retain its original target.
+        run: mage ${{ steps.source.outputs.image_target }}
 
       - name: E2E Test
         timeout-minutes: 15
         run: mage test:e2e
+
+      - name: Build Windows portable worker
+        run: mage build:windows
+
+      - name: Build Windows native test executables
+        run: mage test:windowsBinaries
+
+      - name: Build Windows desktop installer
+        run: mage build:windowsInstaller
+
+      - name: Build Windows update and recovery fixtures
+        run: mage test:windowsUpdateFixtures
+
+      - name: Upload Windows artifacts for native validation
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: windows-worker
+          path: |
+            dist/*-windows-amd64.zip
+            dist/*-windows-amd64-setup.exe
+            dist/transcoderd-worker-windows-amd64.exe
+            dist/transcoderd-desktop-service.exe
+            dist/transcoderd-updater.exe
+            dist/windows-update-manifest.exe
+            dist/windows-installation-files.json
+            dist/windows-tests/
+            dist/windows-update-fixtures/
+          # Installers and the portable bundle are already compressed.
+          compression-level: 0
+          retention-days: 7
 
       - name: Publish
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -158,6 +147,10 @@ jobs:
           IMAGE_VERSION_ALIASES: ${{ steps.release.outputs.release_created == 'true' && format('v{0}.{1},v{0}', steps.release.outputs.major, steps.release.outputs.minor) || '' }}
         run: mage publish:app
 
+      - name: Export Linux release images
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.release.outputs.release_created
+        run: mage docker:all
+
       - name: Upload release assets
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.release.outputs.release_created
         env:
@@ -165,43 +158,37 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
         run: mage release:upload
 
-  windows-build:
-    if: ${{ success() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.windows_debug_artifact_run == '') }}
-    needs: [ci, windows-unit]
-    env:
-      PROJECT_VERSION: ${{ needs.ci.outputs.project_version }}
-    runs-on: transcoderd
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.ci.outputs.source_ref }}
-      - uses: dagger/dagger-for-github@v8.4.1
-        with:
-          version: 0.20.6
-      - uses: ./.github/actions/setup-mage
-      - name: Build portable worker and native test executables
-        run: mage build:windows test:windowsBinaries build:windowsInstaller test:windowsUpdateFixtures
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-worker
-          path: dist/
-          # The installer and portable bundle are already compressed.
-          compression-level: 0
-          retention-days: 7
-
   windows-native:
-    needs: [ci, windows-build]
+    needs: ci
     concurrency:
       group: windows-release-${{ needs.ci.outputs.release_tag || github.run_id }}
       cancel-in-progress: false
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.ci.outputs.source_ref }}
-      - uses: actions/download-artifact@v4
+      - name: Validate installer test network isolation
+        shell: pwsh
+        run: |
+          . ./scripts/windows/test-network.ps1
+          $name = 'TranscoderD-Network-Probe-' + [guid]::NewGuid().ToString('N')
+          try {
+            New-InstallerTestNetworkIsolation -Name $name -Program "$env:SystemRoot\System32\notepad.exe" | Out-Null
+          } finally {
+            Remove-NetFirewallRule -Name $name -ErrorAction SilentlyContinue
+          }
+      - uses: actions/setup-go@v6
+        if: needs.ci.outputs.source_ref != ''
+        with:
+          go-version: 1.26.10
+          cache-dependency-path: go.sum
+      - name: Legacy tagged-source frontend unit tests
+        if: needs.ci.outputs.source_ref != ''
+        shell: pwsh
+        run: go test -v -timeout 2m ./frontend/...
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: windows-worker
           path: dist
@@ -251,7 +238,7 @@ jobs:
             -ServerBinary "$PWD/dist/windows-tests/windows-e2e-server.exe" `
             -Fixture "$PWD/integration/testdata/e2e_fixture.mkv" `
             -EvidenceDirectory "$PWD/dist/windows-update-e2e" -UpdateFixtures "$PWD/dist/windows-update-fixtures"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: windows-native-test-logs
@@ -299,56 +286,3 @@ jobs:
           # Eligibility is established only after every validated payload is available.
           gh release upload $env:RELEASE_TAG "$PWD/dist/windows-update.json.sig"
           if ($LASTEXITCODE -ne 0) { throw 'Windows release signature upload failed.' }
-
-  windows-debug:
-    if: github.event_name == 'workflow_dispatch' && inputs.windows_debug_artifact_run != ''
-    needs: [release-source, windows-unit]
-    permissions:
-      contents: read
-      actions: read
-    runs-on: windows-2025
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download existing fixtures for test debugging
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-worker
-          path: dist
-          run-id: ${{ inputs.windows_debug_artifact_run }}
-          github-token: ${{ github.token }}
-      - name: Extract portable tools
-        shell: pwsh
-        run: |
-          $archive = @(Get-ChildItem dist -Filter '*-windows-amd64.zip')
-          if ($archive.Count -ne 1) { throw 'Expected one Windows worker ZIP.' }
-          $bundle = Join-Path $env:RUNNER_TEMP 'TranscoderD debug tools'
-          Expand-Archive -LiteralPath $archive[0].FullName -DestinationPath $bundle
-          "WINDOWS_BUNDLE=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Validate normal installed service with current test scripts
-        shell: pwsh
-        run: |
-          $installer = @(Get-ChildItem dist -Filter '*-windows-amd64-setup.exe')
-          if ($installer.Count -ne 1) { throw 'Expected one Windows installer.' }
-          ./scripts/windows/test-ci.ps1 -Bundle $env:WINDOWS_BUNDLE `
-            -TestBinary "$PWD/dist/windows-tests/windows-bundle.test.exe" `
-            -ServerBinary "$PWD/dist/windows-tests/windows-e2e-server.exe" `
-            -Fixture "$PWD/integration/testdata/e2e_fixture.mkv" `
-            -EvidenceDirectory "$PWD/dist/windows-debug-installed" -DesktopInstaller $installer[0].FullName
-      - name: Validate mandatory update and recovery with current test scripts
-        shell: pwsh
-        run: |
-          ./scripts/windows/test-ci.ps1 -Bundle $env:WINDOWS_BUNDLE `
-            -TestBinary "$PWD/dist/windows-tests/windows-bundle.test.exe" `
-            -ServerBinary "$PWD/dist/windows-tests/windows-e2e-server.exe" `
-            -Fixture "$PWD/integration/testdata/e2e_fixture.mkv" `
-            -EvidenceDirectory "$PWD/dist/windows-debug-update" -UpdateFixtures "$PWD/dist/windows-update-fixtures"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: windows-debug-test-logs
-          path: |
-            dist/windows-debug-installed/**/*.log
-            dist/windows-debug-installed/**/*.err
-            dist/windows-debug-update/**/*.log
-            dist/windows-debug-update/**/*.err

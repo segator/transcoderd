@@ -14,6 +14,6 @@ make -j "$jobs"
 make install
 "$TARGET-strip" /output/bin/ffmpeg.exe /output/bin/ffprobe.exe
 cp LICENSE.md /output/licenses/ffmpeg.txt
-printf '%s\n' 'FFmpeg 9.0.2; aom 3.14.1; SVT-AV1 4.2.0; x265 b81f650e21e8aacbe6a9ad04ce14aefc05b932c0; FDK AAC 2.0.3; nv-codec-headers 13.1.15.0' > /output/toolchain.txt
+printf '%s\n' 'FFmpeg 9.0.2; aom 3.14.1; SVT-AV1 4.3.0; x265 b81f650e21e8aacbe6a9ad04ce14aefc05b932c0; FDK AAC 2.0.3; nv-codec-headers 13.1.15.0' > /output/toolchain.txt
 # Keep only runtime artifacts; avoid exporting headers and static libraries.
 rm -rf /output/include /output/lib /output/share

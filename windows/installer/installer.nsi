@@ -16,6 +16,9 @@ OutFile "${OUTPUT}"
 InstallDir "$PROGRAMFILES64\TranscoderD"
 RequestExecutionLevel admin
 SetCompressor /FINAL zlib
+; Bound compression work on the complete OCR/tool payload. Keep NSIS's
+; default deduplication: measurements show negligible time and smaller output.
+SetCompressionLevel 3
 ShowInstDetails show
 ShowUninstDetails show
 !define MUI_ABORTWARNING

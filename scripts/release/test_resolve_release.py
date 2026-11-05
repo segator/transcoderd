@@ -32,11 +32,12 @@ class ReleaseSourceTests(unittest.TestCase):
 
     def test_exact_release_source_not_workflow_source(self):
         self.assertEqual(self.resolve(), dict(source_ref=self.sha, source_sha=self.sha,
-                                              release_tag='v2.12.0'))
+                                              release_tag='v2.12.0', image_target='docker:all'))
 
     def test_normal_checkout_preserved_without_api_calls(self):
         self.assertEqual(self.resolve(tag='', api=lambda _: self.fail('Unexpected API call')),
-                         dict(source_ref='', source_sha='b' * 40, release_tag=''))
+                         dict(source_ref='', source_sha='b' * 40, release_tag='',
+                              image_target='docker:check'))
 
     def test_untrusted_dispatch_and_injected_tags(self):
         for changes in [dict(event='pull_request'), dict(ref='refs/heads/other'),

@@ -16,7 +16,8 @@ def github_api(path):
 
 def resolve(tag, event, ref, sha, debug_run, repository, api=github_api):
     if not tag:
-        return {'source_ref': '', 'source_sha': sha, 'release_tag': ''}
+        return {'source_ref': '', 'source_sha': sha, 'release_tag': '',
+                'image_target': 'docker:check'}
     if event != 'workflow_dispatch' or ref != 'refs/heads/main' or debug_run:
         raise ValueError('Release completion requires a main dispatch without debug fixtures')
     if not re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', tag):
@@ -50,7 +51,10 @@ def resolve(tag, event, ref, sha, debug_run, repository, api=github_api):
     version = base64.b64decode(content['content']).decode('utf-8').strip()
     if version != tag[1:]:
         raise ValueError('Tagged source version does not match release')
-    return {'source_ref': source, 'source_sha': source, 'release_tag': tag}
+    # Completion checks out immutable older source, which need not contain
+    # newer Mage targets. Its original image build remains compatible.
+    return {'source_ref': source, 'source_sha': source, 'release_tag': tag,
+            'image_target': 'docker:all'}
 
 
 if __name__ == '__main__':

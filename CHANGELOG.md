@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.13.0](https://github.com/segator/transcoderd/compare/v2.12.0...v2.13.0) (2026-11-05)
+
+
+### 🎉 Features
+
+* upgrade SVT-AV1, streamline CI and add ARM64 frontend ([#206](https://github.com/segator/transcoderd/issues/206)) ([772b0cf](https://github.com/segator/transcoderd/commit/772b0cf45cf39d27b4ff73c9ec09e53a146cd7cc))
+
+
+### 🐛 Bug Fixes
+
+* **ci:** retry Windows source downloads after TLS resets ([#208](https://github.com/segator/transcoderd/issues/208)) ([76ed904](https://github.com/segator/transcoderd/commit/76ed9042adf3a272a18aeeadaaa9611bdac67128))
+
+
+### 🤖 Continuous Integration
+
+* complete existing tagged Windows releases safely ([#204](https://github.com/segator/transcoderd/issues/204)) ([b5b4b37](https://github.com/segator/transcoderd/commit/b5b4b37c9d4a97f71323c02af3b6d56183c975ef))
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/go-jose/go-jose/v4 from 4.1.6 to 4.1.7 ([#207](https://github.com/segator/transcoderd/issues/207)) ([87d4919](https://github.com/segator/transcoderd/commit/87d4919d316b263b1eb8b106a3d97f8bf5ae89df))
+
 ## [2.12.0](https://github.com/segator/transcoderd/compare/v2.11.1...v2.12.0) (2026-11-04)
 
 

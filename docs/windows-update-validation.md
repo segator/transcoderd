@@ -17,14 +17,14 @@ SVT-AV1 and FDK AAC without requiring a GPU.
 
 Run `node scripts/windows/test-web-ui.cjs`, the relevant Go tests and
 `openspec validate --all --strict` locally. `mage lint:check lint:windows` checks
-both platforms through Dagger. CI runs focused Windows administration/update
-unit tests alongside Linux-hosted cross-builds; Dagger builds the shipped binaries, media bundle,
+both platforms through Dagger. CI cross-compiles the Windows unit suites,
+including frontend, for execution in `windows-native`. Dagger builds the shipped binaries, media bundle,
 installer and fixture installers. The full native workflow retains encode,
 service and update-state logs as artifacts.
 
-For test-script iteration, maintainers can dispatch the main workflow with
-`windows_debug_artifact_run` pointing to a trusted earlier Windows artifact run.
-Its separate `windows-debug` check uses the current test scripts and existing
+For test-script iteration, maintainers can dispatch the dedicated
+`windows-debug.yml` workflow with `artifact_run` pointing to a trusted earlier
+Windows artifact run. Its read-only `windows-debug` check uses current scripts and existing
 binaries. It does not replace the ordinary PR `windows-native` check or validate
 new application code; code changes require a fresh normal build.
 
@@ -73,8 +73,9 @@ broad unattended rollout. Windows is never rebooted automatically by this update
 The follow-up pause fix has Linux Go/race coverage and native Windows queue tests
 for one/four encode slots, held prefetched work, Resume, paused/restored startup,
 service-owned limits replacing stale server values, and maintenance draining from
-pause. CI's early `windows-unit` job now includes `worker/worker` so these regressions
-run before packaging. Shared UI checks and the Dagger-built tray also pass locally.
+pause. These regressions originally ran in the early `windows-unit` job; the
+consolidated pipeline now executes their cross-built binaries in `windows-native`.
+Shared UI checks and the Dagger-built tray also pass locally.
 These queue tests simulate encode completion; the complete service/media E2E still
 runs in the ordinary native workflow.
 

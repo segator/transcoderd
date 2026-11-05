@@ -2,26 +2,37 @@
 
 ## Jobs and execution platforms
 
-`.github/workflows/main.yml` owns the required `ci` check. After immutable
-release-source resolution, its Linux runner invokes Mage/Dagger for Linux and
-Windows lint, Go tests, Linux binaries/images/E2E, Windows portable distribution,
-native-test executables, the desktop installer and two update/recovery fixtures.
-Each Windows target has a separate Actions step and timing. There is no separate
-`windows-build` job or lint workflow.
+`.github/workflows/main.yml` has two jobs: the required Linux-hosted `ci` check
+and `windows-native`. CI invokes Mage/Dagger for immutable release-source guards,
+PWA/resource/activity tests, Linux/Windows lint, Go tests, Linux binaries/images/
+E2E, both frontend image architectures, Windows portable distribution, native
+test executables, the desktop installer and two update/recovery fixtures. Each
+Windows target has a separate Actions step and timing. Source resolution, web
+tests and Windows units no longer allocate separate jobs.
 
 PRs against every base branch run these checks, preserving the former standalone
 lint workflow's coverage. Push/release publication remains restricted to `main`.
 
-`windows-unit` runs focused native Go unit tests alongside `ci`. After both jobs
-pass, `windows-native` downloads the cross-built tools and runs the complete
+After CI succeeds, `windows-native` checks network isolation, downloads the
+cross-built tools and executes the unit suites (including frontend), complete
 portable, installed-service, desktop and mandatory-update/recovery checks on
-`windows-2025`. FFmpeg and the codecs are not rebuilt on Windows. `go test` in
-the early native unit job does compile Go test packages.
+`windows-2025`. Go unit executables are cross-compiled once in CI and run natively;
+FFmpeg and the codecs are not rebuilt on Windows. Older tagged-source completion
+uses a native Go frontend-test fallback because its original exporters lack
+frontend test executables.
 
-PWA/JavaScript checks remain a separate short job. Superseded PR runs cancel
-only earlier runs for the same PR; main and release-completion runs do not
-cancel one another. The isolated `windows-debug` dispatch reuses existing
-fixtures and skips ordinary CI compilation. It cannot publish releases.
+Superseded PR runs cancel only earlier runs for the same PR; main and release
+completion runs do not cancel one another. Current CI tools are compiled into
+the runner's temporary directory before switching to validated tagged source;
+Python/GitHub CLI guards and Node 24 web tests run in cached Dagger containers.
+This preserves the new tooling across legacy checkouts without a new Python or
+Node dependency on the Linux runner.
+
+`.github/workflows/windows-debug.yml` is manual-only. Its `artifact_run` input
+selects trusted existing fixtures for the current PowerShell harness. Its token
+is read-only and it has no signing/publication path. The debugger is separated
+because it executes old artifacts with different permissions and does not
+validate new application binaries; it does not appear in ordinary PR runs.
 
 ## Engine cache and compiler budget
 
@@ -53,10 +64,14 @@ installers. An application commit does not redownload them.
 
 ## Images, artifacts and publication
 
-CI uses `mage docker:check`: it evaluates the same application-image graphs
-without exporting OCI tarballs or loading the runner's Docker daemon. Dagger
-Services run the CPU E2E directly. `mage docker:all` still exports archives and
-loads tags for local development; release runs retain that export step.
+CI uses `mage docker:check` to evaluate application-image graphs without exporting
+multi-gigabyte media image archives or loading the runner's Docker daemon.
+Frontend checks inspect a small temporary OCI index containing Linux amd64 and
+arm64 and execute each runtime's version and health endpoints (with emulation
+for the foreign CPU). Frontend publication/archives contain both variants;
+local Docker loading selects the host-compatible variant. Dagger Services run
+the CPU E2E directly. `mage docker:all` still exports distribution archives and
+loads local tags; release runs retain that export step.
 Explicit completion of an older tagged release uses its original `docker:all`
 target, since that immutable source may predate `docker:check`. The source guard
 outputs the compatible target alongside the validated SHA and version.

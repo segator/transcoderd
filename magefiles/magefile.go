@@ -507,8 +507,8 @@ func (Lint) Fmt(ctx context.Context) error {
 // Docker contains targets for building container images locally.
 type Docker mg.Namespace
 
-// Check builds all application images in the Engine without exporting archives
-// or loading a runner's Docker daemon. CI E2E uses Dagger Services directly.
+// Check validates all image graphs without exporting media archives or loading
+// Docker. Frontend checks also inspect a small multi-platform OCI index.
 func (Docker) Check(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
@@ -517,12 +517,19 @@ func (Docker) Check(ctx context.Context) error {
 	defer client.Close()
 	src := projectSource(client)
 	for _, component := range []string{"server", "worker", "frontend"} {
-		image, err := containerImage(ctx, client, src, component)
+		images, err := applicationImages(ctx, client, src, component)
 		if err != nil {
 			return err
 		}
-		if _, err := image.Sync(ctx); err != nil {
-			return fmt.Errorf("validate %s image: %w", component, err)
+		for _, image := range images {
+			if _, err := image.Sync(ctx); err != nil {
+				return fmt.Errorf("validate %s image: %w", component, err)
+			}
+		}
+		if component == "frontend" {
+			if err := checkFrontendImages(ctx, client, images); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -656,13 +663,15 @@ func (Publish) App(ctx context.Context) error {
 		return err
 	}
 	for _, component := range []string{"server", "worker", "frontend"} {
-		ctr, err := containerImage(ctx, client, src, component)
+		images, err := applicationImages(ctx, client, src, component)
 		if err != nil {
 			return err
 		}
-		ctr = ctr.WithRegistryAuth("ghcr.io", os.Getenv("GHCR_USERNAME"), secret)
+		for i, image := range images {
+			images[i] = image.WithRegistryAuth("ghcr.io", os.Getenv("GHCR_USERNAME"), secret)
+		}
 		for _, tag := range imageTags(component) {
-			addr, err := ctr.Publish(ctx, tag)
+			addr, err := images[0].Publish(ctx, tag, dagger.ContainerPublishOpts{PlatformVariants: images[1:]})
 			if err != nil {
 				return fmt.Errorf("publish %s: %w", tag, err)
 			}
@@ -767,15 +776,7 @@ func (Release) Upload(ctx context.Context) error {
 	}
 	defer client.Close()
 
-	_, err = client.Container().
-		From("debian:trixie-slim").
-		WithExec([]string{"sh", "-c", "apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tar && rm -rf /var/lib/apt/lists/*"}).
-		WithExec([]string{"sh", "-c", fmt.Sprintf(
-			"curl -fsSL https://github.com/cli/cli/releases/download/v%s/gh_%s_linux_amd64.tar.gz -o /tmp/gh.tar.gz && "+
-				"tar -xzf /tmp/gh.tar.gz --strip-components=2 -C /usr/local/bin gh_%s_linux_amd64/bin/gh && "+
-				"gh --version | grep -Fq 'gh version %s' && rm /tmp/gh.tar.gz",
-			githubCLIVersion, githubCLIVersion, githubCLIVersion, githubCLIVersion,
-		)}).
+	_, err = releaseTools(client).
 		WithDirectory("/dist", client.Host().Directory(distPath, dagger.HostDirectoryOpts{Include: assets})).
 		WithEnvVariable("GH_REPO", "segator/transcoderd").
 		WithSecretVariable("GH_TOKEN", client.SetSecret("github-token", token)).
@@ -802,22 +803,26 @@ func isLinuxReleaseAsset(name string) bool {
 // ---------------------------------------------------------------------------
 
 func buildContainerImage(ctx context.Context, client *dagger.Client, src *dagger.Directory, component string) error {
-	ctr, err := containerImage(ctx, client, src, component)
+	images, err := applicationImages(ctx, client, src, component)
 	if err != nil {
 		return err
 	}
 
-	for _, tag := range imageTags(component) {
-		tarPath := filepath.Join(projectRoot(), "dist", component+"-image.tar")
-		_, err := ctr.AsTarball(dagger.ContainerAsTarballOpts{
-			ForcedCompression: dagger.ImageLayerCompressionGzip,
-		}).Export(ctx, tarPath)
-		if err != nil {
-			return fmt.Errorf("export %s: %w", component, err)
-		}
-		fmt.Printf("Exported %s → %s\n", tag, tarPath)
+	tarPath := filepath.Join(projectRoot(), "dist", component+"-image.tar")
+	_, err = images[0].AsTarball(dagger.ContainerAsTarballOpts{
+		PlatformVariants: images[1:], ForcedCompression: dagger.ImageLayerCompressionGzip,
+	}).Export(ctx, tarPath)
+	if err != nil {
+		return fmt.Errorf("export %s: %w", component, err)
+	}
+	fmt.Printf("Exported %s image → %s\n", component, tarPath)
+	localImage := images[0]
+	if component == "frontend" && runtime.GOARCH == "arm64" {
+		localImage = images[1]
+	}
 
-		if err := ctr.ExportImage(ctx, tag); err != nil {
+	for _, tag := range imageTags(component) {
+		if err := localImage.ExportImage(ctx, tag); err != nil {
 			fmt.Printf("Warning: local image load failed; OCI archive is available at %s: %v\n", tarPath, err)
 		}
 	}
@@ -825,6 +830,9 @@ func buildContainerImage(ctx context.Context, client *dagger.Client, src *dagger
 }
 
 func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Directory, component string) (*dagger.Container, error) {
+	if component == "frontend" {
+		return frontendImage(client, src, frontendPlatforms[0]), nil
+	}
 	goBinary := goContainer(client, src).
 		WithEnvVariable("GOOS", "linux").
 		WithEnvVariable("GOARCH", "amd64").
@@ -835,14 +843,6 @@ func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Dire
 			"./" + component + "/main.go",
 		}).
 		File("/output/transcoderd-" + component)
-
-	if component == "frontend" {
-		return client.Container().From("debian:trixie-slim").
-			WithExec([]string{"sh", "-c", "apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*"}).
-			WithFile("/app/transcoderd-frontend", goBinary).
-			WithUser("65532:65532").WithExposedPort(8081).
-			WithEntrypoint([]string{"/app/transcoderd-frontend"}), nil
-	}
 
 	ffmpegBins := ffmpegBuilderImage(client)
 

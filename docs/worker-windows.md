@@ -85,11 +85,12 @@ Measured native test results and their scope are recorded in
 
 ## Hosted CI and releases
 
-Focused Windows update/administration unit tests run natively alongside the
-`ci` job. That job runs Linux/Windows lint, Linux builds and tests, and all
-Windows cross-compilation and packaging through Mage/Dagger on Linux. Both jobs
-must pass before full native media, service and upgrade validation runs on
-`windows-2025`. Dagger also builds a test-only Windows server under
+The `ci` job runs source guards, web tests, Linux/Windows lint, Linux builds/tests,
+frontend platform checks and all Windows cross-compilation/packaging through
+Mage/Dagger on Linux. The subsequent `windows-native` job runs all cross-built
+unit suites, including frontend, plus full media, service and upgrade validation
+on `windows-2025`. Legacy tagged-source builds retain a native Go frontend-test
+fallback. Dagger also builds a test-only Windows server under
 `dist/windows-tests/`; it is not a distributed server product or release asset.
 
 The native job runs all unit and bundled-tool tests and then

@@ -27,7 +27,18 @@ mage build:frontend
 
 Point the public HTTPS reverse proxy at the frontend port. Set `frontend.publicURL` to the actual browser origin when TLS terminates there; client-supplied forwarded host/scheme headers are ignored. API/public URL settings accept HTTP(S) origins only, without credentials, non-root paths, query or fragments. The default API origin is `http://localhost:8080`; the default listener is `:8081`; an empty public URL derives the direct HTTP/TLS request origin. YAML uses `frontend.listen`, `frontend.apiURL` and `frontend.publicURL`; explicit environment names are `TR_FRONTEND_LISTEN`, `TR_FRONTEND_API_URL` and `TR_FRONTEND_PUBLIC_URL`. `--config /etc/transcoderd/frontend.yaml` selects a file, otherwise the usual config.yaml search paths apply. CLI overrides environment and YAML.
 
-The separately published image is `ghcr.io/segator/transcoderd:frontend-<version>` (`mage docker:frontend` builds it locally). Example on the frontend host:
+The separately published image is `ghcr.io/segator/transcoderd:frontend-<version>`
+with Linux amd64 and arm64 variants under the same tag. Docker/Kubernetes select
+the matching variant; use a released multi-platform tag or index digest on ARM64,
+since older tags are unchanged. `mage docker:frontend` exports both variants in
+`dist/frontend-image.tar` and loads the host-compatible local image.
+`mage test:frontendImages` checks both static ELF architectures, version output,
+nonroot HTTP health and the OCI index. Foreign-architecture runtime checks use
+emulation on an amd64 Engine; they are not a native ARM performance benchmark.
+The standalone `mage build:frontend` executable keeps its existing host-target
+behavior. Server and media-worker image architectures are unchanged.
+
+Example on either supported frontend host:
 
 ```bash
 docker run -d --name transcoderd-frontend --read-only --cap-drop=ALL \

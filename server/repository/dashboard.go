@@ -166,8 +166,9 @@ func (s *SQLRepository) readDashboardWorkers(ctx context.Context, db SQLDBOperat
 )
  SELECT w.name,COALESCE(w.ip,''),w.last_seen,w.runtime,ws.max_active_jobs,ws.cpu_jobs,ws.gpu_jobs,
  COALESCE(st.active,0),COALESCE(st.completed,0),COALESCE(st.failed,0),
- COALESCE(st.source_bytes,0),COALESCE(st.target_bytes,0)
- FROM workers w
+ COALESCE(st.source_bytes,0),COALESCE(st.target_bytes,0),
+ CASE WHEN wc.id IS NOT NULL THEN jsonb_build_object('id',wc.id,'action',wc.action,'state',wc.state,'error',wc.error) END
+ FROM workers w LEFT JOIN worker_controls wc ON wc.worker_name=w.name
  LEFT JOIN worker_settings ws ON ws.worker_name=w.name LEFT JOIN stats st ON st.worker_name=w.name
  WHERE w.last_seen >= $2 ORDER BY w.name`, since, d.GeneratedAt.Add(-30*24*time.Hour))
 	if err != nil {
@@ -176,14 +177,19 @@ func (s *SQLRepository) readDashboardWorkers(ctx context.Context, db SQLDBOperat
 	defer rows.Close()
 	for rows.Next() {
 		var w model.DashboardWorker
-		var raw []byte
+		var raw, control []byte
 		if err := rows.Scan(&w.Name, &w.IP, &w.LastSeen, &raw, &w.DesiredMax, &w.DesiredCPUJobs, &w.DesiredGPUJobs,
-			&w.ActiveJobs, &w.Completed, &w.Failed, &w.SourceBytes, &w.TargetBytes); err != nil {
+			&w.ActiveJobs, &w.Completed, &w.Failed, &w.SourceBytes, &w.TargetBytes, &control); err != nil {
 			return err
 		}
 		if len(raw) > 0 {
 			if err := json.Unmarshal(raw, &w.Runtime); err != nil {
 				return fmt.Errorf("decode worker runtime: %w", err)
+			}
+		}
+		if len(control) > 0 {
+			if err := json.Unmarshal(control, &w.Control); err != nil {
+				return err
 			}
 		}
 		d.Workers = append(d.Workers, w)

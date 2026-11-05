@@ -15,6 +15,7 @@ type WorkerJobRuntime struct {
 }
 
 type WorkerRuntime struct {
+	ControlVersion   int                `json:"controlVersion,omitempty"`
 	Resources        *WorkerResources   `json:"resources,omitempty"`
 	Paused           bool               `json:"paused"`
 	RAMPaused        bool               `json:"ramPaused"`
@@ -80,6 +81,7 @@ type DashboardBucket struct {
 }
 
 type DashboardWorker struct {
+	Control        *WorkerControl `json:"control,omitempty"`
 	Name           string         `json:"name"`
 	IP             string         `json:"ip"`
 	LastSeen       *time.Time     `json:"lastSeen"`

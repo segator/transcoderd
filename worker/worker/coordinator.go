@@ -16,10 +16,12 @@ import (
 )
 
 type ServerCoordinator struct {
-	logger       console.LeveledLogger
-	serverClient *serverclient.ServerClient
-	worker       *JobExecutor
-	updater      *update.Updater
+	logger              console.LeveledLogger
+	serverClient        *serverclient.ServerClient
+	worker              *JobExecutor
+	updater             *update.Updater
+	appliedControlID    string
+	appliedControlError string
 }
 
 func NewServerCoordinator(serverClient *serverclient.ServerClient, worker *JobExecutor, updater *update.Updater, logger console.LeveledLogger) *ServerCoordinator {
@@ -148,6 +150,9 @@ func (q *ServerCoordinator) syncWorkerSettings(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if settings.Control != nil {
+		return q.applyRemoteControl(settingsCtx, settings.Control)
+	}
 	current := q.worker.AdmissionStatus()
 
 	// Service/maintenance holds must not be undone by periodic convergence.
@@ -197,7 +202,7 @@ func (e *JobExecutor) RuntimeTelemetry() *model.WorkerRuntime {
 	case status.GPUJobs > 0:
 		kind = "gpu"
 	}
-	runtime := &model.WorkerRuntime{Encoder: encoder, Kind: kind, Accepting: status.Accepting,
+	runtime := &model.WorkerRuntime{ControlVersion: 1, Encoder: encoder, Kind: kind, Accepting: status.Accepting,
 		WithinSchedule: status.WithinSchedule, ActiveJobs: status.ActiveJobs, ReservedJobs: status.ReservedJobs,
 		MaxActiveJobs: status.MaxActiveJobs, ActiveEncodes: status.ActiveEncodes, MaxEncodes: status.MaxEncodes,
 		CapacityVersion: 2, CPUJobs: status.CPUJobs, GPUJobs: status.GPUJobs,

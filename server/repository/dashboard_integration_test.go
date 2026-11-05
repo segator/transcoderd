@@ -285,4 +285,5 @@ func TestDashboardPostgresPagination(t *testing.T) {
 	}
 	checkDashboardJobPages(t, repo)
 	checkDashboardWorkerRecency(t, repo)
+	checkWorkerControlRepository(t, repo)
 }

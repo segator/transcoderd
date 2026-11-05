@@ -139,12 +139,18 @@
       window.location.replace("/dashboard/login");
       throw new Error("Your session has expired.");
     }
-    if (!response.ok)
+    if (!response.ok) {
+      const reason =
+        response.status === 409
+          ? (await response.text()).trim().slice(0, 512)
+          : "";
       throw new Error(
-        response.status === 400
-          ? "Check the values you entered."
-          : "The server could not complete the operation.",
+        reason ||
+          (response.status === 400
+            ? "Check the values you entered."
+            : "The server could not complete the operation."),
       );
+    }
     return response.status === 204 ? null : response.json();
   }
   function schedule() {
@@ -196,7 +202,7 @@
       workers = data.workers;
     resourceHistory.observe(workers, Date.parse(data.generatedAt));
     const online = workers.filter((w) => w.online).length;
-    $("nav-worker-count").textContent = workers.length;
+    $("nav-worker-count").textContent = visibleWorkers().length;
     $("nav-job-count").textContent = integer.format(s.active + s.queued);
     $("fleet-note").textContent =
       `${online} of ${workers.length} recent workers online`;
@@ -593,9 +599,19 @@
       return { cpu: "0", gpu: String(w.runtime.maxActiveJobs) };
     return { cpu: "", gpu: "" };
   }
+  function visibleWorkers() {
+    if (!data) return [];
+    const since = Date.parse(data.generatedAt) - hours * 3600000;
+    return data.workers.filter(
+      (w) => w.lastSeen && Date.parse(w.lastSeen) >= since,
+    );
+  }
   function renderWorkers() {
     if (!data) return;
-    if (!data.workers.length) {
+    const periodWorkers = visibleWorkers();
+    $("worker-scope-note").textContent =
+      `${periodWorkers.length} workers seen in the last ${hours === 24 ? "24 hours" : hours === 168 ? "7 days" : "30 days"} · online and active first. Offline workers show basic information.`;
+    if (!periodWorkers.length) {
       $("worker-pagination").innerHTML = "";
       $("worker-cards").innerHTML = empty(
         "Connect your first worker",
@@ -603,7 +619,7 @@
       );
       return;
     }
-    const all = data.workers.filter(
+    const all = periodWorkers.filter(
       (worker) => !selectedWorker || worker.name === selectedWorker,
     );
     workerPage = Math.max(
@@ -645,8 +661,20 @@
                   : !rt.withinSchedule
                     ? ["queued", "Outside schedule"]
                     : ["completed", "Online"];
+        const command = w.control;
+        const pendingControl = command?.state === "pending";
         const busy = saving.has(w.name),
-          disabled = busy || !modern;
+          disabled = busy || !modern || pendingControl;
+        const controlDisabled =
+          disabled || !(rt?.controlVersion >= 1) || rt?.draining;
+        const controlNote = pendingControl
+          ? `Waiting for worker confirmation: ${command.action}. Usually within 5 seconds.`
+          : command?.state === "failed"
+            ? command.error || "The worker could not apply the control."
+            : !(rt?.controlVersion >= 1)
+              ? "Update this worker to enable remote RAM and queue controls."
+              : "Pause in RAM suspends active encodes and retains RAM/VRAM. Stop after current lets active encodes finish and holds the queue. Resuming one preserves the other and individual pauses.";
+        const controls = `<div class="worker-controls"><button class="button subtle" type="button" data-worker-control="${rt?.ramPaused ? "resume-encodes" : "pause-encodes"}" data-worker-name="${esc(w.name)}" ${controlDisabled || rt?.finishing ? "disabled" : ""}>${rt?.ramPaused ? "Resume encodes" : "Pause in RAM"}</button><button class="button subtle" type="button" data-worker-control="${rt?.maxActiveJobs === 0 ? "resume-queue" : "stop-after-current"}" data-worker-name="${esc(w.name)}" ${controlDisabled ? "disabled" : ""}>${rt?.maxActiveJobs === 0 ? "Resume queue" : "Stop after current"}</button></div><p class="pending-note ${pendingControl ? "pending" : command?.state === "failed" ? "control-error" : ""}">${esc(controlNote)}</p>`;
         const lane = (kind) => {
           const active =
               rt?.[kind === "cpu" ? "activeCPUEncodes" : "activeGPUEncodes"],
@@ -673,7 +701,7 @@
                   : paused
                     ? "Queue stopped. Active encodes finish; queued encodes wait."
                     : `Limits applied · up to ${rt.cpuJobs + rt.gpuJobs + 1} jobs in the pipeline`;
-        return `<article class="panel worker-card" data-worker="${esc(w.name)}"><div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${esc(profileLabel)}</p></div>${badge(...status)}</div><p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.managedProfile ? " · This profile controls only its own encoder. Hardware readings are shared with other processes and profiles." : ""}</p>${resources.summary(w, Date.parse(data.generatedAt))}<a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">View resource details ↗</a><div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div><form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs">${input("cpu", profile.cpu)}${input("gpu", profile.gpu)}</div><div class="capacity-controls"><button class="button primary" type="submit" ${disabled ? "disabled" : ""}>${busy ? "Saving…" : "Save limits"}</button><button class="button subtle" type="button" data-pause="${esc(w.name)}" ${disabled ? "disabled" : ""}>${rt?.managedProfile ? "Pause profile" : "Pause both"}</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form><div class="worker-footer"><span>${esc(w.ip)} · ${age(w.lastSeen)}</span><span>${integer.format(w.completed)} completed · ${integer.format(w.failed)} failures · ${bytes(w.sourceBytes - w.targetBytes)}</span></div></article>`;
+        return `<article class="panel worker-card" data-worker="${esc(w.name)}"><div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${esc(profileLabel)}</p></div>${badge(...status)}</div><p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.managedProfile ? " · This profile controls only its own encoder. Hardware readings are shared with other processes and profiles." : ""}</p>${resources.summary(w, Date.parse(data.generatedAt))}${resources.compact(w, resourceHistory, Date.parse(data.generatedAt))}<a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">View resource details ↗</a><div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div><form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs">${input("cpu", profile.cpu)}${input("gpu", profile.gpu)}</div><div class="capacity-controls"><button class="button primary" type="submit" ${disabled ? "disabled" : ""}>${busy ? "Saving…" : "Save limits"}</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>${controls}<div class="worker-footer"><span>${esc(w.ip)} · ${age(w.lastSeen)}</span><span>${integer.format(w.completed)} completed · ${integer.format(w.failed)} failures · ${bytes(w.sourceBytes - w.targetBytes)}</span></div></article>`;
       })
       .join("");
     applyWidths($("worker-cards"));
@@ -683,7 +711,7 @@
     $("worker-detail-navigation").hidden = !show;
     $("worker-resource-detail").hidden = !show;
     if (!show || !data) return;
-    const worker = data.workers.find((w) => w.name === selectedWorker);
+    const worker = visibleWorkers().find((w) => w.name === selectedWorker);
     $("worker-resource-detail").innerHTML = worker
       ? worker.online
         ? resources.details(
@@ -698,8 +726,8 @@
               ". Hardware details and controls are available after reconnection.",
           )
       : empty(
-          "Worker not found",
-          "Return to all workers to choose an available worker.",
+          "Worker not seen in this period",
+          "Choose a longer reporting period or return to all workers.",
         );
     applyWidths($("worker-resource-detail"));
   }
@@ -836,9 +864,38 @@
       gpu: event.target.elements.gpuJobs.value,
     });
   });
+  async function controlWorker(name, action) {
+    const worker = data?.workers.find((w) => w.name === name);
+    if (
+      !worker?.online ||
+      !(worker.runtime?.controlVersion >= 1) ||
+      saving.has(name) ||
+      worker.control?.state === "pending"
+    )
+      return;
+    saving.add(name);
+    if (document.activeElement instanceof HTMLElement)
+      document.activeElement.blur();
+    renderWorkers();
+    try {
+      const command = await api(`workers/${encodeURIComponent(name)}/control`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      });
+      worker.control = command;
+      showToast(`${name}: command queued; waiting for worker confirmation.`);
+      await refresh();
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      saving.delete(name);
+      renderWorkers();
+    }
+  }
   $("worker-cards").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-pause]");
-    if (button) saveWorker(button.dataset.pause, { cpu: "0", gpu: "0" });
+    const button = event.target.closest("[data-worker-control]");
+    if (button && !button.disabled)
+      controlWorker(button.dataset.workerName, button.dataset.workerControl);
   });
   window.addEventListener("hashchange", setView);
   document.addEventListener("visibilitychange", () => {

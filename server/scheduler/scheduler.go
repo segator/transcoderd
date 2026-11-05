@@ -36,6 +36,9 @@ type Scheduler interface {
 	GetWorkerMaxActiveJobs(ctx context.Context, workerName string) (*int, error)
 	SetWorkerMaxActiveJobs(ctx context.Context, workerName string, max int) error
 	GetWorkerSettings(ctx context.Context, name string) (*model.WorkerSettings, error)
+	GetWorkerControl(context.Context, string) (*model.WorkerControl, error)
+	ControlWorker(context.Context, string, string) (*model.WorkerControl, error)
+	AckWorkerControl(context.Context, string, model.WorkerControlAck) error
 	SetWorkerSettings(ctx context.Context, name string, settings model.WorkerSettings) error
 	HandleWorkerEvent(ctx context.Context, taskEvent *model.EnvelopEvent) error
 	CancelJob(ctx context.Context, id string) error

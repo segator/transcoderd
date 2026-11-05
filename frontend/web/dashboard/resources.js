@@ -78,6 +78,12 @@
     }).join("");
     return `<div class="resource-legend">${series.map((s,i)=>`<span><i class="resource-line-${i}"></i>${esc(s.name)}</span>`).join("")}</div><svg class="resource-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(title)}">${[0,50,100].map(v=>`<line class="chart-gridline" x1="${left}" x2="${width-right}" y1="${y(v)}" y2="${y(v)}"/><text class="chart-label" x="${left-5}" y="${y(v)+4}" text-anchor="end">${v}</text>`).join("")}${paths}<text class="chart-label" x="${left}" y="${height-6}">${esc(new Date(start).toLocaleTimeString("en-US"))}</text><text class="chart-label" x="${width-right}" y="${height-6}" text-anchor="end">${esc(new Date(points.at(-1).at).toLocaleTimeString("en-US"))}</text></svg>`;
   }
+  function compact(worker, history, now) {
+    const s=state(worker,now),p=profile(worker),points=history.get(worker.name);
+    if (!s.live) return `<div class="resource-card-history resource-stale"><span class="media-help">${esc(s.label)} · live graph unavailable</span></div>`;
+    const series=[...(p.cpu ? [{name:"CPU",value:x=>x.cpu}] : []),{name:"RAM",value:x=>x.memory},...(p.gpu ? [{name:"GPU",value:x=>busiest(x.gpus,"gpu")},{name:"NVENC",value:x=>busiest(x.gpus,"encoder")}] : [])];
+    return `<section class="resource-card-history" aria-label="Recent resource history for ${esc(worker.name)}"><p class="media-help">Resource history · up to 10 minutes in this tab</p>${chart(points,series,"Recent worker CPU, RAM and GPU usage")}</section>`;
+  }
   const stat = (label, value, note = "") => `<div class="resource-stat"><small>${esc(label)}</small><strong>${esc(value)}</strong>${note ? `<span>${esc(note)}</span>` : ""}</div>`;
   function details(worker, history, now) {
     const s=state(worker,now), r=s.resource, points=history.get(worker.name), p=profile(worker);
@@ -91,7 +97,7 @@
     }).join("");
     return `<section class="panel resource-panel ${s.live ? "" : "resource-last-reported"}"><div class="resource-heading"><div><span class="eyebrow muted">WORKER RESOURCES</span><h2>${esc(worker.name)}</h2><p>${esc(r.hostname || "Unknown host")} · ${esc(r.os)} / ${esc(r.architecture)}</p></div><span class="badge ${s.live ? "completed" : "offline"}">${esc(s.label)}</span></div><p class="media-help">${esc(s.detail)}. OS-visible CPU/memory and visible NVIDIA devices are shared with other processes and worker profiles; they are not per-job utilization.</p><div class="resource-stats">${p.cpu ? stat(cpuLabel,pct(r.cpu?.percent),cpuNote) : ""}${stat("Host RAM",r.memory ? `${bytes(r.memory.usedBytes)} / ${bytes(r.memory.totalBytes)}` : "—",pct(memory))}${stat("Recent history",`${points.length} samples`,"In this tab · up to 10 minutes")}</div>${chart(points,[...(p.cpu ? [{name:cpuLabel,value:p=>p.cpu}] : []),{name:"RAM",value:p=>p.memory}],p.cpu ? "CPU and memory utilization" : "Memory utilization")}<p class="media-help">Measured hardware usage is separate from configured encode slots. Missing sensors are shown as unavailable.</p></section>${gpuCards || (p.gpu ? '<section class="panel resource-panel"><h3>No NVIDIA telemetry</h3><p class="muted">No devices were reported, or the driver/nvidia-smi is unavailable to this worker.</p></section>' : "")}`;
   }
-  const api={profile,percent,memoryPercent,state,busiest,link,summary,History,chart,details};
+  const api={compact,profile,percent,memoryPercent,state,busiest,link,summary,History,chart,details};
   if (typeof module !== "undefined" && module.exports) module.exports=api;
   else window.TranscoderResources=api;
 })();

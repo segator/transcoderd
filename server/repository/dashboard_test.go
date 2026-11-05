@@ -199,7 +199,7 @@ func TestDashboardJobPages(t *testing.T) { checkDashboardJobPages(t, NewInMemory
 
 func checkDashboardWorkerRecency(t *testing.T, repo Repository) {
 	t.Helper()
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	tests := []struct {
 		name string
 		age  time.Duration

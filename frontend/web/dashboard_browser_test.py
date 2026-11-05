@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import sync_playwright, expect
@@ -29,7 +29,7 @@ def job(state, index):
 def worker(name, kind="cpu", online=True):
     return dict(name=name, online=online, lastSeen=NOW, ip="127.0.0.1",
                 completed=0, failed=0, sourceBytes=0, targetBytes=0, activeJobs=0,
-                runtime=dict(managedProfile=True, capacityVersion=2, kind=kind,
+                runtime=dict(managedProfile=True, capacityVersion=2, controlVersion=1, maxActiveJobs=2, kind=kind,
                              encoder="libsvtav1" if kind == "cpu" else "av1_nvenc",
                              cpuEncoder="libsvtav1", gpuEncoder="av1_nvenc",
                              cpuJobs=2 if kind == "cpu" else 0,
@@ -46,7 +46,7 @@ def worker(name, kind="cpu", online=True):
 def main():
     jobs = [job("active", 0), job("failed", 0)] + [job("queued", i) for i in range(130)] + [job("completed", i) for i in range(28)]
     workers = [worker("windows-cpu"), worker("windows-gpu", "gpu")] + [worker(f"offline-{i:02d}", online=False) for i in range(24)]
-    writes, requests, errors = [], [], []
+    writes, requests, errors, controls = [], [], [], []
     media = dict(id="demo", name="Original test.mp4", path="Original test.mp4", root="source",
                  size=10000, eligible=True,
                  metadata=dict(codec="h264", width=320, height=240, durationSeconds=8, bitrateMbps=5))
@@ -88,6 +88,11 @@ def main():
                     matching = [j for j in jobs if (state == "all" or j["state"] == state) and search in (j["sourcePath"] + j["worker"] + j["id"]).lower()]
                     offset, limit = int(query.get("offset", [0])[0]), int(query.get("limit", [25])[0])
                     reply(dict(jobs=matching[offset:offset+limit], total=len(matching), offset=offset, limit=limit))
+                elif path.endswith("/control"):
+                    action = request.post_data_json["action"]
+                    controls.append(action)
+                    workers[0]["control"] = dict(id=f"command-{len(controls)}", action=action, state="pending")
+                    reply(workers[0]["control"], 202)
                 elif path.endswith("/settings"):
                     writes.append(request.post_data_json)
                     reply(None, 204)
@@ -159,6 +164,36 @@ def main():
             expect(gpu.locator('input[name="gpuJobs"]')).to_be_visible()
             expect(gpu.locator(".resource-summary")).not_to_contain_text("CPU")
             expect(cpu).to_contain_text("shared host windows-host")
+            expect(cpu.locator(".resource-card-history svg")).to_have_count(1)
+            expect(gpu.locator(".resource-card-history svg")).to_have_count(1)
+            expect(cpu.locator(".resource-card-history")).to_contain_text("RAM")
+            expect(gpu.locator(".resource-card-history")).to_contain_text("NVENC")
+            expect(cpu.locator(".resource-card-history")).not_to_contain_text("NVENC")
+            def acknowledge():
+                workers[0]["control"]["state"] = "applied"
+                page.locator("#refresh").click()
+                expect(cpu).not_to_contain_text("Waiting for worker confirmation")
+            cpu.get_by_text("Pause in RAM", exact=True).click()
+            expect(cpu).to_contain_text("Waiting for worker confirmation")
+            workers[0]["runtime"]["ramPaused"] = True
+            acknowledge()
+            expect(cpu.get_by_text("Resume encodes", exact=True)).to_be_enabled()
+            cpu.get_by_text("Resume encodes", exact=True).click()
+            expect(cpu).to_contain_text("Waiting for worker confirmation")
+            workers[0]["runtime"]["ramPaused"] = False
+            acknowledge()
+            cpu.get_by_text("Stop after current", exact=True).click()
+            expect(cpu).to_contain_text("Waiting for worker confirmation")
+            workers[0]["runtime"]["maxActiveJobs"] = 0
+            workers[0]["runtime"]["cpuJobs"] = 0
+            acknowledge()
+            expect(cpu.get_by_text("Resume queue", exact=True)).to_be_enabled()
+            cpu.get_by_text("Resume queue", exact=True).click()
+            expect(cpu).to_contain_text("Waiting for worker confirmation")
+            workers[0]["runtime"]["maxActiveJobs"] = 2
+            workers[0]["runtime"]["cpuJobs"] = 2
+            acknowledge()
+            assert controls == ["pause-encodes", "resume-encodes", "stop-after-current", "resume-queue"]
             cpu.locator('input[name="cpuJobs"]').fill("3")
             cpu.get_by_text("Save limits", exact=True).click()
             page.wait_for_function("document.querySelector('#toast').textContent.includes('saved')")
@@ -182,6 +217,16 @@ def main():
             expect(page.locator("#worker-resource-detail")).to_contain_text("NVIDIA Test GPU")
             expect(page.locator("#worker-resource-detail")).not_to_contain_text("Host CPU")
 
+            # Reporting period changes membership before pagination, including details.
+            page.evaluate("location.hash='workers'")
+            workers[-1]["lastSeen"] = (datetime.now(timezone.utc)-timedelta(days=2)).isoformat()
+            workers[-2]["lastSeen"] = (datetime.now(timezone.utc)-timedelta(days=10)).isoformat()
+            page.locator("#period").select_option("24")
+            expect(page.locator("#worker-scope-note")).to_contain_text("24 workers seen in the last 24 hours")
+            page.locator("#period").select_option("168")
+            expect(page.locator("#worker-scope-note")).to_contain_text("25 workers seen in the last 7 days")
+            page.locator("#period").select_option("720")
+            expect(page.locator("#worker-scope-note")).to_contain_text("26 workers seen in the last 30 days")
             page.evaluate("location.hash='library'")
             expect(page.locator("#media-files")).to_contain_text("Previous encode failed · Retry eligible")
             page.locator("#media-filters").evaluate("form => form.requestSubmit()")

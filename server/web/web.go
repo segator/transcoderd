@@ -17,9 +17,11 @@ import (
 
 	"transcoder/model"
 	"transcoder/server/library"
+	"transcoder/server/repository"
 	"transcoder/server/scheduler"
 	"transcoder/update"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	log "github.com/sirupsen/logrus"
 )
@@ -86,6 +88,15 @@ func (s *Server) getWorkerSettings(writer http.ResponseWriter, request *http.Req
 	settings, err := s.scheduler.GetWorkerSettings(request.Context(), workerName)
 	if webError(writer, err, http.StatusInternalServerError) {
 		return
+	}
+	if request.Header.Get("workerControlVersion") == model.RemoteControlCapability {
+		c, err := s.scheduler.GetWorkerControl(request.Context(), workerName)
+		if webError(writer, err, http.StatusInternalServerError) {
+			return
+		}
+		if c != nil && c.State == "pending" {
+			settings.Control = c
+		}
 	}
 	writer.Header().Set("Content-Type", "application/json")
 	if settings.Independent() && request.Header.Get("workerCapabilities") != model.IndependentEncoderCapability {
@@ -425,6 +436,7 @@ func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update
 	rtr.Handle("/api/v1/job/request", webServer.AuthFunc(webServer.requestJob)).Methods("GET")
 	rtr.Handle("/api/v1/worker/settings", webServer.AuthFunc(webServer.getWorkerSettings)).Methods("GET")
 	rtr.Handle("/api/v1/worker/settings", webServer.AuthFunc(webServer.setWorkerSettings)).Methods("PUT")
+	rtr.Handle("/api/v1/worker/control/ack", webServer.AuthFunc(webServer.ackWorkerControl)).Methods("POST")
 	rtr.Handle("/api/v1/job/{jobid}", webServer.AuthFunc(webServer.getJob)).Methods("GET")
 	rtr.Handle("/api/v1/job/{jobid}", webServer.AuthFunc(webServer.cancelJobs)).Methods("DELETE")
 	rtr.Handle("/api/v1/event", webServer.AuthFunc(webServer.handleWorkerEvent)).Methods("POST")
@@ -560,3 +572,25 @@ func webError(writer http.ResponseWriter, err error, code int) bool {
 
 // ServeHTTP exposes the API routes for HTTP hosting and integration tests.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.srv.Handler.ServeHTTP(w, r) }
+
+func (s *Server) ackWorkerControl(w http.ResponseWriter, r *http.Request) {
+	name := workerNameFromRequest(r)
+	var ack model.WorkerControlAck
+	if name == "" || decodeDashboardJSON(w, r, &ack) != nil || len(ack.Error) > 512 {
+		http.Error(w, "Invalid control acknowledgement", 400)
+		return
+	}
+	if _, err := uuid.Parse(ack.ID); err != nil {
+		http.Error(w, "Invalid command ID", 400)
+		return
+	}
+	err := s.scheduler.AckWorkerControl(r.Context(), name, ack)
+	if errors.Is(err, repository.ErrElementNotFound) {
+		http.Error(w, "Command was superseded", http.StatusConflict)
+		return
+	}
+	if webError(w, err, 500) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

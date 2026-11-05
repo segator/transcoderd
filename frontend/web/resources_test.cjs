@@ -40,3 +40,10 @@ test('fixed Windows profiles show only relevant encoder hardware',()=>{
  else {assert.match(summary,/GPU/);assert.match(details,/NVIDIA DEVICE/);assert.doesNotMatch(summary,/CPU <b>/);assert.doesNotMatch(details,/Host CPU|CPU and memory utilization/)}
  }
 });
+
+test('compact history plots only relevant profile measurements and identifies stale samples',()=>{
+ const w=worker(),h=new r.History();w.runtime.managedProfile=true;w.runtime.encoder='libsvtav1';h.observe([w],now);
+ let html=r.compact(w,h,now);assert.match(html,/Resource history/);assert.match(html,/RAM/);assert.match(html,/CPU/);assert.doesNotMatch(html,/NVENC/);
+ w.runtime.encoder='av1_nvenc';html=r.compact(w,h,now);assert.match(html,/GPU/);assert.match(html,/NVENC/);assert.doesNotMatch(html,/>CPU</);
+ assert.match(r.compact(w,h,now+21000),/live graph unavailable/);
+});

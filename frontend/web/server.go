@@ -202,6 +202,8 @@ func originPort(u *url.URL) string {
 	return "80"
 }
 
+var workerControlPath = regexp.MustCompile(`^/dashboard/api/workers/[^/]+/control$`)
+
 var workerSettingsPath = regexp.MustCompile(`^/dashboard/api/workers/[^/]+/settings$`)
 var mediaObjectPath = regexp.MustCompile(`^/dashboard/api/media/(info|file|preview|jobs|operations)/[^/]+$`)
 
@@ -215,7 +217,7 @@ func allowedAPI(method, p string) bool {
 	case http.MethodHead:
 		return strings.HasPrefix(p, "/dashboard/api/media/file/") && mediaObjectPath.MatchString(p)
 	case http.MethodPost:
-		return p == "/dashboard/api/login" || p == "/dashboard/api/logout" || p == "/dashboard/api/media/scans" || p == "/dashboard/api/media/batches"
+		return workerControlPath.MatchString(p) || p == "/dashboard/api/login" || p == "/dashboard/api/logout" || p == "/dashboard/api/media/scans" || p == "/dashboard/api/media/batches"
 	case http.MethodPut:
 		return workerSettingsPath.MatchString(p)
 	case http.MethodDelete:

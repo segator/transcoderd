@@ -45,11 +45,15 @@ func NewServerClient(webServerConfig *web.Config, workerName string) *ServerClie
 }
 
 func (s *ServerClient) publishEvent(event *model.EnvelopEvent) error {
+	return s.publishEventContext(context.Background(), event)
+}
+
+func (s *ServerClient) publishEventContext(ctx context.Context, event *model.EnvelopEvent) error {
 	b, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
-	req, err := s.request("POST", "/api/v1/event", bytes.NewBuffer(b))
+	req, err := s.requestWithContext(ctx, "POST", "/api/v1/event", bytes.NewBuffer(b))
 	if err != nil {
 		fmt.Printf("Error creating request: %v\n", err)
 		return err
@@ -63,10 +67,10 @@ func (s *ServerClient) publishEvent(event *model.EnvelopEvent) error {
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("error publishing event: %s", resp.Status)
 	}
-	defer resp.Body.Close()
 
 	return nil
 }
@@ -113,6 +117,7 @@ func (s *ServerClient) GetWorkerSettings(ctx context.Context) (*WorkerSettings, 
 	}
 	req.Header.Set("workerName", s.workerName)
 	req.Header.Set("workerCapabilities", model.IndependentEncoderCapability)
+	req.Header.Set("workerControlVersion", model.RemoteControlCapability)
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -191,6 +196,10 @@ func (s *ServerClient) requestWithContext(ctx context.Context, method string, ur
 }
 
 func (s *ServerClient) PublishPingEvent(runtime ...*model.WorkerRuntime) error {
+	return s.PublishPingEventContext(context.Background(), runtime...)
+}
+
+func (s *ServerClient) PublishPingEventContext(ctx context.Context, runtime ...*model.WorkerRuntime) error {
 	pingEvent := model.PingEventType{
 		Event: model.Event{
 			EventTime:  time.Now(),
@@ -205,7 +214,7 @@ func (s *ServerClient) PublishPingEvent(runtime ...*model.WorkerRuntime) error {
 		return err
 	}
 
-	return s.publishEvent(event)
+	return s.publishEventContext(ctx, event)
 }
 
 func (s *ServerClient) PublishTaskEvent(taskEvent *model.TaskEventType) error {
@@ -237,4 +246,25 @@ func envelopEvent(eventType model.EventType, eventData interface{}) (*model.Enve
 		EventType: eventType,
 		EventData: b,
 	}, nil
+}
+
+func (s *ServerClient) AckWorkerControl(ctx context.Context, ack model.WorkerControlAck) error {
+	body, err := json.Marshal(ack)
+	if err != nil {
+		return err
+	}
+	req, err := s.requestWithContext(ctx, http.MethodPost, "/api/v1/worker/control/ack", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("workerName", s.workerName)
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("acknowledge worker control: %s", resp.Status)
+	}
+	return nil
 }

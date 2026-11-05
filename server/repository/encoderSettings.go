@@ -44,9 +44,12 @@ func (s *SQLRepository) SetWorkerSettings(ctx context.Context, name string, sett
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO worker_settings (worker_name,max_active_jobs,cpu_jobs,gpu_jobs,updated_at)
- VALUES ($1,$2,$3,$4,CURRENT_TIMESTAMP) ON CONFLICT (worker_name) DO UPDATE SET
- max_active_jobs=$2,cpu_jobs=$3,gpu_jobs=$4,updated_at=CURRENT_TIMESTAMP`, name, total, *settings.CPUJobs, *settings.GPUJobs)
+	_, err = db.ExecContext(ctx, `INSERT INTO worker_settings (worker_name,max_active_jobs,cpu_jobs,gpu_jobs,resume_max_active_jobs,resume_cpu_jobs,resume_gpu_jobs,updated_at)
+ VALUES ($1,$2::bigint,$3::bigint,$4::bigint,CASE WHEN $2::bigint>0 THEN $2::bigint END,CASE WHEN $2::bigint>0 THEN $3::bigint END,CASE WHEN $2::bigint>0 THEN $4::bigint END,CURRENT_TIMESTAMP)
+ ON CONFLICT (worker_name) DO UPDATE SET max_active_jobs=$2::bigint,cpu_jobs=$3::bigint,gpu_jobs=$4::bigint,
+ resume_max_active_jobs=CASE WHEN $2::bigint>0 THEN $2::bigint ELSE worker_settings.resume_max_active_jobs END,
+ resume_cpu_jobs=CASE WHEN $2::bigint>0 THEN $3::bigint ELSE worker_settings.resume_cpu_jobs END,
+ resume_gpu_jobs=CASE WHEN $2::bigint>0 THEN $4::bigint ELSE worker_settings.resume_gpu_jobs END,updated_at=CURRENT_TIMESTAMP`, name, total, *settings.CPUJobs, *settings.GPUJobs)
 	return err
 }
 
@@ -81,6 +84,9 @@ func (r *InMemoryRepository) SetWorkerSettings(ctx context.Context, name string,
 	defer r.mu.Unlock()
 	clone := settings.Clone()
 	clone.MaxActiveJobs = &total
+	if total > 0 {
+		r.workerResumeLimits[name] = clone.Clone()
+	}
 	r.workerEncoderLimits[name] = clone
 	r.workerMaxJobs[name] = total
 	return nil

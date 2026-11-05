@@ -6,14 +6,18 @@ const IndependentEncoderCapability = "independent-encoders"
 
 // WorkerSettings is either one legacy maximum or one atomic CPU/GPU pair.
 type WorkerSettings struct {
-	MaxActiveJobs *int `json:"maxActiveJobs"`
-	CPUJobs       *int `json:"cpuJobs,omitempty"`
-	GPUJobs       *int `json:"gpuJobs,omitempty"`
+	Control       *WorkerControl `json:"control,omitempty"`
+	MaxActiveJobs *int           `json:"maxActiveJobs"`
+	CPUJobs       *int           `json:"cpuJobs,omitempty"`
+	GPUJobs       *int           `json:"gpuJobs,omitempty"`
 }
 
 func (s WorkerSettings) Independent() bool { return s.CPUJobs != nil && s.GPUJobs != nil }
 
 func (s WorkerSettings) ValidateWrite() error {
+	if s.Control != nil {
+		return fmt.Errorf("control is read-only in worker settings")
+	}
 	if s.CPUJobs != nil || s.GPUJobs != nil {
 		if !s.Independent() || s.MaxActiveJobs != nil {
 			return fmt.Errorf("supply both cpuJobs and gpuJobs without maxActiveJobs")

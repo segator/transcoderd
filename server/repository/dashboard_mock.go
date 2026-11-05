@@ -170,6 +170,10 @@ func (r *InMemoryRepository) dashboard(ctx context.Context, hours int, now time.
 		d.Summary.AverageSeconds = durationSum / float64(durationCount)
 	}
 	for _, w := range workers {
+		if c, ok := r.workerCommands[w.Name]; ok {
+			copy := c.Clone()
+			w.Control = &copy
+		}
 		d.Workers = append(d.Workers, *w)
 	}
 	sort.Slice(d.Workers, func(i, j int) bool { return d.Workers[i].Name < d.Workers[j].Name })

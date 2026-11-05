@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"transcoder/model"
 	"transcoder/server/scheduler"
 
 	"github.com/gorilla/mux"
@@ -24,6 +25,7 @@ func (s *Server) registerDashboardAPI(r *mux.Router) {
 	d.HandleFunc("/api/session", s.protectDashboard(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})).Methods(http.MethodGet)
+	d.HandleFunc("/api/jobs", s.protectDashboard(s.dashboardJobs)).Methods(http.MethodGet)
 	d.HandleFunc("/api/stats", s.protectDashboard(s.dashboardStats)).Methods(http.MethodGet)
 	s.registerMedia(d)
 	d.HandleFunc("/api/workers/{worker}/settings", s.protectDashboard(s.dashboardWorkerSettings)).Methods(http.MethodPut)
@@ -101,4 +103,46 @@ func (s *Server) dashboardWorkerSettings(w http.ResponseWriter, r *http.Request)
 	}
 	log.WithFields(fields).Info("Dashboard saved worker capacity")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) dashboardJobs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	query := model.DashboardJobsQuery{State: q.Get("state"), Search: strings.TrimSpace(q.Get("search")), Limit: 25}
+	switch query.State {
+	case "", "all", "active", "queued", "completed", "failed", "canceled":
+	default:
+		http.Error(w, "Invalid job state", 400)
+		return
+	}
+	var err error
+	if q.Has("offset") {
+		query.Offset, err = strconv.Atoi(q.Get("offset"))
+		if err != nil || query.Offset < 0 {
+			http.Error(w, "Invalid job offset", 400)
+			return
+		}
+	}
+	if q.Has("limit") {
+		query.Limit, err = strconv.Atoi(q.Get("limit"))
+		if err != nil || query.Limit < 1 || query.Limit > 100 {
+			http.Error(w, "Job limit must be 1–100", 400)
+			return
+		}
+	}
+	if len(query.Search) > 256 {
+		http.Error(w, "Search is too long", 400)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	page, err := s.scheduler.GetDashboardJobs(ctx, query)
+	if err != nil {
+		log.WithError(err).Error("Could not read dashboard jobs")
+		http.Error(w, "Could not load jobs", 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(page); err != nil {
+		log.WithError(err).Debug("Could not write dashboard jobs")
+	}
 }

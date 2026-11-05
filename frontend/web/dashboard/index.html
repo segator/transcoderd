@@ -64,14 +64,15 @@
         <div class="fleet-mini">
           <span class="eyebrow">FLEET STATUS</span
           ><strong id="fleet-note">Connecting…</strong
-          ><span id="fleet-detail" class="muted"
-            >Waiting for server data</span
-          >
+          ><span id="fleet-detail" class="muted">Waiting for server data</span>
           <div class="fleet-lights" id="fleet-lights" aria-hidden="true"></div>
         </div>
         <div class="sidebar-footer">
           <span class="avatar">OP</span>
-          <div><strong>Operator</strong><small>Private session</small></div>
+          <div>
+            <strong id="session-name">Signed in</strong
+            ><small id="session-account">Loading account…</small>
+          </div>
           <button
             class="icon-button"
             id="logout"
@@ -87,9 +88,11 @@
     <div class="app-shell">
       <header class="topbar">
         <div class="breadcrumb">
-          Workspace <span>/</span> <strong id="breadcrumb-view">Overview</strong>
+          Workspace <span>/</span>
+          <strong id="breadcrumb-view">Overview</strong>
         </div>
         <div class="topbar-right">
+          <span id="session-mobile" class="session-mobile">Signed in</span>
           <button
             id="mobile-logout"
             data-logout
@@ -186,7 +189,8 @@
                 </div>
                 <div id="storage-impact"></div>
                 <p class="panel-footnote">
-                  Verified final sizes only. Storage savings do not measure visual quality.
+                  Verified final sizes only. Storage savings do not measure
+                  visual quality.
                 </p>
               </section>
             </div>
@@ -249,9 +253,7 @@
                 <div>
                   <span class="eyebrow muted">IN PROGRESS</span>
                   <h2>Jobs at a glance</h2>
-                  <p>
-                    Current phase progress · worker updates every ~15 s
-                  </p>
+                  <p>Current phase progress · worker updates every ~15 s</p>
                 </div>
                 <a href="#jobs" class="text-link">View jobs ↗</a>
               </div>
@@ -267,23 +269,40 @@
             <div class="info-strip">
               <span aria-hidden="true">ⓘ</span>
               <p>
-                Each worker can encode on CPU and GPU at the same time. Both limits are saved together and applied without restarting.
+                Windows installations run separate CPU and GPU worker profiles
+                on the same host. Each profile shows its own limit and relevant
+                shared hardware readings. Independent workers can run both
+                encoders. Limits apply without restarting.
                 <strong
-                  >0 disables that group; setting both to 0 pauses admission.</strong
+                  >0 stops new encodes for that profile or encoder.</strong
                 >
                 Accepted jobs continue.
               </p>
             </div>
-            <div id="worker-detail-navigation" class="worker-detail-navigation" hidden><a href="#workers" class="text-link">← All workers</a></div>
-            <div id="worker-resource-detail" class="worker-resource-detail" hidden></div>
+            <div
+              id="worker-detail-navigation"
+              class="worker-detail-navigation"
+              hidden
+            >
+              <a href="#workers" class="text-link">← All workers</a>
+            </div>
+            <div
+              id="worker-resource-detail"
+              class="worker-resource-detail"
+              hidden
+            ></div>
+            <p class="table-note">
+              Workers seen in the last 30 days · online and active first.
+              Offline workers show basic information.
+            </p>
             <div id="worker-cards" class="worker-grid"></div>
+            <nav
+              id="worker-pagination"
+              class="list-pagination"
+              aria-label="Worker pages"
+            ></nav>
           </section>
-          <section
-            id="jobs-view"
-            class="view"
-            aria-label="Job explorer"
-            hidden
-          >
+          <section id="jobs-view" class="view" aria-label="Job explorer" hidden>
             <section class="panel jobs-panel">
               <div class="job-filters">
                 <div
@@ -313,9 +332,16 @@
                 /></label>
               </div>
               <p class="table-note">
-                Up to 100 jobs: active jobs first, then queued jobs and recent results. Counters and charts cover the entire database.
+                Filters and search cover all jobs, with 25 per page. Queued
+                playback shows the source; completed playback shows the output.
+                Counters and charts cover the entire database.
               </p>
               <div id="job-list" class="table-wrap"></div>
+              <nav
+                id="job-pagination"
+                class="list-pagination"
+                aria-label="Job pages"
+              ></nav>
             </section>
           </section>
           <section
@@ -360,7 +386,8 @@
                     <option value="series">TV shows · high bitrate</option>
                   </select>
                   <p class="media-help">
-                    Presets based on the Unraid scripts. All criteria can be edited.
+                    Presets based on the Unraid scripts. All criteria can be
+                    edited.
                   </p>
                   <label for="media-contains">Path contains</label
                   ><input
@@ -443,15 +470,11 @@
                   <details class="media-advanced">
                     <summary>Retries and limits</summary>
                     <label class="media-check"
-                      ><input
-                        id="media-retry-failed"
-                        type="checkbox"
-                      />Retry failed jobs</label
+                      ><input id="media-retry-failed" type="checkbox" />Retry
+                      failed jobs</label
                     ><label class="media-check"
-                      ><input
-                        id="media-retry-canceled"
-                        type="checkbox"
-                      />Retry canceled jobs</label
+                      ><input id="media-retry-canceled" type="checkbox" />Retry
+                      canceled jobs</label
                     ><label for="media-candidate-limit"
                       >Maximum candidates to scan</label
                     ><input
@@ -462,7 +485,8 @@
                       value="1000"
                     />
                     <p class="media-help">
-                      Largest files are prioritized. Existing jobs are skipped unless their retry option is selected.
+                      Largest files are prioritized. Existing jobs are skipped
+                      unless their retry option is selected.
                     </p>
                   </details>
                   <button
@@ -484,7 +508,9 @@
                 <section class="panel media-browser-panel">
                   <div class="panel-header">
                     <div>
-                      <span class="eyebrow muted">EXPLORE BEFORE SELECTING</span>
+                      <span class="eyebrow muted"
+                        >EXPLORE BEFORE SELECTING</span
+                      >
                       <h2>Your videos, one click away</h2>
                     </div>
                     <span class="panel-tag" id="media-file-count"
@@ -530,7 +556,8 @@
                     </button>
                   </div>
                   <p id="media-dirty" class="media-notice" hidden>
-                    Filters have changed. Prepare a new preview before adding jobs.
+                    Filters have changed. Prepare a new preview before adding
+                    jobs.
                   </p>
                   <div id="media-selection" class="table-wrap"></div>
                   <div class="media-queue-bar">
@@ -555,7 +582,9 @@
                     </button>
                   </div>
                   <p class="media-help">
-                    Only successfully queued jobs count toward the target. Changed, already queued or unavailable files appear in the results.
+                    Only successfully queued jobs count toward the target.
+                    Changed, already queued or unavailable files appear in the
+                    results.
                   </p>
                 </section>
               </div>
@@ -595,39 +624,21 @@
         hidden
       ></div>
       <video id="media-video" controls playsinline preload="none"></video>
-      <div class="media-timeline">
-        <span id="media-player-current">00:00</span
-        ><input
-          id="media-player-seek"
-          type="range"
-          min="0"
-          max="1"
-          step="1"
-          value="0"
-          disabled
-          aria-label="Position in the full video"
-        /><span id="media-player-duration">—</span>
-      </div>
       <div class="media-player-controls">
-        <button id="media-player-toggle" class="button primary" type="button">
-          Play</button
-        ><label
+        <label
           >File<select
             id="media-player-asset"
-            aria-label="Source or output"
-          ></select></label
-        ><label
-          >Mode<select id="media-player-mode">
-            <option value="compatible">Compatible · up to 720p</option>
-            <option value="original">Original · no conversion</option>
-          </select></label
-        >
+            aria-label="Playing file"
+          ></select
+        ></label>
       </div>
       <p id="media-player-info" class="media-help">
         Loading video information…
       </p>
       <p class="media-help">
-        Compatible playback converts video and audio for your browser. The original file stays unchanged. Viewing the original quality requires a format your browser supports.
+        Original file · no conversion. Playback and seeking use your browser’s
+        native controls and require supported container, video and audio
+        formats.
       </p>
     </dialog>
     <div id="toast" class="toast" role="status" hidden></div>

@@ -41,6 +41,7 @@ type Scheduler interface {
 	CancelJob(ctx context.Context, id string) error
 	GetJob(ctx context.Context, id string) (*model.Job, error)
 	GetDashboard(ctx context.Context, hours int) (*model.Dashboard, error)
+	GetDashboardJobs(ctx context.Context, query model.DashboardJobsQuery) (*model.DashboardJobPage, error)
 	ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error)
 }
 
@@ -164,6 +165,10 @@ func (r *RuntimeScheduler) SetWorkerSettings(ctx context.Context, name string, s
 		}
 	}
 	return r.repo.SetWorkerSettings(ctx, name, settings)
+}
+
+func (r *RuntimeScheduler) GetDashboardJobs(ctx context.Context, query model.DashboardJobsQuery) (*model.DashboardJobPage, error) {
+	return r.repo.GetDashboardJobs(ctx, query)
 }
 
 func (r *RuntimeScheduler) GetDashboard(ctx context.Context, hours int) (*model.Dashboard, error) {

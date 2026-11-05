@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -98,10 +99,10 @@ func TestDashboardMeasuredOutcomes(t *testing.T) {
 	if len(d.Codecs) != 1 || d.Codecs[0].Name != "av1" || d.Codecs[0].SourceBytes != 1000 || d.Codecs[0].TargetBytes != 230 {
 		t.Errorf("codecs = %+v, want av1 1000→230 in period", d.Codecs)
 	}
-	if len(d.Workers) != 3 {
-		t.Fatalf("workers = %d, want 3 including offline settings-only worker", len(d.Workers))
+	if len(d.Workers) != 2 {
+		t.Fatalf("workers = %d, want 2 recently seen workers", len(d.Workers))
 	}
-	if !d.Workers[0].Online || d.Workers[2].Online {
+	if !d.Workers[0].Online || !d.Workers[1].Online {
 		t.Errorf("worker freshness = %+v", d.Workers)
 	}
 	if d.Jobs[0].State != "active" {
@@ -139,4 +140,106 @@ func TestDashboardEmptyAndProgress(t *testing.T) {
 	if len(d.Jobs[0].Progress) != 0 {
 		t.Error("dashboard displayed abandoned assignment progress")
 	}
+}
+
+func checkDashboardJobPages(t *testing.T, repo Repository) {
+	t.Helper()
+	for i := 0; i < 130; i++ {
+		j := &model.Job{Id: uuid.New(), SourcePath: fmt.Sprintf("queue-%03d.mkv", i)}
+		if err := repo.AddJob(t.Context(), j); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.AddNewTaskEvent(t.Context(), j.AddEvent(model.JobNotification, model.QueuedNotificationStatus)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 28; i++ {
+		j := &model.Job{Id: uuid.New(), SourcePath: fmt.Sprintf("Finished-Movie-%03d.mkv", i)}
+		if err := repo.AddJob(t.Context(), j); err != nil {
+			t.Fatal(err)
+		}
+		event := j.AddEvent(model.JobNotification, model.CompletedNotificationStatus)
+		event.WorkerName = "Test-CPU"
+		if err := repo.AddNewTaskEvent(t.Context(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	for _, offset := range []int{0, 25} {
+		page, err := repo.GetDashboardJobs(t.Context(), model.DashboardJobsQuery{State: "completed", Search: "finished-movie", Limit: 25, Offset: offset})
+		if err != nil || page.Total != 28 || page.Offset != offset || len(page.Jobs) != min(25, 28-offset) {
+			t.Fatalf("GetDashboardJobs() = %+v, %v", page, err)
+		}
+		for _, j := range page.Jobs {
+			if seen[j.ID] || j.State != "completed" {
+				t.Fatalf("GetDashboardJobs() duplicate or wrong state = %+v", j)
+			}
+			seen[j.ID] = true
+		}
+	}
+	for _, query := range []model.DashboardJobsQuery{
+		{State: "completed", Search: "TEST-cpu", Limit: 25},
+		{State: "completed", Search: "%", Limit: 25},
+		{State: "completed", Search: "finished-movie", Limit: 25, Offset: 1000},
+	} {
+		page, err := repo.GetDashboardJobs(t.Context(), query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if query.Search == "TEST-cpu" {
+			if page.Total != 28 {
+				t.Fatalf("worker search total = %d, want 28", page.Total)
+			}
+		} else if len(page.Jobs) != 0 {
+			t.Fatalf("literal search/empty page = %+v", page)
+		}
+	}
+}
+func TestDashboardJobPages(t *testing.T) { checkDashboardJobPages(t, NewInMemoryRepository()) }
+
+func checkDashboardWorkerRecency(t *testing.T, repo Repository) {
+	t.Helper()
+	now := time.Now().UTC()
+	tests := []struct {
+		name string
+		age  time.Duration
+		want bool
+	}{
+		{"recency-online", time.Second, true}, {"recency-offline", time.Hour, true},
+		{"recency-boundary", 30 * 24 * time.Hour, true}, {"recency-old", 30*24*time.Hour + time.Second, false},
+	}
+	for _, tt := range tests {
+		if err := repo.PingServerUpdate(t.Context(), "127.0.0.1", model.PingEventType{Event: model.Event{WorkerName: tt.name}}); err != nil {
+			t.Fatal(err)
+		}
+		at := now.Add(-tt.age)
+		switch r := repo.(type) {
+		case *InMemoryRepository:
+			r.mu.Lock()
+			r.workers[tt.name].LastSeen = at
+			r.mu.Unlock()
+		case *SQLRepository:
+			if _, err := r.db.ExecContext(t.Context(), "UPDATE workers SET last_seen=$1 WHERE name=$2", at, tt.name); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, hours := range []int{24, 168, 720} {
+		d, err := repo.GetDashboard(t.Context(), hours, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := map[string]bool{}
+		for _, w := range d.Workers {
+			found[w.Name] = true
+		}
+		for _, tt := range tests {
+			if found[tt.name] != tt.want {
+				t.Errorf("GetDashboard(%d) worker %s present=%v, want %v", hours, tt.name, found[tt.name], tt.want)
+			}
+		}
+	}
+}
+func TestDashboardWorkerRecency(t *testing.T) {
+	checkDashboardWorkerRecency(t, NewInMemoryRepository())
 }

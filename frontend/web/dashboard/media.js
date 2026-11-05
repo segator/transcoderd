@@ -47,13 +47,7 @@
     busy = false;
   let playerFiles = [],
     currentFile = null,
-    offset = 0,
-    absoluteTime = 0,
-    totalTime = 0,
-    pauseTimer = null,
-    internalStop = false;
-  let infoGeneration = 0,
-    seekTimer = null;
+    infoGeneration = 0;
 
   async function api(path, options = {}) {
     const response = await fetch(`/dashboard/api/media/${path}`, {
@@ -154,8 +148,16 @@
   }
   function stateLabel(f) {
     if (f.directory) return '<span class="muted">Folder</span>';
-    if (f.job)
-      return `<span class="badge ${esc(f.job.state)}">${esc(f.job.role === "output" ? "Encoded" : names[f.job.state] || f.job.state)}</span>`;
+    if (f.job) {
+      const previous = ["failed", "canceled"].includes(f.job.state);
+      const label =
+        f.job.role === "output"
+          ? "Encoded output"
+          : previous
+            ? `Previous encode ${f.job.state}${f.eligible ? " · Retry eligible" : ""}`
+            : `${names[f.job.state] || f.job.state} encode · Source file`;
+      return `<span class="badge ${previous ? "offline" : esc(f.job.state)}" title="${esc(previous ? "Encoding history, not a scan error. A retry is submitted only when you queue the selection." : "Encoding job status")}">${esc(label)}</span>`;
+    }
     return `<span class="badge ${f.eligible ? "completed" : "offline"}">${f.root === "source" ? "Available" : "Output"}</span>`;
   }
   async function browse(next = folder, page = 0) {
@@ -363,24 +365,11 @@
     $("media-player-error").textContent = message;
     $("media-player-error").hidden = false;
   }
-  function currentTime() {
-    const v = $("media-video");
-    return $("media-player-mode").value === "original"
-      ? Number.isFinite(v.currentTime)
-        ? v.currentTime
-        : absoluteTime
-      : offset + (Number.isFinite(v.currentTime) ? v.currentTime : 0);
-  }
   function stopVideo() {
-    internalStop = true;
-    clearTimeout(pauseTimer);
-    clearTimeout(seekTimer);
-    const v = $("media-video");
-    v.pause();
-    v.removeAttribute("src");
-    v.load();
-    $("media-player-toggle").textContent = "Play";
-    internalStop = false;
+    const video = $("media-video");
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
   }
   function closePlayer() {
     infoGeneration++;
@@ -389,192 +378,86 @@
     currentFile = null;
     playerFiles = [];
   }
-  function videoURL() {
-    return $("media-player-mode").value === "original"
-      ? `/dashboard/api/media/file/${currentFile.id}`
-      : `/dashboard/api/media/preview/${currentFile.id}?start=${offset.toFixed(3)}`;
-  }
-  function assignSource(at = 0) {
-    stopVideo();
-    absoluteTime = Math.max(0, at);
-    offset = $("media-player-mode").value === "original" ? 0 : absoluteTime;
-    const v = $("media-video");
-    v.src = videoURL();
-    if ($("media-player-mode").value === "original" && at > 0)
-      v.addEventListener(
-        "loadedmetadata",
-        () => {
-          v.currentTime = at;
-        },
-        { once: true },
-      );
-    $("media-player-error").hidden = true;
-    updateTime();
-  }
-  function updateTime() {
-    if (!currentFile) return;
-    const v = $("media-video");
-    if (v.getAttribute("src")) absoluteTime = currentTime();
-    $("media-player-current").textContent = clock(absoluteTime);
-    if (document.activeElement !== $("media-player-seek"))
-      $("media-player-seek").value = Math.min(totalTime, absoluteTime);
-  }
   async function chooseAsset(id) {
     const generation = ++infoGeneration;
     stopVideo();
     currentFile = null;
-    $("media-player-toggle").disabled = true;
     $("media-player-error").hidden = true;
     $("media-player-info").textContent = "Reading video information…";
     try {
-      const f = await api(`info/${id}`);
+      const file = await api(`info/${id}`);
       if (generation !== infoGeneration) return;
-      currentFile = f;
-      $("media-player-toggle").disabled = false;
-      totalTime = f.metadata?.durationSeconds || 0;
-      $("media-player-title").textContent = f.name;
-      $("media-player-duration").textContent = totalTime
-        ? clock(totalTime)
-        : "—";
-      $("media-player-seek").max = Math.max(1, totalTime);
-      $("media-player-seek").disabled = !totalTime;
+      currentFile = file;
+      const asset = playerFiles.find((f) => f.id === id);
+      const role =
+        asset?.job?.role === "output"
+          ? "Completed output"
+          : asset?.job?.role === "source"
+            ? "Queued source"
+            : "Library file";
+      $("media-player-title").textContent = file.name;
       $("media-player-info").textContent =
-        `${bytes(f.size)} · ${f.metadata?.codec?.toUpperCase() || "Video"} · ${f.metadata?.width || "?"} × ${f.metadata?.height || "?"} · ${f.metadata ? num.format(f.metadata.bitrateMbps) + " Mb/s total" : ""}${playerFiles.some((a) => a.job?.role === "output") && !playerFiles.some((a) => a.job?.role === "source") ? " · Source unavailable" : ""}`;
-      assignSource(0);
-    } catch (e) {
-      if (generation === infoGeneration) playerError(e.message);
+        `${role} · Original file · ${bytes(file.size)} · ${file.metadata?.codec?.toUpperCase() || "Video"} · ${file.metadata?.width || "?"} × ${file.metadata?.height || "?"} · ${clock(file.metadata?.durationSeconds || 0)}`;
+      $("media-video").src = `/dashboard/api/media/file/${file.id}`;
+    } catch (error) {
+      if (generation === infoGeneration) playerError(error.message);
     }
   }
   function showPlayer(files) {
     closePlayer();
     playerFiles = files;
     $("media-player-title").textContent = "Video player";
-    $("media-player-duration").textContent = "—";
-    $("media-player-current").textContent = "00:00";
     $("media-player-info").textContent = "";
-    $("media-player-seek").disabled = true;
-    $("media-player-toggle").disabled = true;
-    $("media-player-asset").innerHTML = "";
     $("media-player-error").hidden = true;
+    $("media-player-asset").innerHTML = files
+      .map(
+        (file) =>
+          `<option value="${esc(file.id)}">${file.job?.role === "output" ? "Completed output" : file.job?.role === "source" ? "Queued source" : "Library file"}</option>`,
+      )
+      .join("");
+    $("media-player-asset").parentElement.hidden = files.length < 2;
+    $("media-player").showModal();
     if (!files.length) {
-      $("media-player").showModal();
       playerError(
-        "No source or output file is available for this job.",
+        "The completed output or queued source is no longer available. The source is never substituted for a completed output.",
       );
       return;
     }
-    $("media-player-asset").innerHTML = files
-      .map(
-        (f) =>
-          `<option value="${esc(f.id)}">${f.job?.role === "output" ? "Encoded" : f.job?.role === "source" ? "Source" : f.root === "source" ? "Source file" : "Available file"}</option>`,
-      )
-      .join("");
-    const preferred = files.find((f) => f.job?.role === "output") || files[0];
-    $("media-player-asset").value = preferred.id;
-    $("media-player-mode").value = "compatible";
-    $("media-player").showModal();
-    chooseAsset(preferred.id);
+    chooseAsset(files[0].id);
   }
-  async function openFile(id) {
+  function openFile(id) {
     showPlayer([{ id, root, job: null }]);
   }
   async function openJob(id) {
+    closePlayer();
+    const generation = infoGeneration;
     try {
       const response = await api(`jobs/${id}`);
-      showPlayer(response.files);
-    } catch (e) {
-      $("media-player").showModal();
-      playerError(e.message);
+      if (generation === infoGeneration) showPlayer(response.files);
+    } catch (error) {
+      if (generation !== infoGeneration) return;
+      showPlayer([]);
+      playerError(error.message);
     }
   }
-  async function togglePlay() {
-    if (!currentFile) return;
-    const v = $("media-video");
-    if (!v.paused) {
-      v.pause();
-      return;
-    }
-    if (!v.getAttribute("src")) assignSource(absoluteTime);
-    try {
-      await v.play();
-    } catch (e) {
-      if (e.name !== "AbortError")
-        playerError(
-          "Could not start playback. Try again or switch to original mode.",
-        );
-    }
-  }
-  $("media-video").addEventListener("timeupdate", updateTime);
-  $("media-video").addEventListener("play", () => {
-    clearTimeout(pauseTimer);
-    $("media-player-toggle").textContent = "Pause";
-  });
-  $("media-video").addEventListener("pause", () => {
-    if (internalStop || !currentFile) return;
-    absoluteTime = currentTime();
-    $("media-player-toggle").textContent = "Resume";
-    if ($("media-player-mode").value === "compatible")
-      pauseTimer = setTimeout(() => {
-        if ($("media-video").paused) {
-          const at = absoluteTime;
-          stopVideo();
-          absoluteTime = at;
-          offset = at;
-          updateTime();
-          $("media-player-toggle").textContent = "Resume";
-        }
-      }, 2000);
-  });
   $("media-video").addEventListener("error", () => {
-    if (!internalStop && $("media-video").getAttribute("src"))
+    if (currentFile && $("media-video").getAttribute("src"))
       playerError(
-        $("media-player-mode").value === "original"
-          ? "Your browser does not support this file. Switch to compatible mode."
-          : "Could not start compatible playback. Other videos may be using the available slots; retry or use original mode.",
+        "The original file could not be played. Its container or audio/video codecs may not be supported by this browser, or the file may no longer be available. No conversion is applied.",
       );
   });
-  $("media-player-toggle").addEventListener("click", togglePlay);
   $("media-player-close").addEventListener("click", closePlayer);
-  $("media-player").addEventListener("cancel", () => {
-    stopVideo();
-    currentFile = null;
-    infoGeneration++;
-  });
+  $("media-player").addEventListener("cancel", closePlayer);
   $("media-player").addEventListener("close", () => {
     if (!$("media-player").open) {
-      stopVideo();
-      currentFile = null;
       infoGeneration++;
+      currentFile = null;
+      stopVideo();
     }
   });
   $("media-player-asset").addEventListener("change", () =>
     chooseAsset($("media-player-asset").value),
   );
-  $("media-player-mode").addEventListener("change", () => {
-    if (!currentFile) return;
-    const at = absoluteTime;
-    assignSource(at);
-  });
-  $("media-player-seek").addEventListener("input", () => {
-    $("media-player-current").textContent = clock(
-      Number($("media-player-seek").value),
-    );
-  });
-  $("media-player-seek").addEventListener("change", () => {
-    if (!currentFile) return;
-    const at = Number($("media-player-seek").value);
-    if ($("media-player-mode").value === "original") {
-      $("media-video").currentTime = at;
-      absoluteTime = at;
-    } else {
-      clearTimeout(seekTimer);
-      seekTimer = setTimeout(() => {
-        if (!currentFile) return;
-        assignSource(at);
-        togglePlay();
-      }, 150);
-    }
-  });
   $("media-root").addEventListener("change", () => {
     root = $("media-root").value;
     markDirty();

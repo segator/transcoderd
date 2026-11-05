@@ -29,3 +29,14 @@ test('plots do not bridge unknown samples or fabricate data and escape device la
  assert.match(r.chart([{at:now,cpu:null}],[{name:'CPU',value:p=>p.cpu}],'CPU'),/Waiting for resource samples/);
  const w=worker();w.runtime.resources.gpus[0].name='<img src=x onerror=alert(1)>';const h=new r.History();h.observe([w],now);const html=r.details(w,h,now);assert.ok(!html.includes('<img'));assert.ok(html.includes('&lt;img'));assert.ok(html.includes('NVENC'));
 });
+
+test('fixed Windows profiles show only relevant encoder hardware',()=>{
+ for(const kind of ['cpu','gpu']) {
+ const w=worker();w.runtime.managedProfile=true;w.runtime.kind=kind;w.runtime.encoder=kind==='cpu'?'libsvtav1':'av1_nvenc';
+ const h=new r.History();h.observe([w],now);
+ const summary=r.summary(w,now),details=r.details(w,h,now);
+ assert.match(summary,/RAM/);assert.match(details,/Host RAM/);
+ if(kind==='cpu') {assert.match(summary,/CPU <b>/);assert.doesNotMatch(summary,/GPU|NVENC/);assert.doesNotMatch(details,/NVIDIA DEVICE|No NVIDIA/)}
+ else {assert.match(summary,/GPU/);assert.match(details,/NVIDIA DEVICE/);assert.doesNotMatch(summary,/CPU <b>/);assert.doesNotMatch(details,/Host CPU|CPU and memory utilization/)}
+ }
+});

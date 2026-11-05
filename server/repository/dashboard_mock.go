@@ -4,12 +4,17 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"transcoder/model"
 )
 
 func (r *InMemoryRepository) GetDashboard(ctx context.Context, hours int, now time.Time) (*model.Dashboard, error) {
+	return r.dashboard(ctx, hours, now, nil)
+}
+
+func (r *InMemoryRepository) dashboard(ctx context.Context, hours int, now time.Time, query *model.DashboardJobsQuery) (*model.Dashboard, error) {
 	if hours != 24 && hours != 168 && hours != 720 {
 		return nil, fmt.Errorf("dashboard hours must be 24, 168, or 720")
 	}
@@ -179,8 +184,22 @@ func (r *InMemoryRepository) GetDashboard(ctx context.Context, hours int, now ti
 		}
 		return a.UpdatedAt.After(b.UpdatedAt)
 	})
-	if len(d.Jobs) > 100 {
-		d.Jobs = d.Jobs[:100]
+	if query == nil {
+		if len(d.Jobs) > 100 {
+			d.Jobs = d.Jobs[:100]
+		}
+	} else {
+		matching := []model.DashboardJob{}
+		for _, j := range d.Jobs {
+			if query.State != "" && query.State != "all" && j.State != query.State {
+				continue
+			}
+			if !strings.Contains(strings.ToLower(j.SourcePath+" "+j.Worker+" "+j.ID), strings.ToLower(query.Search)) {
+				continue
+			}
+			matching = append(matching, j)
+		}
+		d.Jobs = matching
 	}
 	sort.Slice(d.Activity, func(i, j int) bool { return d.Activity[i].Time.After(d.Activity[j].Time) })
 	if len(d.Activity) > 30 {
@@ -200,4 +219,15 @@ func (r *InMemoryRepository) GetDashboard(ctx context.Context, hours int, now ti
 	}
 	d.Finalize()
 	return d, nil
+}
+
+func (r *InMemoryRepository) GetDashboardJobs(ctx context.Context, query model.DashboardJobsQuery) (*model.DashboardJobPage, error) {
+	d, err := r.dashboard(ctx, 24, time.Now().UTC(), &query)
+	if err != nil {
+		return nil, err
+	}
+	total := len(d.Jobs)
+	start := min(query.Offset, total)
+	end := min(start+query.Limit, total)
+	return &model.DashboardJobPage{Jobs: d.Jobs[start:end], Total: int64(total), Offset: query.Offset, Limit: query.Limit}, nil
 }

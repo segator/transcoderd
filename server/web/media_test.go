@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"transcoder/model"
 	"transcoder/server/library"
 	"transcoder/server/repository"
@@ -112,5 +113,42 @@ func TestMediaMutationValidationAndReadOnlyRoots(t *testing.T) {
 	_, err := s.library.Info(context.Background(), library.FileID("encoded", "missing.mkv"))
 	if err == nil {
 		t.Error("missing file available")
+	}
+}
+
+func TestMediaJobPlaybackPolicy(t *testing.T) {
+	s, root := mediaTestServer(t)
+	repo := repository.NewInMemoryRepository()
+	sch, err := scheduler.NewScheduler(&scheduler.Config{SourcePath: root}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.library.Close()
+	s.library = library.New(sch, s.config.MediaRoots, 2)
+	cookie := loginDashboard(t, s)
+	tests := []struct {
+		state model.NotificationStatus
+		want  int
+	}{
+		{model.QueuedNotificationStatus, 200}, {model.StartedNotificationStatus, 409},
+		{model.FailedNotificationStatus, 409}, {model.CanceledNotificationStatus, 409}, {model.CompletedNotificationStatus, 200},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.state), func(t *testing.T) {
+			j := &model.Job{Id: uuid.New(), SourcePath: "clip.mkv", TargetPath: "missing-output.mkv"}
+			if err := repo.AddJob(t.Context(), j); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.AddNewTaskEvent(t.Context(), j.AddEvent(model.JobNotification, tt.state)); err != nil {
+				t.Fatal(err)
+			}
+			w := dashboardRequest(s, "GET", "/dashboard/api/media/jobs/"+j.Id.String(), "", "", cookie)
+			if w.Code != tt.want {
+				t.Fatalf("mediaJobAssets() = %d %s, want %d", w.Code, w.Body.String(), tt.want)
+			}
+			if tt.state == model.CompletedNotificationStatus && strings.TrimSpace(w.Body.String()) != `{"files":[]}` {
+				t.Fatalf("completed missing output substituted source: %s", w.Body.String())
+			}
+		})
 	}
 }

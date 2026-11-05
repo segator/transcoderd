@@ -83,3 +83,7 @@ Local image verification also found the previous Docker loader assumed OCI archi
 ### Frontend OIDC and Kubernetes (2026-11-04)
 
 The frontend now owns optional OIDC browser login while API session validation/revocation remains server-owned. Token mode stays the compatibility default. `frontend/web/oidc.go` validates discovery, code/PKCE, state/nonce and signed identity/group claims, then encrypts the API session for interchangeable frontend replicas. OIDC mode refuses token/legacy-cookie fallback. The historical API-only frontend constraint now also permits identity-provider access and runtime auth secrets; media/database access remains unnecessary. Session/key/provider/logout limitations and k3s/Traefik examples are documented in `docs/frontend-authentication.md` and `deploy/kubernetes/frontend/`.
+
+### Fleet playback and presentation investigation (2026-11-05)
+
+The previous View action for active/failed jobs returned the server-side source, never an unfinished worker stream. Completed filtering ran after a global 100-job cap and could falsely show no completed jobs. Worker membership also included names from historical settings/jobs without recent presence; fixed Windows profiles displayed irrelevant encoder classes, and verified OIDC display claims were discarded. The fix-fleet-playback-and-worker-clarity change resolves these discrepancies with explicit playback roles, filtered paging, recent membership and verified display identity.

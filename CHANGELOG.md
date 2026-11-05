@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.13.1](https://github.com/segator/transcoderd/compare/v2.13.0...v2.13.1) (2026-11-05)
+
+
+### 🐛 Bug Fixes
+
+* **frontend:** correct playback and align fleet worker controls ([#209](https://github.com/segator/transcoderd/issues/209)) ([7b2f9f9](https://github.com/segator/transcoderd/commit/7b2f9f9647453cf5e4d471ed1032077bb47a2d39))
+
 ## [2.13.0](https://github.com/segator/transcoderd/compare/v2.12.0...v2.13.0) (2026-11-05)
 
 

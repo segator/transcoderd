@@ -52,7 +52,7 @@ docker run -d \
        -p 8080:8080 \
        -v /mnt/media:/mnt/media 
       -v ./transcoderd.yml:/etc/transcoderd/config.yml \
-      ghcr.io/segator/transcoderd:server-v2.13.0 # x-release-please-version
+      ghcr.io/segator/transcoderd:server-v2.13.1 # x-release-please-version
 ```
 
 ### Operations dashboard

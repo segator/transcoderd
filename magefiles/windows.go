@@ -85,7 +85,8 @@ func windowsFFmpeg(ctx context.Context, client *dagger.Client) (*dagger.Containe
 	}
 	base := client.Container().From("debian:trixie-slim").
 		WithExec([]string{"bash", "-c", "apt-get update && apt-get install -y --no-install-recommends ca-certificates curl xz-utils make nasm cmake ninja-build pkg-config git gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix && rm -rf /var/lib/apt/lists/*"}).
-		WithFile("/build-ffmpeg.sh", client.Host().File(filepath.Join(projectRoot(), "scripts", "windows", "build-ffmpeg.sh")))
+		WithFile("/build-ffmpeg.sh", client.Host().File(filepath.Join(projectRoot(), "scripts", "windows", "build-ffmpeg.sh"))).
+		WithFile("/fetch.sh", client.Host().File(filepath.Join(projectRoot(), "scripts", "windows", "fetch.sh")))
 	stages := make([]*dagger.Container, 0, 5)
 	builds, buildCtx := errgroup.WithContext(ctx)
 	builds.SetLimit(parallel)

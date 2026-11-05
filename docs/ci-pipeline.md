@@ -55,6 +55,15 @@ prefixes and licenses merge into FFmpeg's final compilation. An SVT stage edit
 therefore rebuilds SVT and FFmpeg; it leaves unrelated libraries cached. A shared
 helper or compiler-base change correctly invalidates all dependent stages.
 
+Windows toolchain source GETs retry transport errors, including TLS resets and
+partial transfers, up to five times. Connection setup is limited to 30 seconds,
+each attempt to 120 seconds, and new retries to a 300-second window (an attempt
+already in progress can finish after that window). Curl writes to a regular
+temporary file so a partial attempt is discarded before retrying. Pinned SHA-256
+verification runs before extraction; a checksum mismatch fails immediately.
+The temporary archive is removed on success or failure. These retry limits
+apply to source downloads, without rerunning compilers or whole CI jobs.
+
 Go module/build caches remain mounted in the Engine. Media/OCR directories are
 assembled before adding commit-specific application executables, so worker edits
 do not invalidate the large tool-copy layers. Portable and installer recipes use

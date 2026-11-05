@@ -2,6 +2,7 @@
 # Shared Windows x64 cross-compilation helpers; stages pin their own sources.
 set -euo pipefail
 script_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+source "$script_dir/fetch.sh"
 stage=$1
 export PREFIX=/opt/windows
 export TARGET=x86_64-w64-mingw32
@@ -16,15 +17,6 @@ if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then
 fi
 mkdir -p /build "$PREFIX" /output/bin /output/licenses
 cd /build
-
-fetch() {
-    local name=$1 url=$2 checksum=$3
-    curl --fail --location --retry 5 --connect-timeout 30 "$url" -o "$name.tar.gz"
-    echo "$checksum  $name.tar.gz" | sha256sum --check
-    mkdir -p "$name"
-    tar -xf "$name.tar.gz" -C "$name" --strip-components=1
-    rm "$name.tar.gz"
-}
 
 cmake_cross() {
     cmake -G Ninja -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 \

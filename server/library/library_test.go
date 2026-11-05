@@ -342,11 +342,8 @@ func TestJobAssetsCompletedOutputAfterSourceRemoval(t *testing.T) {
 		}
 	}
 	assets, err := l.JobAssets(ctx, j.Id.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(assets) != 1 || assets[0].Job.Role != "source" {
-		t.Fatalf("intermediate completion assets = %+v", assets)
+	if !errors.Is(err, ErrPlaybackUnavailable) || len(assets) != 0 {
+		t.Fatalf("intermediate completion assets = %+v, %v, want unavailable", assets, err)
 	}
 	if err := b.AddNewTaskEvent(ctx, j.AddEvent(model.JobNotification, model.CompletedNotificationStatus)); err != nil {
 		t.Fatal(err)
@@ -433,5 +430,57 @@ func TestBatchCancellationKeepsPreviouslyQueuedJobs(t *testing.T) {
 	j, err := b.GetJobByPath(context.Background(), "first.mkv")
 	if err != nil || j == nil {
 		t.Fatalf("previously committed job missing: %+v %v", j, err)
+	}
+}
+
+func TestJobAssetsStateAndRole(t *testing.T) {
+	tests := []struct {
+		name   string
+		phase  model.NotificationType
+		status model.NotificationStatus
+		role   string
+	}{
+		{"queued source", model.JobNotification, model.QueuedNotificationStatus, "source"},
+		{"assigned", model.JobNotification, model.AssignedNotificationStatus, ""},
+		{"active", model.JobNotification, model.StartedNotificationStatus, ""},
+		{"phase complete", model.FFMPEGSNotification, model.CompletedNotificationStatus, ""},
+		{"failed", model.JobNotification, model.FailedNotificationStatus, ""},
+		{"canceled", model.JobNotification, model.CanceledNotificationStatus, ""},
+		{"completed output", model.JobNotification, model.CompletedNotificationStatus, "output"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l, b := newTestLibrary(t)
+			seedVideo(t, l, "source.mkv", 100)
+			if err := os.WriteFile(filepath.Join(l.roots["encoded"], "output.mp4"), []byte("output"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			j := &model.Job{Id: uuid.New(), SourcePath: "source.mkv", TargetPath: "output.mp4"}
+			if err := b.AddJob(t.Context(), j); err != nil {
+				t.Fatal(err)
+			}
+			if err := b.AddNewTaskEvent(t.Context(), j.AddEvent(tt.phase, tt.status)); err != nil {
+				t.Fatal(err)
+			}
+			got, err := l.JobAssets(t.Context(), j.Id.String())
+			if tt.role == "" {
+				if !errors.Is(err, ErrPlaybackUnavailable) {
+					t.Fatalf("JobAssets() = %+v, %v, want unavailable", got, err)
+				}
+				return
+			}
+			if err != nil || len(got) != 1 || got[0].Job.Role != tt.role {
+				t.Fatalf("JobAssets() = %+v, %v, want %s", got, err, tt.role)
+			}
+			if tt.role == "output" {
+				if err := os.Remove(filepath.Join(l.roots["encoded"], "output.mp4")); err != nil {
+					t.Fatal(err)
+				}
+				got, err = l.JobAssets(t.Context(), j.Id.String())
+				if err != nil || len(got) != 0 {
+					t.Fatalf("JobAssets() missing output = %+v, %v, want empty without source fallback", got, err)
+				}
+			}
+		})
 	}
 }

@@ -57,6 +57,8 @@ func mediaError(w http.ResponseWriter, err error) {
 		code, message = 404, "The file is no longer available"
 	case errors.Is(err, fs.ErrPermission):
 		code, message = 403, "Access to this video is denied"
+	case errors.Is(err, library.ErrPlaybackUnavailable):
+		code, message = 409, "Playback is available only for queued sources and completed outputs"
 	case errors.Is(err, library.ErrChanged):
 		code, message = 409, "The file changed since selection"
 	}

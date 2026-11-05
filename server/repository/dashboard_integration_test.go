@@ -158,7 +158,7 @@ func TestDashboardPostgres(t *testing.T) {
 		if !reflect.DeepEqual(d.Codecs, want.Codecs) {
 			t.Errorf("SQL codecs = %+v, want %+v", d.Codecs, want.Codecs)
 		}
-		if len(d.Workers) != 3 || d.Workers[1].DesiredMax == nil || *d.Workers[1].DesiredMax != 4 || d.Workers[1].Runtime == nil {
+		if len(d.Workers) != 2 || d.Workers[0].DesiredMax == nil || *d.Workers[0].DesiredMax != 4 || d.Workers[0].Runtime == nil {
 			t.Errorf("SQL workers = %+v, want telemetry and desired per-name limit", d.Workers)
 		}
 		if len(d.Jobs) != 7 || d.Jobs[0].State != "active" {
@@ -182,7 +182,7 @@ func TestDashboardPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Workers[1].Runtime != nil || !d.Workers[1].Online {
+	if d.Workers[0].Runtime != nil || !d.Workers[0].Online {
 		t.Error("legacy heartbeat did not clear unavailable telemetry while updating presence")
 	}
 	// The durable desired capacity survives a fresh repository object.
@@ -203,8 +203,8 @@ func TestDashboardPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pairedDashboard.Workers[1].DesiredCPUJobs == nil || *pairedDashboard.Workers[1].DesiredCPUJobs != 2 || *pairedDashboard.Workers[1].DesiredGPUJobs != 3 {
-		t.Errorf("dashboard pair = %+v", pairedDashboard.Workers[1])
+	if pairedDashboard.Workers[0].DesiredCPUJobs == nil || *pairedDashboard.Workers[0].DesiredCPUJobs != 2 || *pairedDashboard.Workers[0].DesiredGPUJobs != 3 {
+		t.Errorf("dashboard pair = %+v", pairedDashboard.Workers[0])
 	}
 	if err := repo.SetWorkerMaxActiveJobs(ctx, "gpu", 4); err != nil {
 		t.Fatal(err)
@@ -257,4 +257,33 @@ func TestDashboardPostgres(t *testing.T) {
 		t.Fatalf("SQL persisted pause telemetry = %+v, %v", observed, err)
 	}
 
+}
+
+func TestDashboardPostgresPagination(t *testing.T) {
+	dsn := os.Getenv("DASHBOARD_TEST_POSTGRES")
+	if dsn == "" {
+		t.Skip("DASHBOARD_TEST_POSTGRES is not set")
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	schema := "paging_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err := db.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = db.ExecContext(context.Background(), "DROP SCHEMA "+schema+" CASCADE") }()
+	scoped, err := sql.Open("postgres", dsn+" search_path="+schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer scoped.Close()
+	repo := &SQLRepository{db: &SQLDatabase{db: scoped}}
+	if err := repo.Initialize(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	checkDashboardJobPages(t, repo)
+	checkDashboardWorkerRecency(t, repo)
+	checkWorkerControlRepository(t, repo)
 }

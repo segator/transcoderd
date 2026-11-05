@@ -54,12 +54,20 @@ type oidcAuth struct {
 }
 
 // The API retains session revocation; the frontend stores no user/session database.
+type displayIdentity struct {
+	Name     string `json:"name,omitempty"`
+	Username string `json:"username,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Subject  string `json:"subject,omitempty"`
+}
+
 type authPayload struct {
-	Expires int64  `json:"expires"`
-	Session string `json:"session,omitempty"`
-	State   string `json:"state,omitempty"`
-	Nonce   string `json:"nonce,omitempty"`
-	PKCE    string `json:"pkce,omitempty"`
+	Identity *displayIdentity `json:"identity,omitempty"`
+	Expires  int64            `json:"expires"`
+	Session  string           `json:"session,omitempty"`
+	State    string           `json:"state,omitempty"`
+	Nonce    string           `json:"nonce,omitempty"`
+	PKCE     string           `json:"pkce,omitempty"`
 }
 
 func secureOIDCURL(raw string) bool {
@@ -234,7 +242,34 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	if !session.Expires.IsZero() && session.Expires.Before(expires) {
 		expires = session.Expires
 	}
-	value, err := s.oidc.encode(frontendSessionCookie, authPayload{Session: session.Value, Expires: expires.Unix()})
+	var claims struct {
+		Name     string `json:"name"`
+		Username string `json:"preferred_username"`
+		Email    string `json:"email"`
+	}
+	if err := identity.Claims(&claims); err != nil {
+		http.Error(w, "Could not read your identity", http.StatusUnauthorized)
+		return
+	}
+	bounded := func(value string) string {
+		value = strings.TrimSpace(value)
+		runes := []rune(value)
+		if len(runes) > 200 {
+			runes = runes[:200]
+		}
+		// Bound JSON expansion too (for example '<' and control characters),
+		// keeping the encrypted session comfortably below browser cookie limits.
+		for len(runes) > 0 {
+			encoded, _ := json.Marshal(string(runes))
+			if len(encoded) <= 384 {
+				break
+			}
+			runes = runes[:len(runes)-1]
+		}
+		return string(runes)
+	}
+	display := &displayIdentity{Name: bounded(claims.Name), Username: bounded(claims.Username), Email: bounded(claims.Email), Subject: bounded(identity.Subject)}
+	value, err := s.oidc.encode(frontendSessionCookie, authPayload{Session: session.Value, Expires: expires.Unix(), Identity: display})
 	if err != nil {
 		http.Error(w, "Could not open your session. Please try again.", http.StatusInternalServerError)
 		return

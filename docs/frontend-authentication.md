@@ -103,3 +103,9 @@ OIDC uses an encrypted HttpOnly SameSite=Lax frontend cookie (Secure with HTTPS)
 Successful **Sign out** revokes the API session and removes the frontend cookie across all frontend replicas. API restart or session expiry also revokes access. It signs out of TranscoderD only; the Authentik/Google session remains, so the next SSO login may be immediate. Provider-wide/back-channel logout and continuous rechecking of group changes are not implemented. To revoke existing sessions immediately, revoke/restart API sessions or rotate the frontend session key; changing the issuer/client/public origin also invalidates encrypted cookies.
 
 Multiple frontend replicas need the same configuration/key and the same API instance; no sticky sessions or frontend storage are required. The current API session store is in-memory and does not support arbitrary load balancing across multiple independent API replicas. Expose the frontend to browsers and keep the separate API origin private to workers/frontend; its dashboard token remains a privileged service credential in OIDC mode.
+
+## Signed-in identity
+
+The account area displays the verified OIDC name (falling back to preferred username, email or subject) and email/username; mobile layouts show the account in the top bar. Verified display claims are bounded and retained inside the encrypted frontend session, shared across replicas. `GET /dashboard/api/identity` is frontend-owned, validates the API session on every request and returns non-cacheable display fields without credentials/provider tokens. Token mode identifies **Token session** and **Dashboard token**, without fabricating a username.
+
+Sessions created before this change contain no display claims. Sign out and sign in once after upgrading to populate the account display. Authentik must include the profile/email claims in the signed ID token using the scope mappings above.

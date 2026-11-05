@@ -18,6 +18,8 @@ type InMemoryRepository struct {
 	events              map[string][]*model.TaskEventType
 	progress            map[string]*model.TaskProgressType
 	workers             map[string]*model.Worker
+	workerCommands      map[string]model.WorkerControl
+	workerResumeLimits  map[string]model.WorkerSettings
 	workerMaxJobs       map[string]int
 	workerEncoderLimits map[string]model.WorkerSettings
 	mediaProbes         map[string]cachedMediaProbe
@@ -30,6 +32,8 @@ func NewInMemoryRepository() *InMemoryRepository {
 		events:              make(map[string][]*model.TaskEventType),
 		progress:            make(map[string]*model.TaskProgressType),
 		workers:             make(map[string]*model.Worker),
+		workerCommands:      make(map[string]model.WorkerControl),
+		workerResumeLimits:  make(map[string]model.WorkerSettings),
 		workerMaxJobs:       make(map[string]int),
 		workerEncoderLimits: make(map[string]model.WorkerSettings),
 		mediaProbes:         make(map[string]cachedMediaProbe),
@@ -312,6 +316,10 @@ func (r *InMemoryRepository) SetWorkerMaxActiveJobs(ctx context.Context, name st
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if max > 0 {
+		snapshot := max
+		r.workerResumeLimits[name] = model.WorkerSettings{MaxActiveJobs: &snapshot}
+	}
 	r.workerMaxJobs[name] = max
 	delete(r.workerEncoderLimits, name)
 	return nil

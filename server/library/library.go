@@ -18,11 +18,12 @@ import (
 )
 
 var (
-	ErrInvalidPath       = errors.New("invalid media path")
-	ErrUnavailable       = errors.New("media unavailable")
-	ErrBusy              = errors.New("media operations busy")
-	ErrOperationNotFound = errors.New("media operation expired or not found")
-	ErrChanged           = errors.New("media changed since preview")
+	ErrInvalidPath         = errors.New("invalid media path")
+	ErrUnavailable         = errors.New("media unavailable")
+	ErrBusy                = errors.New("media operations busy")
+	ErrOperationNotFound   = errors.New("media operation expired or not found")
+	ErrPlaybackUnavailable = errors.New("job playback is unavailable in this state")
+	ErrChanged             = errors.New("media changed since preview")
 )
 
 type Backend interface {
@@ -318,14 +319,16 @@ func (l *Library) JobAssets(ctx context.Context, id string) ([]model.MediaFile, 
 	if err != nil {
 		return nil, err
 	}
+	event := j.Events.GetLatest()
+	if event == nil || event.NotificationType != model.JobNotification || (event.Status != model.QueuedNotificationStatus && event.Status != model.CompletedNotificationStatus) {
+		return nil, ErrPlaybackUnavailable
+	}
 	assets := []model.MediaFile{}
-	for _, asset := range []struct{ p, role string }{{j.SourcePath, "source"}, {j.TargetPath, "output"}} {
-		if asset.role == "output" {
-			event := j.Events.GetLatestPerNotificationType(model.JobNotification)
-			if event == nil || event.Status != model.CompletedNotificationStatus {
-				continue
-			}
-		}
+	candidates := []struct{ p, role string }{{j.SourcePath, "source"}}
+	if event.Status == model.CompletedNotificationStatus {
+		candidates = []struct{ p, role string }{{j.TargetPath, "output"}}
+	}
+	for _, asset := range candidates {
 		for _, root := range l.Roots() {
 			if asset.role == "source" && root.ID != "source" {
 				continue
@@ -335,7 +338,7 @@ func (l *Library) JobAssets(ctx context.Context, id string) ([]model.MediaFile, 
 				continue
 			}
 			_ = f.Close()
-			entry.Job = &model.MediaJobState{ID: id, State: j.Status, Role: asset.role}
+			entry.Job = &model.MediaJobState{ID: id, State: string(event.Status), Role: asset.role}
 			assets = append(assets, entry)
 			break
 		}

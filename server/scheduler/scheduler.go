@@ -36,11 +36,15 @@ type Scheduler interface {
 	GetWorkerMaxActiveJobs(ctx context.Context, workerName string) (*int, error)
 	SetWorkerMaxActiveJobs(ctx context.Context, workerName string, max int) error
 	GetWorkerSettings(ctx context.Context, name string) (*model.WorkerSettings, error)
+	GetWorkerControl(context.Context, string) (*model.WorkerControl, error)
+	ControlWorker(context.Context, string, string) (*model.WorkerControl, error)
+	AckWorkerControl(context.Context, string, model.WorkerControlAck) error
 	SetWorkerSettings(ctx context.Context, name string, settings model.WorkerSettings) error
 	HandleWorkerEvent(ctx context.Context, taskEvent *model.EnvelopEvent) error
 	CancelJob(ctx context.Context, id string) error
 	GetJob(ctx context.Context, id string) (*model.Job, error)
 	GetDashboard(ctx context.Context, hours int) (*model.Dashboard, error)
+	GetDashboardJobs(ctx context.Context, query model.DashboardJobsQuery) (*model.DashboardJobPage, error)
 	ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error)
 }
 
@@ -164,6 +168,10 @@ func (r *RuntimeScheduler) SetWorkerSettings(ctx context.Context, name string, s
 		}
 	}
 	return r.repo.SetWorkerSettings(ctx, name, settings)
+}
+
+func (r *RuntimeScheduler) GetDashboardJobs(ctx context.Context, query model.DashboardJobsQuery) (*model.DashboardJobPage, error) {
+	return r.repo.GetDashboardJobs(ctx, query)
 }
 
 func (r *RuntimeScheduler) GetDashboard(ctx context.Context, hours int) (*model.Dashboard, error) {

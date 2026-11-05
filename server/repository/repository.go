@@ -37,11 +37,16 @@ type Repository interface {
 	GetWorkerMaxActiveJobs(ctx context.Context, name string) (*int, error)
 	SetWorkerMaxActiveJobs(ctx context.Context, name string, max int) error
 	GetWorkerSettings(ctx context.Context, name string) (*model.WorkerSettings, error)
+	GetWorkerResumeSettings(context.Context, string) (*model.WorkerSettings, error)
+	GetWorkerControl(context.Context, string) (*model.WorkerControl, error)
+	SetWorkerControl(context.Context, string, model.WorkerControl) error
+	AckWorkerControl(context.Context, string, model.WorkerControlAck) error
 	SetWorkerSettings(ctx context.Context, name string, settings model.WorkerSettings) error
 	RetrieveQueuedJob(ctx context.Context) (*model.Job, error)
 	ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error)
 	GetAllProgressJobs(ctx context.Context) ([]model.TaskProgressType, error)
 	GetDashboard(ctx context.Context, hours int, now time.Time) (*model.Dashboard, error)
+	GetDashboardJobs(ctx context.Context, query model.DashboardJobsQuery) (*model.DashboardJobPage, error)
 	GetMediaProbe(ctx context.Context, root, path string, size, modified int64) (*model.MediaProbe, error)
 	PutMediaProbe(ctx context.Context, root, path string, size, modified int64, probe *model.MediaProbe) error
 	GetMediaJobStates(ctx context.Context, paths []string) (map[string]model.MediaJobState, error)
@@ -309,9 +314,12 @@ func (s *SQLRepository) SetWorkerMaxActiveJobs(ctx context.Context, name string,
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO worker_settings (worker_name, max_active_jobs, updated_at)
-		VALUES ($1, $2, CURRENT_TIMESTAMP)
-		ON CONFLICT (worker_name) DO UPDATE SET max_active_jobs=$2, cpu_jobs=NULL, gpu_jobs=NULL, updated_at=CURRENT_TIMESTAMP`, name, max)
+	_, err = db.ExecContext(ctx, `INSERT INTO worker_settings (worker_name,max_active_jobs,resume_max_active_jobs,updated_at)
+ VALUES ($1,$2::bigint,CASE WHEN $2::bigint>0 THEN $2::bigint END,CURRENT_TIMESTAMP)
+ ON CONFLICT (worker_name) DO UPDATE SET max_active_jobs=$2::bigint,cpu_jobs=NULL,gpu_jobs=NULL,
+ resume_max_active_jobs=CASE WHEN $2::bigint>0 THEN $2::bigint ELSE worker_settings.resume_max_active_jobs END,
+ resume_cpu_jobs=CASE WHEN $2::bigint>0 THEN NULL ELSE worker_settings.resume_cpu_jobs END,
+ resume_gpu_jobs=CASE WHEN $2::bigint>0 THEN NULL ELSE worker_settings.resume_gpu_jobs END,updated_at=CURRENT_TIMESTAMP`, name, max)
 	return err
 }
 

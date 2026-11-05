@@ -51,11 +51,15 @@ The dashboard SHALL refresh periodically and show job phase progress and ETA whe
 - **THEN** the dashboard labels its state and unavailable measurements rather than inventing CPU/GPU utilization
 
 ### Requirement: Visual media exploration and job playback
-The authenticated dashboard SHALL offer folder navigation, selectable video results, editable filter presets, an embedded player and explicit reviewed job submission. Job rows SHALL offer playback of available sources and completed outputs. The UI SHALL show scan/load progress, actual successes, skipped/failed reasons, cancellation, empty/error states and unavailable files without invented data.
+The dashboard SHALL offer authenticated folder navigation, selectable videos, editable presets, an embedded player and reviewed submission. Job rows SHALL label playback as queued source or completed output; active, failed and canceled jobs SHALL have no playback action. Scan/load progress, actual successes, skipped/failed reasons, cancellation, empty/error states and unavailable files SHALL be shown without invented data.
 
 #### Scenario: Browse and play queued source
 - **WHEN** an operator opens a queued job's available source
 - **THEN** its video can be played inside the dashboard without worker assignment or a worker credential
+
+#### Scenario: Active or failed job
+- **WHEN** a job is active, failed or canceled
+- **THEN** its row has no playback action and its job-assets endpoint rejects playback
 
 #### Scenario: Review before loading jobs
 - **WHEN** an operator changes selection filters
@@ -183,3 +187,72 @@ OIDC browser sessions SHALL encrypt the API session in a frontend-only HttpOnly 
 #### Scenario: Attempted token bypass
 - **WHEN** OIDC mode receives an API token bearer header, legacy dashboard cookie or token-login request without a valid OIDC session
 - **THEN** it rejects access and never exposes the private API login credential
+
+### Requirement: Filtered paginated jobs
+The dashboard SHALL query all jobs by state and case-insensitive filename, worker or ID search before pagination. Pages SHALL contain at most 100 jobs with a matching total and navigation; the default page size SHALL be 25. Overview counters SHALL remain global.
+
+#### Scenario: Completed jobs behind a large queue
+- **WHEN** more than 100 queued jobs precede completed jobs
+- **THEN** selecting Completed returns completed jobs with their matching total and further pages remain accessible
+
+### Requirement: Recent fleet membership and offline presentation
+Fleet counts and worker listings SHALL include only workers seen within the previous 30 days, independently of the selected statistics period. Online workers SHALL appear first, with active workers before idle peers. Worker lists SHALL paginate at 12 per page. Offline workers SHALL show basic identity and last-seen information without capacity controls or live resource details.
+
+#### Scenario: Historical worker
+- **WHEN** a worker has no heartbeat or was last seen over 30 days ago
+- **THEN** it does not contribute to the fleet total or worker list
+
+#### Scenario: Offline recent worker
+- **WHEN** a worker was seen within 30 days but is currently offline
+- **THEN** it appears after online workers as Offline without editable limits
+
+### Requirement: Fixed worker profile controls
+Fixed Windows CPU and GPU worker profiles SHALL identify their profile and shared host scope. Each SHALL expose only its supported encoder limit and relevant CPU or GPU utilization; independent workers SHALL retain both limits. Limits SHALL still be saved atomically with the unsupported class set to zero.
+
+#### Scenario: Windows CPU profile
+- **WHEN** an operator opens a managed CPU profile
+- **THEN** CPU controls and CPU/RAM metrics are shown without GPU controls or GPU utilization
+
+#### Scenario: Windows GPU profile
+- **WHEN** an operator opens a managed GPU profile
+- **THEN** GPU controls and GPU/RAM metrics are shown without CPU controls or CPU utilization
+
+### Requirement: Signed-in operator identity
+OIDC sessions SHALL retain verified name, preferred username, email and subject display claims inside the encrypted frontend cookie. An authenticated, non-cacheable identity response SHALL expose display identity without credentials or provider tokens. The dashboard SHALL display a name or username and email when available; token login SHALL identify a token session without inventing a user.
+
+#### Scenario: Verified account
+- **WHEN** a verified OIDC identity includes a name and email
+- **THEN** the dashboard displays that name and email across frontend replicas
+
+#### Scenario: Revoked session
+- **WHEN** the API session has been revoked
+- **THEN** the identity endpoint returns unauthorized even if the frontend cookie decrypts
+
+### Requirement: Explicit acknowledged remote worker controls
+Online capable workers SHALL offer Pause in RAM/Resume encodes separately from Stop after current/Resume queue. Commands SHALL require authenticated same-origin requests and worker acknowledgement, with pending/applied/failed feedback. Queue resume SHALL restore the last positive limits. RAM resume SHALL preserve queue and individual holds. Unsupported/offline/maintenance workers SHALL not accept these commands.
+
+#### Scenario: Pause a running encode remotely
+- **WHEN** an operator selects Pause in RAM
+- **THEN** the worker suspends owned encodes through its local RAM control, retains limits and memory, acknowledges application, and the UI offers Resume encodes
+
+#### Scenario: Stop and resume queue
+- **WHEN** an operator selects Stop after current then Resume queue
+- **THEN** active encodes finish while queued starts and admission stop, then the previous positive limits are restored without clearing independent RAM or individual holds
+
+#### Scenario: Failed or superseded command
+- **WHEN** a control fails or a newer command supersedes an unacknowledged command
+- **THEN** the current command reports failure or pending accurately and an old acknowledgement cannot complete the newer command
+
+### Requirement: Reporting-period worker visibility
+The Workers view SHALL include only workers seen within its selected 24-hour, 7-day or 30-day reporting period. Fleet-wide membership SHALL retain its 30-day maximum. Filtered worker counts and pagination SHALL describe the visible set.
+
+#### Scenario: Last 24 hours
+- **WHEN** Last 24 hours is selected and a worker was last seen two days ago
+- **THEN** it is absent from Workers while a worker seen within 24 hours remains visible
+
+### Requirement: Compact worker resource history
+Online worker cards SHALL show small graphs for available CPU, RAM, GPU and encoder usage according to their supported profile, using bounded samples received in the current tab. Missing/stale readings SHALL remain explicit and gaps SHALL not imply measured usage. Graphs SHALL not require opening worker details.
+
+#### Scenario: Profile card history
+- **WHEN** distinct hardware samples arrive for a CPU or GPU Windows profile
+- **THEN** its card shows RAM history and only its relevant CPU or GPU/encoder history

@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // WorkerRuntime is optional so older workers can continue publishing presence.
 type WorkerJobRuntime struct {
@@ -12,6 +15,7 @@ type WorkerJobRuntime struct {
 }
 
 type WorkerRuntime struct {
+	ControlVersion   int                `json:"controlVersion,omitempty"`
 	Resources        *WorkerResources   `json:"resources,omitempty"`
 	Paused           bool               `json:"paused"`
 	RAMPaused        bool               `json:"ramPaused"`
@@ -77,6 +81,7 @@ type DashboardBucket struct {
 }
 
 type DashboardWorker struct {
+	Control        *WorkerControl `json:"control,omitempty"`
 	Name           string         `json:"name"`
 	IP             string         `json:"ip"`
 	LastSeen       *time.Time     `json:"lastSeen"`
@@ -137,13 +142,45 @@ func NewDashboard(now time.Time, hours int) *Dashboard {
 		Codecs: []DashboardCodec{}, Activity: []DashboardActivity{}}
 }
 
+// DashboardJobsQuery is validated at the HTTP boundary. Internal callers use bounded defaults.
+type DashboardJobsQuery struct {
+	State  string
+	Search string
+	Offset int
+	Limit  int
+}
+
+type DashboardJobPage struct {
+	Jobs   []DashboardJob `json:"jobs"`
+	Total  int64          `json:"total"`
+	Offset int            `json:"offset"`
+	Limit  int            `json:"limit"`
+}
+
 func (d *Dashboard) Finalize() {
 	d.Summary.SavedBytes = d.Summary.SourceBytes - d.Summary.TargetBytes
 	if d.Summary.SourceBytes > 0 {
 		d.Summary.CompressionPercent = 100 * float64(d.Summary.SavedBytes) / float64(d.Summary.SourceBytes)
 	}
+	recent := d.Workers[:0]
+	for _, w := range d.Workers {
+		if w.LastSeen != nil && !w.LastSeen.Before(d.GeneratedAt.Add(-30*24*time.Hour)) {
+			recent = append(recent, w)
+		}
+	}
+	d.Workers = recent
 	for i := range d.Workers {
 		w := &d.Workers[i]
 		w.Online = w.LastSeen != nil && d.GeneratedAt.Sub(*w.LastSeen) <= 30*time.Second
 	}
+	sort.Slice(d.Workers, func(i, j int) bool {
+		a, b := d.Workers[i], d.Workers[j]
+		if a.Online != b.Online {
+			return a.Online
+		}
+		if a.ActiveJobs != b.ActiveJobs {
+			return a.ActiveJobs > b.ActiveJobs
+		}
+		return a.Name < b.Name
+	})
 }

@@ -2162,3 +2162,23 @@
  .resource-stat strong { font-size:18px; }
  .resource-summary { gap:8px 12px; }
 }
+
+.list-pagination { display:flex; align-items:center; justify-content:flex-end; gap:12px; padding:16px 0; flex-wrap:wrap; }
+.worker-offline { align-self:start; opacity:.75; }
+.encoder-lanes > :only-child, .encoder-inputs > div:only-of-type { grid-column:1 / -1; }
+#session-name, #session-account { display:block; max-width:175px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.session-mobile { display:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; font-size:11px; }
+@media (max-width:720px) { .session-mobile { display:block; max-width:125px; } }
+
+.worker-controls { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.control-error { color:var(--red); }
+.resource-card-history { margin:12px 0; min-width:0; }
+.resource-card-history .resource-chart { max-height:110px; width:100%; }
+.resource-card-history .resource-legend { flex-wrap:wrap; gap:10px; }
+.resource-line-2 { stroke:#7eb8ff; fill:#7eb8ff; }
+.resource-line-3 { stroke:#ffbe78; fill:#ffbe78; }
+
+.resource-path.resource-line-2, .resource-path.resource-line-3 { fill:none; }
+.resource-legend .resource-line-2 { background:#7eb8ff; }
+.resource-legend .resource-line-3 { background:#ffbe78; }

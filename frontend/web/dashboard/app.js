@@ -48,7 +48,7 @@
     workers: [
       "Workers",
       "Your processing power, your control",
-      "Adjust CPU and GPU limits independently for each worker, without restarting.",
+      "Manage each worker profile and its supported encoders, without restarting.",
     ],
     jobs: [
       "Jobs",
@@ -58,7 +58,11 @@
   };
   const resources = window.TranscoderResources;
   const resourceHistory = new resources.History();
-  let selectedWorker = null;
+  let selectedWorker = null,
+    workerPage = 0,
+    jobsOffset = 0,
+    jobsGeneration = 0,
+    jobSearchTimer;
   let data = null,
     hours = 168,
     filter = "all",
@@ -135,12 +139,18 @@
       window.location.replace("/dashboard/login");
       throw new Error("Your session has expired.");
     }
-    if (!response.ok)
+    if (!response.ok) {
+      const reason =
+        response.status === 409
+          ? (await response.text()).trim().slice(0, 512)
+          : "";
       throw new Error(
-        response.status === 400
-          ? "Check the values you entered."
-          : "The server could not complete the operation.",
+        reason ||
+          (response.status === 400
+            ? "Check the values you entered."
+            : "The server could not complete the operation."),
       );
+    }
     return response.status === 204 ? null : response.json();
   }
   function schedule() {
@@ -192,10 +202,10 @@
       workers = data.workers;
     resourceHistory.observe(workers, Date.parse(data.generatedAt));
     const online = workers.filter((w) => w.online).length;
-    $("nav-worker-count").textContent = workers.length;
+    $("nav-worker-count").textContent = visibleWorkers().length;
     $("nav-job-count").textContent = integer.format(s.active + s.queued);
     $("fleet-note").textContent =
-      `${online} of ${workers.length} workers online`;
+      `${online} of ${workers.length} recent workers online`;
     $("fleet-detail").textContent = workers.length
       ? `${integer.format(s.active)} active · ${integer.format(s.queued)} queued`
       : "Waiting for the first worker";
@@ -217,7 +227,13 @@
     );
     renderJobs();
     // Polling must not replace a form while an operator is typing.
-    if (!$("worker-cards").contains(document.activeElement)) renderWorkers();
+    const editingWorker =
+      document.activeElement?.closest?.("form[data-worker]")?.dataset.worker;
+    if (
+      !editingWorker ||
+      !data.workers.some((w) => w.name === editingWorker && w.online)
+    )
+      renderWorkers();
     renderWorkerDetails();
     applyWidths($("overview-view"));
     applyWidths($("jobs-view"));
@@ -429,7 +445,13 @@
   }
   function renderWorkerChart() {
     const workers = [...data.workers]
-      .sort((a, b) => b.completed - a.completed || a.name.localeCompare(b.name))
+      .sort(
+        (a, b) =>
+          Number(b.online) - Number(a.online) ||
+          b.activeJobs - a.activeJobs ||
+          b.completed - a.completed ||
+          a.name.localeCompare(b.name),
+      )
       .slice(0, 6);
     if (!workers.length) {
       $("worker-chart").innerHTML = empty(
@@ -440,7 +462,7 @@
     }
     const max = Math.max(1, ...workers.map((w) => w.completed + w.failed));
     $("worker-chart").innerHTML =
-      `<div class="horizontal-chart">${workers.map((w) => `<a class="worker-summary-link" href="${esc(resources.link(w.name))}"><div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} failures</span></div>${resources.summary(w, Date.parse(data.generatedAt))}<div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div><span class="worker-details-link">Resource details ↗</span></a>`).join("")}</div><p class="worker-chart-footer">Job outcomes in the selected period · measured host/device usage. Multi-GPU summaries show the highest reported value for each metric.</p>`;
+      `<div class="horizontal-chart">${workers.map((w) => `<a class="worker-summary-link" href="${esc(resources.link(w.name))}"><div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} failures</span></div>${w.online ? resources.summary(w, Date.parse(data.generatedAt)) : badge("offline", "Offline")}<div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div><span class="worker-details-link">Resource details ↗</span></a>`).join("")}</div><p class="worker-chart-footer">Job outcomes in the selected period · measured host/device usage. Multi-GPU summaries show the highest reported value for each metric.</p>`;
   }
   function renderActivity() {
     if (!data.activity.length) {
@@ -517,21 +539,48 @@
         "No jobs to display",
         "Files appear here when they are queued or you change the filter.",
       );
-    return `<table><thead><tr><th>File</th><th>Status</th><th>Worker</th><th>Progress / result</th><th>Updated</th><th>Video</th></tr></thead><tbody>${jobs.map((j) => `<tr><td class="file-cell"><div class="file-name"><span aria-hidden="true">▹</span><div><strong title="${esc(j.sourcePath)}">${esc(basename(j.sourcePath))}</strong><small title="${esc(j.id)}">${bytes(j.sourceBytes)} · ${esc(j.id.slice(0, 8))}</small></div></div></td><td>${jobBadge(j)}</td><td>${esc(j.worker || "—")}</td><td><div class="job-progress">${observedProgress(j)}</div></td><td title="${esc(new Date(j.updatedAt).toLocaleString("en-US"))}">${age(j.updatedAt)}</td><td><button type="button" class="button media-job-play" data-job-media="${esc(j.id)}" aria-label="Play ${esc(basename(j.sourcePath))}">▷ View</button></td></tr>`).join("")}</tbody></table>`;
+    return `<table><thead><tr><th>File</th><th>Status</th><th>Worker</th><th>Progress / result</th><th>Updated</th><th>Video</th></tr></thead><tbody>${jobs.map((j) => `<tr><td class="file-cell"><div class="file-name"><span aria-hidden="true">▹</span><div><strong title="${esc(j.sourcePath)}">${esc(basename(j.sourcePath))}</strong><small title="${esc(j.id)}">${bytes(j.sourceBytes)} · ${esc(j.id.slice(0, 8))}</small></div></div></td><td>${jobBadge(j)}</td><td>${esc(j.worker || "—")}</td><td><div class="job-progress">${observedProgress(j)}</div></td><td title="${esc(new Date(j.updatedAt).toLocaleString("en-US"))}">${age(j.updatedAt)}</td><td>${["queued", "completed"].includes(j.state) ? `<button type="button" class="button media-job-play" data-job-media="${esc(j.id)}" aria-label="Play ${j.state === "completed" ? "completed output" : "queued source"} ${esc(basename(j.sourcePath))}">▷ View ${j.state === "completed" ? "output" : "source"}</button>` : `<span class="muted">—</span>`}</td></tr>`).join("")}</tbody></table>`;
   }
-  function renderJobs() {
+  function pagination(total, offset, limit, kind) {
+    if (!total) return "";
+    return `<span>${integer.format(offset + 1)}–${integer.format(Math.min(offset + limit, total))} of ${integer.format(total)}</span><button class="button" type="button" data-${kind}-page="${offset - limit}" ${offset <= 0 ? "disabled" : ""}>Previous</button><button class="button" type="button" data-${kind}-page="${offset + limit}" ${offset + limit >= total ? "disabled" : ""}>Next</button>`;
+  }
+  async function renderJobs() {
     if (!data) return;
-    const search = $("job-search").value.toLocaleLowerCase("en");
-    const jobs = data.jobs.filter(
-      (j) =>
-        (filter === "all" || j.state === filter) &&
-        (!search ||
-          `${j.sourcePath} ${j.worker} ${j.id}`
-            .toLocaleLowerCase("en")
-            .includes(search)),
-    );
-    $("job-list").innerHTML = jobsTable(jobs);
-    applyWidths($("job-list"));
+    const generation = ++jobsGeneration;
+    const query = new URLSearchParams({
+      state: filter,
+      search: $("job-search").value.trim(),
+      offset: String(jobsOffset),
+      limit: "25",
+    });
+    try {
+      const page = await api(`jobs?${query}`);
+      if (generation !== jobsGeneration) return;
+      if (page.total > 0 && page.offset >= page.total) {
+        jobsOffset = Math.floor((page.total - 1) / page.limit) * page.limit;
+        return renderJobs();
+      }
+      $("job-list").innerHTML = jobsTable(page.jobs);
+      $("job-pagination").innerHTML = pagination(
+        page.total,
+        page.offset,
+        page.limit,
+        "job",
+      );
+      applyWidths($("job-list"));
+    } catch (error) {
+      if (generation !== jobsGeneration) return;
+      $("job-list").innerHTML = empty("Could not load jobs", error.message);
+      $("job-pagination").innerHTML = "";
+    }
+  }
+  function reloadJobs() {
+    jobsOffset = 0;
+    jobsGeneration++;
+    $("job-list").innerHTML = empty("Loading jobs…");
+    $("job-pagination").innerHTML = "";
+    renderJobs();
   }
   function workerLimits(w) {
     if (w.desiredCPUJobs != null && w.desiredGPUJobs != null)
@@ -550,71 +599,109 @@
       return { cpu: "0", gpu: String(w.runtime.maxActiveJobs) };
     return { cpu: "", gpu: "" };
   }
+  function visibleWorkers() {
+    if (!data) return [];
+    const since = Date.parse(data.generatedAt) - hours * 3600000;
+    return data.workers.filter(
+      (w) => w.lastSeen && Date.parse(w.lastSeen) >= since,
+    );
+  }
   function renderWorkers() {
     if (!data) return;
-    if (!data.workers.length) {
+    const periodWorkers = visibleWorkers();
+    $("worker-scope-note").textContent =
+      `${periodWorkers.length} workers seen in the last ${hours === 24 ? "24 hours" : hours === 168 ? "7 days" : "30 days"} · online and active first. Offline workers show basic information.`;
+    if (!periodWorkers.length) {
+      $("worker-pagination").innerHTML = "";
       $("worker-cards").innerHTML = empty(
         "Connect your first worker",
         "Its name, encoders and status will appear automatically.",
       );
       return;
     }
-    $("worker-cards").innerHTML = data.workers
-      .filter(w => !selectedWorker || w.name === selectedWorker)
+    const all = periodWorkers.filter(
+      (worker) => !selectedWorker || worker.name === selectedWorker,
+    );
+    workerPage = Math.max(
+      0,
+      Math.min(workerPage, Math.ceil(all.length / 12) - 1),
+    );
+    const visible = selectedWorker
+      ? all
+      : all.slice(workerPage * 12, workerPage * 12 + 12);
+    $("worker-pagination").innerHTML = selectedWorker
+      ? ""
+      : pagination(all.length, workerPage * 12, 12, "worker");
+    $("worker-cards").innerHTML = visible
       .map((w, i) => {
-        const rt = w.runtime;
-        const modern = rt?.capacityVersion >= 2;
-        const desired = workerLimits(w);
-        const draft = drafts.get(w.name) ?? desired;
-        const paired = w.desiredCPUJobs != null && w.desiredGPUJobs != null;
+        if (!w.online)
+          return `<article class="panel worker-card worker-offline"><div class="worker-heading"><div><h2>${esc(w.name)}</h2><p>Last seen ${age(w.lastSeen)}</p></div>${badge("offline", "Offline")}</div><p class="media-help">${esc(w.ip || "Address unavailable")} · Controls become available when this worker reconnects.</p></article>`;
+        const rt = w.runtime,
+          modern = rt?.capacityVersion >= 2;
+        const profile = resources.profile(w);
+        const desired = workerLimits(w),
+          draft = drafts.get(w.name) ?? desired;
         const pending =
-          (paired || w.desiredMax != null) &&
+          (w.desiredCPUJobs != null || w.desiredMax != null) &&
           (!modern ||
             Number(desired.cpu) !== rt.cpuJobs ||
             Number(desired.gpu) !== rt.gpuJobs);
         const paused =
           modern && (rt.paused || (rt.cpuJobs === 0 && rt.gpuJobs === 0));
-        const status = !w.online
-          ? ["offline", "Offline"]
-          : !modern
-            ? ["queued", "Update worker"]
-            : rt.draining
-              ? ["queued", "Maintenance"]
-              : rt.finishing
-                ? ["queued", "Finishing jobs"]
-                : rt.ramPaused
-                  ? ["queued", "RAM pause"]
-                  : paused
-                    ? ["queued", "Queue paused"]
-                    : !rt.withinSchedule
-                      ? ["queued", "Outside schedule"]
-                      : ["completed", "Online"];
-        const busy = saving.has(w.name);
-        const fixedCPU = rt?.managedProfile && rt.encoder !== "av1_nvenc",
-          fixedGPU = rt?.managedProfile && rt.encoder === "av1_nvenc";
-        const lane = (kind, encoder, active, limit) =>
-          `<div class="encoder-lane ${kind}"><div class="load-labels"><span><b>${kind.toUpperCase()}</b> · ${esc(encoder || "No telemetry")}</span><strong>${modern ? `${active} / ${limit}` : "—"}</strong></div><div class="progress-track"><span data-width="${modern && limit > 0 ? (active / limit) * 100 : 0}"></span></div><p class="lane-note">${!modern ? "Update this worker to monitor and control both encoders." : active > limit ? `${active} occupied slots · limit ${limit}` : limit === 0 ? "Disabled for new encodes" : `${limit} encoding slots${w.online ? "" : " · last reported"}`}</p></div>`;
+        const status = !modern
+          ? ["queued", "Update worker"]
+          : rt.draining
+            ? ["queued", "Maintenance"]
+            : rt.finishing
+              ? ["queued", "Finishing jobs"]
+              : rt.ramPaused
+                ? ["queued", "RAM pause"]
+                : paused
+                  ? ["queued", "Queue paused"]
+                  : !rt.withinSchedule
+                    ? ["queued", "Outside schedule"]
+                    : ["completed", "Online"];
+        const command = w.control;
+        const pendingControl = command?.state === "pending";
+        const busy = saving.has(w.name),
+          disabled = busy || !modern || pendingControl;
+        const controlDisabled =
+          disabled || !(rt?.controlVersion >= 1) || rt?.draining;
+        const controlNote = pendingControl
+          ? `Waiting for worker confirmation: ${command.action}. Usually within 5 seconds.`
+          : command?.state === "failed"
+            ? command.error || "The worker could not apply the control."
+            : !(rt?.controlVersion >= 1)
+              ? "Update this worker to enable remote RAM and queue controls."
+              : "Pause in RAM suspends active encodes and retains RAM/VRAM. Stop after current lets active encodes finish and holds the queue. Resuming one preserves the other and individual pauses.";
+        const controls = `<div class="worker-controls"><button class="button subtle" type="button" data-worker-control="${rt?.ramPaused ? "resume-encodes" : "pause-encodes"}" data-worker-name="${esc(w.name)}" ${controlDisabled || rt?.finishing ? "disabled" : ""}>${rt?.ramPaused ? "Resume encodes" : "Pause in RAM"}</button><button class="button subtle" type="button" data-worker-control="${rt?.maxActiveJobs === 0 ? "resume-queue" : "stop-after-current"}" data-worker-name="${esc(w.name)}" ${controlDisabled ? "disabled" : ""}>${rt?.maxActiveJobs === 0 ? "Resume queue" : "Stop after current"}</button></div><p class="pending-note ${pendingControl ? "pending" : command?.state === "failed" ? "control-error" : ""}">${esc(controlNote)}</p>`;
+        const lane = (kind) => {
+          const active =
+              rt?.[kind === "cpu" ? "activeCPUEncodes" : "activeGPUEncodes"],
+            limit = rt?.[`${kind}Jobs`];
+          return `<div class="encoder-lane ${kind}"><div class="load-labels"><span><b>${kind.toUpperCase()}</b> · ${esc(rt?.[`${kind}Encoder`] || rt?.encoder || "No telemetry")}</span><strong>${modern ? `${active} / ${limit}` : "—"}</strong></div><div class="progress-track"><span data-width="${modern && limit > 0 ? (active / limit) * 100 : 0}"></span></div><p class="lane-note">${!modern ? "Update the worker to enable capacity controls." : limit === 0 ? "New encodes stopped" : `${limit} encoding slots · ${active} occupied`}</p></div>`;
+        };
+        const input = (kind, enabled) =>
+          enabled
+            ? `<div><label for="${kind}-${i}">${kind.toUpperCase()} limit <span>ENCODES</span></label><input id="${kind}-${i}" name="${kind}Jobs" type="number" min="0" step="1" required inputmode="numeric" value="${esc(draft[kind])}" ${rt?.managedProfile ? 'max="64"' : ""} ${disabled ? "disabled" : ""} aria-label="${kind.toUpperCase()} limit for ${esc(w.name)}"></div>`
+            : `<input type="hidden" name="${kind}Jobs" value="0">`;
+        const profileLabel = rt?.managedProfile
+          ? `Windows ${profile.cpu ? "CPU" : "GPU"} profile · shared host${rt.resources?.hostname ? " " + rt.resources.hostname : ""}`
+          : "Independent CPU + GPU worker";
         const note = pending
-          ? `◷ Desired: CPU ${desired.cpu || "?"} · GPU ${desired.gpu || "?"} — ${!modern ? "worker update required" : w.online ? "pending application" : "will apply on reconnection"}`
+          ? `Desired limits pending synchronization${rt.managedProfile ? " for this profile" : ""}.`
           : !modern
-            ? "Both limits are saved together; this older worker is paused until updated."
+            ? "Update this worker to enable controls."
             : rt.draining
-              ? "Maintenance: finishing accepted work without admitting new jobs."
+              ? "Maintenance: finishing accepted work."
               : rt.finishing
-                ? "Finishing accepted work; synchronization preserves this hold."
+                ? "Finishing accepted work; admission remains held."
                 : rt.ramPaused
-                  ? `RAM pause · ${rt.suspendedEncodes || 0} encodes suspended. Configured limits are retained.`
+                  ? `RAM pause · ${rt.suspendedEncodes || 0} encodes suspended; limits retained.`
                   : paused
-                    ? "Queue stopped. Active encodes finish; queued encodes wait for Resume."
-                    : `✓ Limits applied · up to ${rt.cpuJobs + rt.gpuJobs + 1} jobs in the pipeline`;
-        return `<article class="panel worker-card" data-worker="${esc(w.name)}">
-        <div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${modern ? (rt.managedProfile ? "Windows profile · " + (fixedCPU ? "CPU" : "GPU") : "CPU + GPU · independent execution") : esc(rt?.encoder || "Waiting for compatible telemetry")}</p></div>${badge(...status)}</div>
-        <div class="worker-stats"><div class="worker-stat"><small>CPU encodes${w.online ? "" : " · last reported"}</small><strong>${modern ? rt.activeCPUEncodes : "—"}<span>${modern ? "/ " + rt.cpuJobs : ""}</span></strong></div><div class="worker-stat"><small>GPU encodes${w.online ? "" : " · last reported"}</small><strong>${modern ? rt.activeGPUEncodes : "—"}<span>${modern ? "/ " + rt.gpuJobs : ""}</span></strong></div><div class="worker-stat"><small>Accepted jobs</small><strong>${rt ? rt.activeJobs : w.activeJobs}</strong></div></div>
-        ${resources.summary(w, Date.parse(data.generatedAt))}<a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">View resource details ↗</a>
-        <div class="encoder-lanes">${lane("cpu", rt?.cpuEncoder, rt?.activeCPUEncodes, rt?.cpuJobs)}${lane("gpu", rt?.gpuEncoder, rt?.activeGPUEncodes, rt?.gpuJobs)}</div>
-        <form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs"><div><label for="cpu-${i}">CPU limit <span>ENCODES</span></label><input id="cpu-${i}" name="cpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${fixedGPU ? 0 : esc(draft.cpu)}" ${rt?.managedProfile ? 'max="64"' : ""} ${busy || fixedGPU ? "disabled" : ""} aria-label="CPU limit for ${esc(w.name)}"></div><div><label for="gpu-${i}">GPU limit <span>ENCODES</span></label><input id="gpu-${i}" name="gpuJobs" type="number" min="0" step="1" required inputmode="numeric" value="${fixedCPU ? 0 : esc(draft.gpu)}" ${rt?.managedProfile ? 'max="64"' : ""} ${busy || fixedCPU ? "disabled" : ""} aria-label="GPU limit for ${esc(w.name)}"></div></div><div class="capacity-controls"><button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Saving…" : "Save limits"}</button><button class="button subtle" type="button" data-pause="${esc(w.name)}" ${busy ? "disabled" : ""}>Pause both</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>
-        <div class="worker-footer"><span>${esc(w.ip || "No heartbeat recorded")} · ${age(w.lastSeen)}</span><span>${integer.format(w.completed)} completed · ${integer.format(w.failed)} failures · ${bytes(w.sourceBytes - w.targetBytes)}</span></div>
-      </article>`;
+                    ? "Queue stopped. Active encodes finish; queued encodes wait."
+                    : `Limits applied · up to ${rt.cpuJobs + rt.gpuJobs + 1} jobs in the pipeline`;
+        return `<article class="panel worker-card" data-worker="${esc(w.name)}"><div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${esc(profileLabel)}</p></div>${badge(...status)}</div><p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.managedProfile ? " · This profile controls only its own encoder. Hardware readings are shared with other processes and profiles." : ""}</p>${resources.summary(w, Date.parse(data.generatedAt))}${resources.compact(w, resourceHistory, Date.parse(data.generatedAt))}<a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">View resource details ↗</a><div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div><form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs">${input("cpu", profile.cpu)}${input("gpu", profile.gpu)}</div><div class="capacity-controls"><button class="button primary" type="submit" ${disabled ? "disabled" : ""}>${busy ? "Saving…" : "Save limits"}</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>${controls}<div class="worker-footer"><span>${esc(w.ip)} · ${age(w.lastSeen)}</span><span>${integer.format(w.completed)} completed · ${integer.format(w.failed)} failures · ${bytes(w.sourceBytes - w.targetBytes)}</span></div></article>`;
       })
       .join("");
     applyWidths($("worker-cards"));
@@ -624,15 +711,35 @@
     $("worker-detail-navigation").hidden = !show;
     $("worker-resource-detail").hidden = !show;
     if (!show || !data) return;
-    const worker = data.workers.find(w => w.name === selectedWorker);
+    const worker = visibleWorkers().find((w) => w.name === selectedWorker);
     $("worker-resource-detail").innerHTML = worker
-      ? resources.details(worker, resourceHistory, Date.parse(data.generatedAt))
-      : empty("Worker not found", "Return to all workers to choose an available worker.");
+      ? worker.online
+        ? resources.details(
+            worker,
+            resourceHistory,
+            Date.parse(data.generatedAt),
+          )
+        : empty(
+            "Worker offline",
+            "Last seen " +
+              age(worker.lastSeen) +
+              ". Hardware details and controls are available after reconnection.",
+          )
+      : empty(
+          "Worker not seen in this period",
+          "Choose a longer reporting period or return to all workers.",
+        );
     applyWidths($("worker-resource-detail"));
   }
   async function saveWorker(name, values) {
     const w = data.workers.find((worker) => worker.name === name);
-    if (!w || saving.has(name)) return;
+    if (
+      !w ||
+      !w.online ||
+      !(w.runtime?.capacityVersion >= 2) ||
+      saving.has(name)
+    )
+      return;
     const cpu = Number(values.cpu),
       gpu = Number(values.gpu);
     if (
@@ -664,7 +771,9 @@
       }
       drafts.delete(name);
       showToast(
-        `${name}: CPU ${cpu} · GPU ${gpu} saved. They will apply at the next synchronization.`,
+        w.runtime?.managedProfile
+          ? `${name}: ${resources.profile(w).cpu ? "CPU " + cpu : "GPU " + gpu} saved. Applies at the next synchronization.`
+          : `${name}: CPU ${cpu} · GPU ${gpu} saved. Applies at the next synchronization.`,
       );
       await refresh();
     } catch (e) {
@@ -678,7 +787,8 @@
     window.scrollTo(0, 0);
     const [route, query = ""] = window.location.hash.slice(1).split("?", 2);
     view = route;
-    selectedWorker = view === "workers" ? new URLSearchParams(query).get("worker") : null;
+    selectedWorker =
+      view === "workers" ? new URLSearchParams(query).get("worker") : null;
     if (!titles[view]) view = "overview";
     const [label, title, description] = titles[view];
     $("breadcrumb-view").textContent = label;
@@ -711,7 +821,23 @@
       }
     }),
   );
-  $("job-search").addEventListener("input", renderJobs);
+  $("job-search").addEventListener("input", () => {
+    jobsGeneration++;
+    clearTimeout(jobSearchTimer);
+    jobSearchTimer = setTimeout(reloadJobs, 250);
+  });
+  $("job-pagination").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-job-page]");
+    if (!button || button.disabled) return;
+    jobsOffset = Number(button.dataset.jobPage);
+    renderJobs();
+  });
+  $("worker-pagination").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-worker-page]");
+    if (!button || button.disabled) return;
+    workerPage = Number(button.dataset.workerPage) / 12;
+    renderWorkers();
+  });
   document.querySelectorAll("[data-filter]").forEach((button) =>
     button.addEventListener("click", () => {
       filter = button.dataset.filter;
@@ -719,7 +845,7 @@
         b.classList.toggle("active", b === button);
         b.setAttribute("aria-pressed", String(b === button));
       });
-      renderJobs();
+      reloadJobs();
     }),
   );
   $("worker-cards").addEventListener("input", (event) => {
@@ -738,15 +864,71 @@
       gpu: event.target.elements.gpuJobs.value,
     });
   });
+  async function controlWorker(name, action) {
+    const worker = data?.workers.find((w) => w.name === name);
+    if (
+      !worker?.online ||
+      !(worker.runtime?.controlVersion >= 1) ||
+      saving.has(name) ||
+      worker.control?.state === "pending"
+    )
+      return;
+    saving.add(name);
+    if (document.activeElement instanceof HTMLElement)
+      document.activeElement.blur();
+    renderWorkers();
+    try {
+      const command = await api(`workers/${encodeURIComponent(name)}/control`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      });
+      worker.control = command;
+      showToast(`${name}: command queued; waiting for worker confirmation.`);
+      await refresh();
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      saving.delete(name);
+      renderWorkers();
+    }
+  }
   $("worker-cards").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-pause]");
-    if (button) saveWorker(button.dataset.pause, { cpu: "0", gpu: "0" });
+    const button = event.target.closest("[data-worker-control]");
+    if (button && !button.disabled)
+      controlWorker(button.dataset.workerName, button.dataset.workerControl);
   });
   window.addEventListener("hashchange", setView);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) clearTimeout(timer);
     else refresh();
   });
+  async function loadIdentity() {
+    try {
+      const identity = await api("identity");
+      $("session-name").textContent =
+        identity.name ||
+        identity.username ||
+        identity.email ||
+        (identity.mode === "token" ? "Token session" : "Signed-in user");
+      $("session-account").textContent =
+        identity.email ||
+        identity.username ||
+        (identity.mode === "token"
+          ? "Dashboard token"
+          : "Sign in again to show your account");
+      $("session-mobile").textContent =
+        identity.email ||
+        identity.username ||
+        identity.name ||
+        (identity.mode === "token" ? "Token session" : "Signed in");
+      $("session-mobile").title = $("session-mobile").textContent;
+      $("session-name").title = $("session-name").textContent;
+      $("session-account").title = $("session-account").textContent;
+    } catch (error) {
+      $("session-account").textContent = "Account unavailable";
+    }
+  }
   setView();
   refresh();
+  loadIdentity();
 })();

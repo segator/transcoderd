@@ -169,3 +169,29 @@ func TestDashboardWorkerLimitsAndValidation(t *testing.T) {
 		t.Errorf("direct dashboard HTML = %d, want 404", w.Code)
 	}
 }
+
+func TestDashboardJobsQueryValidation(t *testing.T) {
+	s := newWorkerSettingsTestServer(t)
+	cookie := loginDashboard(t, s)
+	tests := []struct {
+		query string
+		want  int
+	}{
+		{"", 200}, {"?state=completed&offset=0&limit=25&search=movie", 200},
+		{"?state=invalid", 400}, {"?offset=-1", 400}, {"?offset=abc", 400}, {"?limit=0", 400}, {"?limit=101", 400}, {"?search=" + strings.Repeat("x", 257), 400},
+	}
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			w := dashboardRequest(s, "GET", "/dashboard/api/jobs"+tt.query, "", "", cookie)
+			if w.Code != tt.want {
+				t.Fatalf("dashboardJobs() = %d %s, want %d", w.Code, w.Body.String(), tt.want)
+			}
+			if tt.want == 200 && (w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Body.String(), `"jobs":[]`)) {
+				t.Errorf("dashboardJobs() = %s, headers %v", w.Body.String(), w.Header())
+			}
+		})
+	}
+	if got := dashboardRequest(s, "GET", "/dashboard/api/jobs", "", "", nil); got.Code != 401 {
+		t.Fatalf("anonymous jobs = %d", got.Code)
+	}
+}

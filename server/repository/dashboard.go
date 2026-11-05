@@ -110,7 +110,7 @@ func (s *SQLRepository) readDashboard(ctx context.Context, hours int, now time.T
 	if err := s.readDashboardWorkers(ctx, db, d, since); err != nil {
 		return nil, err
 	}
-	if err := s.readDashboardJobs(ctx, db, d); err != nil {
+	if err := s.readDashboardJobs(ctx, db, d, model.DashboardJobsQuery{Limit: 100}); err != nil {
 		return nil, err
 	}
 	rows, err = db.QueryContext(ctx, dashboardJobsSQL+`SELECT COALESCE((SELECT stream->>'codec_name'
@@ -156,10 +156,7 @@ func (s *SQLRepository) readDashboard(ctx context.Context, hours int, now time.T
 }
 
 func (s *SQLRepository) readDashboardWorkers(ctx context.Context, db SQLDBOperations, d *model.Dashboard, since time.Time) error {
-	rows, err := db.QueryContext(ctx, dashboardJobsSQL+`, names AS (
- SELECT name FROM workers UNION SELECT worker_name FROM worker_settings
- UNION SELECT worker_name FROM job_status WHERE worker_name<>''
-), stats AS (
+	rows, err := db.QueryContext(ctx, dashboardJobsSQL+`, stats AS (
  SELECT worker_name, count(*) FILTER (WHERE state='active') active,
  count(*) FILTER (WHERE state='completed' AND event_time >= $1) completed,
  count(*) FILTER (WHERE state='failed' AND event_time >= $1) failed,
@@ -167,21 +164,22 @@ func (s *SQLRepository) readDashboardWorkers(ctx context.Context, db SQLDBOperat
  COALESCE(sum(target_size) FILTER (WHERE state='completed' AND source_size>0 AND target_size>0 AND event_time >= $1),0) target_bytes
  FROM fleet GROUP BY worker_name
 )
- SELECT n.name,COALESCE(w.ip,''),w.last_seen,w.runtime,ws.max_active_jobs,ws.cpu_jobs,ws.gpu_jobs,
+ SELECT w.name,COALESCE(w.ip,''),w.last_seen,w.runtime,ws.max_active_jobs,ws.cpu_jobs,ws.gpu_jobs,
  COALESCE(st.active,0),COALESCE(st.completed,0),COALESCE(st.failed,0),
- COALESCE(st.source_bytes,0),COALESCE(st.target_bytes,0)
- FROM names n LEFT JOIN workers w ON w.name=n.name
- LEFT JOIN worker_settings ws ON ws.worker_name=n.name LEFT JOIN stats st ON st.worker_name=n.name
- ORDER BY n.name`, since)
+ COALESCE(st.source_bytes,0),COALESCE(st.target_bytes,0),
+ CASE WHEN wc.id IS NOT NULL THEN jsonb_build_object('id',wc.id,'action',wc.action,'state',wc.state,'error',wc.error) END
+ FROM workers w LEFT JOIN worker_controls wc ON wc.worker_name=w.name
+ LEFT JOIN worker_settings ws ON ws.worker_name=w.name LEFT JOIN stats st ON st.worker_name=w.name
+ WHERE w.last_seen >= $2 ORDER BY w.name`, since, d.GeneratedAt.Add(-30*24*time.Hour))
 	if err != nil {
 		return fmt.Errorf("dashboard workers: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var w model.DashboardWorker
-		var raw []byte
+		var raw, control []byte
 		if err := rows.Scan(&w.Name, &w.IP, &w.LastSeen, &raw, &w.DesiredMax, &w.DesiredCPUJobs, &w.DesiredGPUJobs,
-			&w.ActiveJobs, &w.Completed, &w.Failed, &w.SourceBytes, &w.TargetBytes); err != nil {
+			&w.ActiveJobs, &w.Completed, &w.Failed, &w.SourceBytes, &w.TargetBytes, &control); err != nil {
 			return err
 		}
 		if len(raw) > 0 {
@@ -189,16 +187,22 @@ func (s *SQLRepository) readDashboardWorkers(ctx context.Context, db SQLDBOperat
 				return fmt.Errorf("decode worker runtime: %w", err)
 			}
 		}
+		if len(control) > 0 {
+			if err := json.Unmarshal(control, &w.Control); err != nil {
+				return err
+			}
+		}
 		d.Workers = append(d.Workers, w)
 	}
 	return rows.Err()
 }
 
-func (s *SQLRepository) readDashboardJobs(ctx context.Context, db SQLDBOperations, d *model.Dashboard) error {
+func (s *SQLRepository) readDashboardJobs(ctx context.Context, db SQLDBOperations, d *model.Dashboard, query model.DashboardJobsQuery) error {
 	rows, err := db.QueryContext(ctx, dashboardJobsSQL+`SELECT id,source_path,source_size,target_size,state,phase,
  worker_name,COALESCE(message,''),event_time FROM fleet
+ WHERE ($1='all' OR $1='' OR state=$1) AND ($2='' OR strpos(lower(source_path || ' ' || worker_name || ' ' || id::text),lower($2))>0)
  ORDER BY CASE WHEN state='active' THEN 0 WHEN state='queued' THEN 1 ELSE 2 END,
- event_time DESC,id LIMIT 100`)
+ event_time DESC,id LIMIT $3 OFFSET $4`, query.State, query.Search, query.Limit, query.Offset)
 	if err != nil {
 		return fmt.Errorf("dashboard jobs: %w", err)
 	}
@@ -255,4 +259,43 @@ func normalizeDashboardProgress(p *model.DashboardProgress, now time.Time) {
 		p.ETASeconds = 0
 	}
 	p.Stale = now.Sub(p.UpdatedAt) > time.Minute
+}
+
+func (s *SQLRepository) GetDashboardJobs(ctx context.Context, query model.DashboardJobsQuery) (*model.DashboardJobPage, error) {
+	if s.tx != nil {
+		return s.readDashboardJobPage(ctx, query)
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	r := &SQLRepository{tx: &SQLTransaction{tx: tx}}
+	page, err := r.readDashboardJobPage(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return page, nil
+}
+
+func (s *SQLRepository) readDashboardJobPage(ctx context.Context, query model.DashboardJobsQuery) (*model.DashboardJobPage, error) {
+	db, err := s.getConnection()
+	if err != nil {
+		return nil, err
+	}
+	page := &model.DashboardJobPage{Offset: query.Offset, Limit: query.Limit}
+	err = db.QueryRowContext(ctx, dashboardJobsSQL+`SELECT count(*) FROM fleet
+ WHERE ($1='all' OR $1='' OR state=$1) AND ($2='' OR strpos(lower(source_path || ' ' || worker_name || ' ' || id::text),lower($2))>0)`, query.State, query.Search).Scan(&page.Total)
+	if err != nil {
+		return nil, fmt.Errorf("dashboard job count: %w", err)
+	}
+	d := model.NewDashboard(time.Now().UTC(), 24)
+	if err := s.readDashboardJobs(ctx, db, d, query); err != nil {
+		return nil, err
+	}
+	page.Jobs = d.Jobs
+	return page, nil
 }

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -133,6 +134,7 @@ func NewServer(config Config) (*Server, error) {
 		r.HandleFunc("/dashboard/auth/login", s.oidcLogin).Methods(http.MethodGet)
 		r.HandleFunc("/dashboard/auth/callback", s.oidcCallback).Methods(http.MethodGet)
 	}
+	r.HandleFunc("/dashboard/api/identity", s.serveIdentity).Methods(http.MethodGet)
 	r.PathPrefix("/dashboard/api/").HandlerFunc(s.serveAPI)
 	d := r.PathPrefix("/dashboard/").Subrouter()
 	s.registerDashboardPWA(d)
@@ -200,6 +202,8 @@ func originPort(u *url.URL) string {
 	return "80"
 }
 
+var workerControlPath = regexp.MustCompile(`^/dashboard/api/workers/[^/]+/control$`)
+
 var workerSettingsPath = regexp.MustCompile(`^/dashboard/api/workers/[^/]+/settings$`)
 var mediaObjectPath = regexp.MustCompile(`^/dashboard/api/media/(info|file|preview|jobs|operations)/[^/]+$`)
 
@@ -209,11 +213,11 @@ func allowedAPI(method, p string) bool {
 	}
 	switch method {
 	case http.MethodGet:
-		return p == "/dashboard/api/session" || p == "/dashboard/api/stats" || p == "/dashboard/api/media/roots" || p == "/dashboard/api/media/browse" || mediaObjectPath.MatchString(p)
+		return p == "/dashboard/api/session" || p == "/dashboard/api/jobs" || p == "/dashboard/api/stats" || p == "/dashboard/api/media/roots" || p == "/dashboard/api/media/browse" || mediaObjectPath.MatchString(p)
 	case http.MethodHead:
 		return strings.HasPrefix(p, "/dashboard/api/media/file/") && mediaObjectPath.MatchString(p)
 	case http.MethodPost:
-		return p == "/dashboard/api/login" || p == "/dashboard/api/logout" || p == "/dashboard/api/media/scans" || p == "/dashboard/api/media/batches"
+		return workerControlPath.MatchString(p) || p == "/dashboard/api/login" || p == "/dashboard/api/logout" || p == "/dashboard/api/media/scans" || p == "/dashboard/api/media/batches"
 	case http.MethodPut:
 		return workerSettingsPath.MatchString(p)
 	case http.MethodDelete:
@@ -317,4 +321,44 @@ func dashboardHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// Identity stays on the frontend, where OIDC claims were verified. API session
+// validation remains authoritative, including for revoked or expired sessions.
+func (s *Server) serveIdentity(w http.ResponseWriter, r *http.Request) {
+	switch s.sessionStatus(r) {
+	case http.StatusUnauthorized:
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	case http.StatusNoContent:
+	default:
+		http.Error(w, "Cannot validate your session", http.StatusServiceUnavailable)
+		return
+	}
+	result := struct {
+		Mode     string `json:"mode"`
+		Name     string `json:"name,omitempty"`
+		Username string `json:"username,omitempty"`
+		Email    string `json:"email,omitempty"`
+	}{Mode: "token"}
+	if s.oidc != nil {
+		payload, err := s.oidcSession(r)
+		if err != nil {
+			http.Error(w, "Authentication required", http.StatusUnauthorized)
+			return
+		}
+		result.Mode = "oidc"
+		if payload.Identity != nil {
+			result.Name = payload.Identity.Name
+			result.Username = payload.Identity.Username
+			result.Email = payload.Identity.Email
+			if result.Name == "" && result.Username == "" && result.Email == "" {
+				result.Username = payload.Identity.Subject
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		return
+	}
 }

@@ -50,11 +50,13 @@ Total bitrate means `file_size_bytes × 8 / duration_seconds / 1e6`, including a
 
 ## Embedded player
 
-Use **View** from the library, preview results or job tables. Job playback offers the existing source and completed output; when the source was removed, the output remains playable and the UI identifies the missing source. Unavailable files show a clear error. Separate legacy outputs are browsable even when no job record exists.
+Use **View** from the library or scan results to play that specific file. Job tables offer **View source** only for queued jobs and **View output** only after Job completion. Active, failed and canceled jobs have no playback action; requesting their job assets returns HTTP 409. Completed jobs never fall back to the source if the output is missing. Separate legacy outputs remain browsable without a job record. Video comes from the API server's filesystem through the frontend; workers do not stream unfinished encodes.
 
-**Compatible** is the default: the server streams temporary H.264/AAC fragmented MP4 at up to 1280×720/24 fps, with stereo audio, realtime input pacing and two video codec threads. The full-duration slider restarts the stream at the chosen second. Closing the dialog, disconnecting or server shutdown terminates FFmpeg; pausing for two seconds releases a compatible stream, and **Reanudar** restarts at the saved position. There are two simultaneous compatible streams by default, configurable through `web.previewMaxStreams`; an extra stream gets HTTP 429 after a short (up to 500 ms) slot-release grace period. Quick seek updates are coalesced before replacing the stream. FFmpeg with libx264/AAC and ffprobe must be present (included in the existing server image). A slow machine may still need fewer concurrent previews.
+The dashboard always serves **original file bytes**, including when the selected file is an encoded output. The browser's native controls provide the only playback timeline, seeking, volume and fullscreen. There is no resolution/mode selector or second seek bar. HTTP Range support allows native seeking. Browser container/video/audio support determines playability; an unsupported original displays an explicit error without starting a conversion or changing the file.
 
-**Original** serves unchanged bytes with HTTP Range support and native seeking. Playback depends on the browser's container/video/audio support. Use Compatible for MKV or unsupported audio/codecs. Compatible previews are a playback aid, not original-quality compression comparison evidence; select Original only when the browser can decode the source/output directly. Neither mode writes preview files or alters source/output files. Preview resources belong to the server and do not consume configured worker CPU/GPU job slots.
+The compatible H.264/AAC preview API remains available to existing clients: temporary fragmented MP4 up to 1280×720/24 fps, two codec threads, realtime pacing and time offsets. Its default two-stream limit is configurable with `web.previewMaxStreams`; extra requests return HTTP 429 after up to 500 ms grace for canceled processes to exit. Disconnecting stops FFmpeg. The dashboard player no longer requests this endpoint.
+
+A scan result labeled **Previous encode failed · Retry eligible** refers to the existing encoding job, not a failed scan. It becomes eligible only with **Retry failed jobs** enabled; the retry is submitted only by explicitly queueing the selected files. Analysis failures remain separate per-file scan results.
 
 ## Dashboard API
 
@@ -67,7 +69,7 @@ All routes are under `/dashboard/api/media/`, require dashboard authentication, 
 | GET | `info/{fileID}` | Cached/probed metadata and eligibility |
 | GET / HEAD | `file/{fileID}` | Original bytes; supports Range |
 | GET | `preview/{fileID}?start=30` | Compatible MP4 stream from a time offset |
-| GET | `jobs/{jobUUID}` | Available source/completed output assets |
+| GET | `jobs/{jobUUID}` | Queued source or completed output assets; HTTP 409 for other states |
 | POST | `scans` | HTTP 202 scan operation; body is filter object |
 | GET | `operations/{operationUUID}` | Operation state/progress/files/results |
 | DELETE | `operations/{operationUUID}` | HTTP 204 cancellation request |

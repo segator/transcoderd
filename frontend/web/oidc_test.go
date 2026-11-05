@@ -494,3 +494,77 @@ func TestOIDCSessionExpiryAndKeyRotation(t *testing.T) {
 		}
 	}
 }
+
+func TestOIDCDisplayIdentity(t *testing.T) {
+	p, a := newOIDCProvider(t), newSessionAPI(t)
+	p.modify = func(claims map[string]any) {
+		claims["name"] = "Isaac Aymerich"
+		claims["preferred_username"] = "isaac"
+		claims["email"] = "isaac@example.test"
+	}
+	config := oidcTestConfig(p, a)
+	first, second := oidcTestFrontend(t, config), oidcTestFrontend(t, config)
+	cookie := oidcLoginSession(t, first, p)
+	for _, s := range []*Server{first, second} {
+		w := dashboardRequest(s, "GET", "/dashboard/api/identity", "", "", cookie)
+		var got struct{ Mode, Name, Username, Email string }
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != 200 || got.Mode != "oidc" || got.Name != "Isaac Aymerich" || got.Username != "isaac" || got.Email != "isaac@example.test" {
+			t.Fatalf("identity = %d %+v", w.Code, got)
+		}
+		if w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatal("identity response is cacheable")
+		}
+		for _, secret := range []string{testAPICredential, testOIDCSecret, "provider-access-token", cookie.Value} {
+			if strings.Contains(w.Body.String(), secret) {
+				t.Fatal("identity exposes credentials")
+			}
+		}
+	}
+	if w := dashboardRequest(second, "GET", "/dashboard/api/identity", "", "", nil); w.Code != 401 {
+		t.Fatalf("anonymous identity = %d", w.Code)
+	}
+	if w := dashboardRequest(second, "POST", "/dashboard/api/logout", "", "", cookie); w.Code != 204 {
+		t.Fatalf("logout = %d", w.Code)
+	}
+	if w := dashboardRequest(first, "GET", "/dashboard/api/identity", "", "", cookie); w.Code != 401 {
+		t.Fatalf("revoked identity = %d", w.Code)
+	}
+}
+
+func TestTokenDisplayIdentity(t *testing.T) {
+	a := newSessionAPI(t)
+	s, err := NewServer(Config{APIURL: a.server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	a.mu.Lock()
+	a.sessions["test-session"] = true
+	a.mu.Unlock()
+	cookie := &http.Cookie{Name: sessionCookie, Value: "test-session"}
+	w := dashboardRequest(s, "GET", "/dashboard/api/identity", "", "", cookie)
+	if w.Code != 200 || strings.TrimSpace(w.Body.String()) != `{"mode":"token"}` {
+		t.Fatalf("token identity = %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOIDCDisplayClaimsStayWithinCookieLimit(t *testing.T) {
+	p, a := newOIDCProvider(t), newSessionAPI(t)
+	p.modify = func(claims map[string]any) {
+		for _, key := range []string{"name", "preferred_username", "email", "sub"} {
+			claims[key] = strings.Repeat("<😀", 300)
+		}
+	}
+	s := oidcTestFrontend(t, oidcTestConfig(p, a))
+	cookie := oidcLoginSession(t, s, p)
+	if len(cookie.String()) >= 4096 {
+		t.Fatalf("session cookie = %d bytes, want below browser limit", len(cookie.String()))
+	}
+	w := dashboardRequest(s, "GET", "/dashboard/api/identity", "", "", cookie)
+	if w.Code != 200 {
+		t.Fatalf("bounded identity = %d %s", w.Code, w.Body.String())
+	}
+}

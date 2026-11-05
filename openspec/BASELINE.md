@@ -84,6 +84,9 @@ Local image verification also found the previous Docker loader assumed OCI archi
 
 The frontend now owns optional OIDC browser login while API session validation/revocation remains server-owned. Token mode stays the compatibility default. `frontend/web/oidc.go` validates discovery, code/PKCE, state/nonce and signed identity/group claims, then encrypts the API session for interchangeable frontend replicas. OIDC mode refuses token/legacy-cookie fallback. The historical API-only frontend constraint now also permits identity-provider access and runtime auth secrets; media/database access remains unnecessary. Session/key/provider/logout limitations and k3s/Traefik examples are documented in `docs/frontend-authentication.md` and `deploy/kubernetes/frontend/`.
 
+### Fleet playback and presentation investigation (2026-11-05)
+
+The previous View action for active/failed jobs returned the server-side source, never an unfinished worker stream. Completed filtering ran after a global 100-job cap and could falsely show no completed jobs. Worker membership also included names from historical settings/jobs without recent presence; fixed Windows profiles displayed irrelevant encoder classes, and verified OIDC display claims were discarded. The fix-fleet-playback-and-worker-clarity change resolves these discrepancies with explicit playback roles, filtered paging, recent membership and verified display identity.
 
 ### SVT CRF default and saved profiles (2026-11-04)
 
@@ -96,3 +99,7 @@ The previous operational references described application builds as reusing publ
 ### Frontend ARM64 and ordinary CI consolidation (2026-11-05)
 
 The original frontend image recipe explicitly compiled amd64 and its Kubernetes example selected only amd64 nodes; this was a documented implementation limit. `frontend-arm64-and-ci-jobs` adds Linux amd64/arm64 image variants and one shared OCI index, with static ELF, version, CA, nonroot health and archive checks. Local foreign-CPU execution uses emulation, not a native ARM hardware/performance claim. The Kubernetes example admits the two supported Linux architectures. Ordinary CI now has one Linux build/check job and one native Windows job; current source/web tooling is saved outside tagged checkouts, frontend Windows units join the cross-built suites and old tags retain their frontend Go-test fallback. Artifact debugging is manual-only with read-only credentials, preserving its distinct validation/publication boundary.
+
+### Remote pause and reporting-period review (2026-11-05)
+
+The fleet's former Pause both/Profile button wrote zero limits, which stopped new work but did not invoke the worker RAM controller and offered no restore action. `align-remote-worker-controls` separates worker-acknowledged RAM and queue commands, retains positive resume capacity and preserves independent holds. Its Workers view applies the selected presence window inside the 30-day maximum and adds compact in-tab hardware history. Real child-process tests cover suspension, queue drain semantics, independent holds and acknowledgement retry; PostgreSQL and Chromium regressions cover storage, filtered pages and controls.

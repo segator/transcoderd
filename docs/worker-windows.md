@@ -49,8 +49,12 @@ mage build:windows       # complete versioned ZIP in dist/
 mage test:windowsBinaries # unit tests and bundle smoke-test executables
 ```
 
-Cross-compilation defaults to two C/C++ compiler jobs. Set `WINDOWS_BUILD_JOBS`
-to increase parallelism on larger builders.
+Cross-compilation defaults to an aggregate budget of 16 C/C++ compiler jobs on
+the connected Dagger Engine. Up to four independent dependency builds divide
+that budget; the final FFmpeg compilation receives all 16 jobs. Set
+`WINDOWS_BUILD_JOBS` to a positive integer to match a smaller or larger Engine.
+This is build parallelism, independent of worker encode concurrency. See
+[CI pipeline](ci-pipeline.md) for cache and packaging boundaries.
 
 The Windows FFmpeg recipe pins the five production encoder dependencies to the
 Linux builder's versions. It does not reproduce unrelated Linux integrations
@@ -81,10 +85,12 @@ Measured native test results and their scope are recorded in
 
 ## Hosted CI and releases
 
-Focused Windows update/administration unit tests run natively in parallel with
-Linux CI, so task registration and permission failures stop before packaging.
-Dagger builds every distributed binary and installer after those gates, followed
-by full native media, service and upgrade validation on `windows-2025`. Dagger also builds a test-only Windows server under
+The `ci` job runs source guards, web tests, Linux/Windows lint, Linux builds/tests,
+frontend platform checks and all Windows cross-compilation/packaging through
+Mage/Dagger on Linux. The subsequent `windows-native` job runs all cross-built
+unit suites, including frontend, plus full media, service and upgrade validation
+on `windows-2025`. Legacy tagged-source builds retain a native Go frontend-test
+fallback. Dagger also builds a test-only Windows server under
 `dist/windows-tests/`; it is not a distributed server product or release asset.
 
 The native job runs all unit and bundled-tool tests and then

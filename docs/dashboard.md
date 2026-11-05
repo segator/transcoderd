@@ -27,7 +27,18 @@ mage build:frontend
 
 Point the public HTTPS reverse proxy at the frontend port. Set `frontend.publicURL` to the actual browser origin when TLS terminates there; client-supplied forwarded host/scheme headers are ignored. API/public URL settings accept HTTP(S) origins only, without credentials, non-root paths, query or fragments. The default API origin is `http://localhost:8080`; the default listener is `:8081`; an empty public URL derives the direct HTTP/TLS request origin. YAML uses `frontend.listen`, `frontend.apiURL` and `frontend.publicURL`; explicit environment names are `TR_FRONTEND_LISTEN`, `TR_FRONTEND_API_URL` and `TR_FRONTEND_PUBLIC_URL`. `--config /etc/transcoderd/frontend.yaml` selects a file, otherwise the usual config.yaml search paths apply. CLI overrides environment and YAML.
 
-The separately published image is `ghcr.io/segator/transcoderd:frontend-<version>` (`mage docker:frontend` builds it locally). Example on the frontend host:
+The separately published image is `ghcr.io/segator/transcoderd:frontend-<version>`
+with Linux amd64 and arm64 variants under the same tag. Docker/Kubernetes select
+the matching variant; use a released multi-platform tag or index digest on ARM64,
+since older tags are unchanged. `mage docker:frontend` exports both variants in
+`dist/frontend-image.tar` and loads the host-compatible local image.
+`mage test:frontendImages` checks both static ELF architectures, version output,
+nonroot HTTP health and the OCI index. Foreign-architecture runtime checks use
+emulation on an amd64 Engine; they are not a native ARM performance benchmark.
+The standalone `mage build:frontend` executable keeps its existing host-target
+behavior. Server and media-worker image architectures are unchanged.
+
+Example on either supported frontend host:
 
 ```bash
 docker run -d --name transcoderd-frontend --read-only --cap-drop=ALL \
@@ -54,7 +65,7 @@ The worker synchronizes settings before each normal admission evaluation, approx
 
 Admission is bounded by `CPU + GPU + 1` accepted jobs: the extra job overlaps preparation or verification/upload. Each encoder class separately enforces its own concurrency. Lowering a positive limit lets its running encodes finish before starting another. Disabling one class sends new unassigned jobs to the other. Jobs whose encoding profile was already pinned before restart may resume on their disabled class using retained drain capacity (minimum one if the old target is unavailable). With both disabled, pending encodes wait; running encodes and downstream work finish. Maintenance draining explicitly releases queue/RAM/individual holds without persisting a new preference. Running/draining counts can temporarily exceed the new desired value; the UI labels this state. Slot counts do not measure hardware utilization.
 
-The startup `worker.ffmpegConfig` remains the preferred encoder/profile. Its class uses that exact recipe. The other class defaults to approved CPU SVT-AV1 preset 4/CRF25 or GPU NVENC p7/CQ38. Audio/thread settings are shared initially; encoder quality flags and hardware-specific `extraArgs` never leak into the other class. Optional YAML `worker.cpuFFmpegConfig` and `worker.gpuFFmpegConfig` specify separate profiles (see the configuration reference). A selected profile is copied and persisted in the job context before encoding, so restart and later configuration changes preserve the job's chosen backend and parameters. When only one class is enabled, the worker pins that class at admission (including an in-flight assignment arriving after a pause), so a CPU-only accepted job cannot switch to GPU after restart.
+The startup `worker.ffmpegConfig` remains the preferred encoder/profile. Its class uses that exact recipe. The other class defaults to approved CPU SVT-AV1 preset 4/CRF26 or GPU NVENC p7/CQ38. Audio/thread settings are shared initially; encoder quality flags and hardware-specific `extraArgs` never leak into the other class. Optional YAML `worker.cpuFFmpegConfig` and `worker.gpuFFmpegConfig` specify separate profiles (see the configuration reference). A selected profile is copied and persisted in the job context before encoding, so restart and later configuration changes preserve the job's chosen backend and parameters. When only one class is enabled, the worker pins that class at admission (including an in-flight assignment arriving after a pause), so a CPU-only accepted job cannot switch to GPU after restart.
 
 A CPU-only host should keep GPU `0`. Enabling GPU slots requires the documented compatible NVIDIA GPU, driver, and container runtime; encoding does not silently fall back to CPU. No GPU command runs when GPU slots are disabled unless previously accepted pinned GPU work is being restored.
 

@@ -6,10 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"dagger.io/dagger"
+	"golang.org/x/sync/errgroup"
 )
 
 // Windows builds the native Windows x64 worker and its portable tool bundle.
@@ -23,9 +25,12 @@ func (Build) Windows(ctx context.Context) error {
 	if _, err := binary.Export(ctx, filepath.Join(projectRoot(), "dist", "transcoderd-worker-windows-amd64.exe")); err != nil {
 		return err
 	}
-	bundle := windowsWorkerBundle(client, binary)
+	bundle, err := windowsWorkerBundle(ctx, client, binary)
+	if err != nil {
+		return err
+	}
 	archive := "transcoderd-worker-" + projectVersion + "-windows-amd64.zip"
-	_, err = bundle.WithWorkdir("/bundle").WithExec([]string{"zip", "-q", "-r", "/" + archive, "."}).File("/"+archive).Export(ctx, filepath.Join(projectRoot(), "dist", archive))
+	_, err = bundle.WithWorkdir("/bundle").WithExec([]string{"zip", "-q", "-3", "-r", "/" + archive, "."}).File("/"+archive).Export(ctx, filepath.Join(projectRoot(), "dist", archive))
 	return err
 }
 
@@ -41,8 +46,7 @@ func (Build) WindowsBinary(ctx context.Context) error {
 }
 
 func windowsWorkerBinary(client *dagger.Client, src *dagger.Directory) *dagger.File {
-	return goContainer(client, src).WithEnvVariable("GOOS", "windows").WithEnvVariable("GOARCH", "amd64").
-		WithExec([]string{"go", "build", "-ldflags", ldflags("transcoderd-worker"), "-o", "/output/worker.exe", "./worker"}).File("/output/worker.exe")
+	return windowsGoBinary(client, src, "./worker", "transcoderd-worker", projectVersion, "", "windows")
 }
 
 // WindowsBinaries exports native Windows unit-test executables. Run them with
@@ -55,41 +59,88 @@ func (Test) WindowsBinaries(ctx context.Context) error {
 	defer client.Close()
 	_, err = goContainer(client, projectSource(client)).
 		WithEnvVariable("GOOS", "windows").WithEnvVariable("GOARCH", "amd64").
-		WithExec([]string{"bash", "-c", `set -eu; mkdir -p /output; for pkg in $(go list ./cmd/... ./helper/... ./model/... ./update/... ./version/... ./worker/...); do name=$(echo "$pkg" | tr / _); go test -c -o "/output/$name.test.exe" "$pkg"; done`}).
+		WithExec([]string{"bash", "-c", `set -eu; mkdir -p /output; for pkg in $(go list ./cmd/... ./helper/... ./model/... ./update/... ./version/... ./worker/... ./frontend/...); do name=$(echo "$pkg" | tr / _); go test -c -o "/output/$name.test.exe" "$pkg"; done`}).
 		WithExec([]string{"go", "test", "-c", "-tags=integration", "-o", "/output/windows-bundle.test.exe", "./integration"}).
 		WithExec([]string{"go", "build", "-ldflags", ldflags("transcoderd-server"), "-o", "/output/windows-e2e-server.exe", "./server"}).
 		Directory("/output").Export(ctx, filepath.Join(projectRoot(), "dist", "windows-tests"))
 	return err
 }
 
-func windowsFFmpeg(client *dagger.Client) *dagger.Container {
-	container := client.Container().From("debian:trixie-slim").
-		WithExec([]string{"bash", "-c", "apt-get update && apt-get install -y --no-install-recommends ca-certificates curl xz-utils make nasm cmake ninja-build pkg-config git gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix && rm -rf /var/lib/apt/lists/*"}).
-		WithEnvVariable("BUILD_JOBS", envOrDefault("WINDOWS_BUILD_JOBS", "2")).
-		WithFile("/build-ffmpeg.sh", client.Host().File(filepath.Join(projectRoot(), "scripts", "windows", "build-ffmpeg.sh")))
-	for _, stage := range []string{"aom", "svt", "x265", "fdk", "nvcodec", "ffmpeg"} {
-		if stage == "ffmpeg" {
-			// FFmpeg executes native table generators as part of a cross-build.
-			container = container.WithExec([]string{"bash", "-c", "apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*"})
-		}
-		container = container.WithFile("/"+stage+".sh", client.Host().File(filepath.Join(projectRoot(), "scripts", "windows", stage+".sh"))).
-			WithExec([]string{"bash", "/build-ffmpeg.sh", stage})
+func windowsCompilePlan(value string) (budget, parallel, jobs int, err error) {
+	if value == "" {
+		value = "16"
 	}
-	return container
+	budget, err = strconv.Atoi(value)
+	if err != nil || budget < 1 {
+		return 0, 0, 0, fmt.Errorf("WINDOWS_BUILD_JOBS must be a positive integer, got %q", value)
+	}
+	parallel = min(4, budget)
+	return budget, parallel, budget / parallel, nil
+}
+
+func windowsFFmpeg(ctx context.Context, client *dagger.Client) (*dagger.Container, error) {
+	budget, parallel, jobs, err := windowsCompilePlan(os.Getenv("WINDOWS_BUILD_JOBS"))
+	if err != nil {
+		return nil, err
+	}
+	base := client.Container().From("debian:trixie-slim").
+		WithExec([]string{"bash", "-c", "apt-get update && apt-get install -y --no-install-recommends ca-certificates curl xz-utils make nasm cmake ninja-build pkg-config git gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix && rm -rf /var/lib/apt/lists/*"}).
+		WithFile("/build-ffmpeg.sh", client.Host().File(filepath.Join(projectRoot(), "scripts", "windows", "build-ffmpeg.sh"))).
+		WithFile("/fetch.sh", client.Host().File(filepath.Join(projectRoot(), "scripts", "windows", "fetch.sh")))
+	stages := make([]*dagger.Container, 0, 5)
+	builds, buildCtx := errgroup.WithContext(ctx)
+	builds.SetLimit(parallel)
+	for _, name := range []string{"aom", "svt", "x265", "fdk", "nvcodec"} {
+		// Each stage has only its own sources as inputs. Changing SVT cannot
+		// invalidate the cached AOM, x265, AAC or NVCodec installations.
+		stage := base.WithEnvVariable("BUILD_JOBS", strconv.Itoa(jobs)).
+			WithFile("/"+name+".sh", client.Host().File(filepath.Join(projectRoot(), "scripts", "windows", name+".sh"))).
+			WithExec([]string{"bash", "/build-ffmpeg.sh", name})
+		stages = append(stages, stage)
+		builds.Go(func() error {
+			if _, err := stage.Sync(buildCtx); err != nil {
+				return fmt.Errorf("build Windows %s: %w", name, err)
+			}
+			return nil
+		})
+	}
+	if err := builds.Wait(); err != nil {
+		return nil, err
+	}
+	// FFmpeg executes native table generators and links the independently
+	// compiled libraries. Only this final compilation needs all dependencies.
+	container := base.WithExec([]string{"bash", "-c", "apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*"})
+	for _, stage := range stages {
+		container = container.WithDirectory("/opt/windows", stage.Directory("/opt/windows")).
+			WithDirectory("/output", stage.Directory("/output"))
+	}
+	return container.WithEnvVariable("BUILD_JOBS", strconv.Itoa(budget)).
+		WithFile("/ffmpeg.sh", client.Host().File(filepath.Join(projectRoot(), "scripts", "windows", "ffmpeg.sh"))).
+		WithExec([]string{"bash", "/build-ffmpeg.sh", "ffmpeg"}), nil
 }
 
 func windowsPGS(client *dagger.Client) *dagger.Container {
 	return pgsBuilderImage(client).WithExec([]string{"bash", "-c", fmt.Sprintf("cd /src/PgsToSrt-%s/src && dotnet publish PgsToSrt/PgsToSrt.csproj -c Release -f net8.0 -r win-x64 --self-contained true -o /windows-pgs", pgstosrtVersion)})
 }
 
-func windowsWorkerBundle(client *dagger.Client, binary *dagger.File) *dagger.Container {
-	ffmpeg := windowsFFmpeg(client)
+func windowsWorkerBundle(ctx context.Context, client *dagger.Client, binary *dagger.File) (*dagger.Container, error) {
+	tools, err := windowsWorkerTools(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	return tools.WithFile("/bundle/transcoderd-worker.exe", binary), nil
+}
+
+func windowsWorkerTools(ctx context.Context, client *dagger.Client) (*dagger.Container, error) {
+	ffmpeg, err := windowsFFmpeg(ctx, client)
+	if err != nil {
+		return nil, err
+	}
 	pgs := windowsPGS(client)
 	return client.Container().From("debian:trixie-slim").
 		WithExec([]string{"bash", "-c", "apt-get update && apt-get install -y --no-install-recommends ca-certificates curl 7zip zip && rm -rf /var/lib/apt/lists/*"}).
 		WithExec([]string{"bash", "-c", fmt.Sprintf("curl --fail --location --retry 5 https://mkvtoolnix.download/windows/releases/103.0/mkvtoolnix-64-bit-103.0.7z -o /mkv.7z && echo '%s  /mkv.7z' | sha256sum --check --status && 7z x /mkv.7z -o/mkv && rm /mkv.7z", windowsMKVSHA256)}).
 		WithDirectory("/bundle", ffmpeg.Directory("/output")).
-		WithFile("/bundle/transcoderd-worker.exe", binary).
 		WithDirectory("/bundle/pgs", pgs.Directory("/windows-pgs")).
 		WithDirectory("/bundle/tessdata", pgs.Directory("/src/tessdata")).
 		// Linux Tesseract's config/font symlinks are not used by PgsToSrt OCR.
@@ -99,7 +150,7 @@ func windowsWorkerBundle(client *dagger.Client, binary *dagger.File) *dagger.Con
 		WithNewFile("/bundle/licenses/PgsToSrt-source.txt", "PgsToSrt source: https://github.com/Tentacule/PgsToSrt/tree/"+pgstosrtVersion+"\nLocal patch: pgs-patches/pgstosrt-bitmap-bounds.patch\n").
 		WithExec([]string{"bash", "-c", "cp -a /mkv/mkvtoolnix/mkvextract.exe /bundle/bin/ && find /mkv/mkvtoolnix -maxdepth 1 -iname '*.dll' -exec cp -t /bundle/bin/ {} + && cp -a /mkv/mkvtoolnix/doc/COPYING.txt /bundle/licenses/mkvtoolnix.txt"}).
 		WithFile("/bundle/README.md", client.Host().File(filepath.Join(projectRoot(), "docs", "worker-windows.md"))).
-		WithFile("/bundle/windows-worker-validation.md", client.Host().File(filepath.Join(projectRoot(), "docs", "windows-worker-validation.md")))
+		WithFile("/bundle/windows-worker-validation.md", client.Host().File(filepath.Join(projectRoot(), "docs", "windows-worker-validation.md"))), nil
 }
 
 const windowsMKVSHA256 = "01d76dbfdbd5615d9e02f69b0710d1429a902d47a98c8eee33bd884c4fcb3cbf"
@@ -196,7 +247,10 @@ func (Build) WindowsInstaller(ctx context.Context) error {
 	}
 	defer client.Close()
 	src := projectSource(client)
-	builder, setup := windowsInstallerBuild(client, src, projectVersion, "", false)
+	builder, setup, err := windowsInstallerBuild(ctx, client, src, projectVersion, "", false)
+	if err != nil {
+		return err
+	}
 	for _, entry := range []struct{ source, target string }{
 		{"/stage/transcoderd-desktop-service.exe", "transcoderd-desktop-service.exe"},
 		{"/stage/transcoderd-updater.exe", "transcoderd-updater.exe"},

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Windows x64 production encoders. Versions match ffmpeg-build-script v9.0.10.
+# Shared Windows x64 cross-compilation helpers; stages pin their own sources.
 set -euo pipefail
 script_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+source "$script_dir/fetch.sh"
 stage=$1
 export PREFIX=/opt/windows
 export TARGET=x86_64-w64-mingw32
@@ -9,18 +10,13 @@ export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
 export CFLAGS='-O2'
 export CXXFLAGS='-O2'
-jobs=${BUILD_JOBS:-2}
+jobs=${BUILD_JOBS:-16}
+if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then
+    echo "BUILD_JOBS must be a positive integer, got: $jobs" >&2
+    exit 2
+fi
 mkdir -p /build "$PREFIX" /output/bin /output/licenses
 cd /build
-
-fetch() {
-    local name=$1 url=$2 checksum=$3
-    curl --fail --location --retry 5 --connect-timeout 30 "$url" -o "$name.tar.gz"
-    echo "$checksum  $name.tar.gz" | sha256sum --check
-    mkdir -p "$name"
-    tar -xf "$name.tar.gz" -C "$name" --strip-components=1
-    rm "$name.tar.gz"
-}
 
 cmake_cross() {
     cmake -G Ninja -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 \

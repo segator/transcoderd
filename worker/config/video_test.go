@@ -26,6 +26,11 @@ func TestResolveVideoSettings(t *testing.T) {
 		{
 			name: "CPU default",
 			cfg:  FFMPEGConfig{VideoCodec: AV1SVT},
+			want: VideoSettings{Codec: AV1SVT, Preset: "4", PixelFormat: "yuv420p10le", CRF: 26},
+		},
+		{
+			name: "CPU explicit previous default",
+			cfg:  FFMPEGConfig{VideoCodec: AV1SVT, VideoCRF: 25},
 			want: VideoSettings{Codec: AV1SVT, Preset: "4", PixelFormat: "yuv420p10le", CRF: 25},
 		},
 		{

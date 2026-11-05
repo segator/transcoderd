@@ -55,3 +55,31 @@ func TestImageTagsFor(t *testing.T) {
 		})
 	}
 }
+
+func TestLinuxReleaseAssetsExcludeUnvalidatedWindowsFiles(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"transcoderd-server", true},
+		{"transcoderd-worker", true},
+		{"transcoderd-frontend", true},
+		{"server-image.tar", true},
+		{"worker-image.tar", true},
+		{"frontend-image.tar", true},
+		{"transcoderd-worker-windows-amd64.exe", false},
+		{"transcoderd-worker-v2.12.0-windows-amd64.zip", false},
+		{"transcoderd-worker-v2.12.0-windows-amd64-setup.exe", false},
+		{"windows-update.json", false},
+		{"windows-update.json.sig", false},
+		{"windows-update-manifest.exe", false},
+		{"key", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isLinuxReleaseAsset(tt.name); got != tt.want {
+				t.Errorf("isLinuxReleaseAsset(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}

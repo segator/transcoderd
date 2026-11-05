@@ -69,20 +69,29 @@ func TestWindowsBundle(t *testing.T) {
 		codec string
 		args  []string
 	}{
-		{"libsvtav1", []string{"-preset", "8", "-svtav1-params", "lp=2"}},
+		{"libsvtav1", []string{"-preset", "4", "-crf", "26"}},
 		{"libaom-av1", []string{"-cpu-used", "8", "-threads", "2"}},
 		{"libx265", []string{"-preset", "ultrafast", "-profile:v", "main10", "-x265-params", "pools=2:frame-threads=1"}},
 	} {
 		t.Run(tt.codec, func(t *testing.T) {
-			args := []string{"-v", "error", "-f", "lavfi", "-i", "testsrc2=size=128x128:rate=2:duration=1", "-pix_fmt", "yuv420p10le", "-c:v", tt.codec}
+			args := []string{"-hide_banner", "-f", "lavfi", "-i", "testsrc2=size=128x128:rate=2:duration=1", "-pix_fmt", "yuv420p10le", "-c:v", tt.codec}
 			args = append(args, tt.args...)
 			output := filepath.Join(work, tt.codec+".mkv")
-			run(t, tool("ffmpeg"), append(args, "-y", output)...)
+			log := run(t, tool("ffmpeg"), append(args, "-y", output)...)
+			if tt.codec == "libsvtav1" && !bytes.Contains(log, []byte("SVT-AV1 Encoder Lib v4.3.0")) {
+				t.Fatalf("bundled SVT version = %s, want 4.3.0", log)
+			}
 			format := strings.TrimSpace(string(run(t, tool("ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=pix_fmt", "-of", "default=noprint_wrappers=1:nokey=1", output)))
 			if format != "yuv420p10le" {
 				t.Errorf("%s pixel format = %s, want yuv420p10le", tt.codec, format)
 			}
-			run(t, tool("ffmpeg"), "-v", "error", "-i", output, "-f", "null", "-")
+			if tt.codec == "libsvtav1" {
+				codec := strings.TrimSpace(string(run(t, tool("ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1", output)))
+				if codec != "av1" {
+					t.Errorf("SVT output codec = %s, want av1", codec)
+				}
+			}
+			run(t, tool("ffmpeg"), "-v", "error", "-xerror", "-i", output, "-f", "null", "-")
 		})
 	}
 	run(t, tool("ffmpeg"), "-v", "error", "-f", "lavfi", "-i", "sine=duration=1", "-c:a", "libfdk_aac", "-vbr", "5", "-y", filepath.Join(work, "audio.m4a"))

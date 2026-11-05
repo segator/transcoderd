@@ -1,0 +1,133 @@
+{
+  "fixed_profile": [
+    {
+      "scene": "Film middle (1800s)",
+      "crf": 25,
+      "video_bytes_change_percent": 1.937954606170944,
+      "observed_time_reduction_percent": 7.169280618489903,
+      "timing_contended": false,
+      "worst_frame_delta": -0.37153299999999945,
+      "worst_delta_frame": 473,
+      "vmaf_mean_delta": -0.019664222222232297,
+      "vmaf_p5_delta": -0.11734399999998857,
+      "vmaf_p1_delta": 0.002670000000009054,
+      "ssim_delta": 0.00011666319444447737,
+      "psnr_delta": 0.02158401944264199
+    },
+    {
+      "scene": "Film late (3600s)",
+      "crf": 25,
+      "video_bytes_change_percent": 0.7714337985805564,
+      "observed_time_reduction_percent": 6.461748054914251,
+      "timing_contended": false,
+      "worst_frame_delta": -0.6868329999999929,
+      "worst_delta_frame": 9,
+      "vmaf_mean_delta": -0.009066993055554917,
+      "vmaf_p5_delta": 0.032859999999999445,
+      "vmaf_p1_delta": 0.25070700000000556,
+      "ssim_delta": 0.0002739305555554683,
+      "psnr_delta": 0.0241938191960287
+    },
+    {
+      "scene": "Film end (5400s)",
+      "crf": 25,
+      "video_bytes_change_percent": 1.998619940600066,
+      "observed_time_reduction_percent": 8.088624803714861,
+      "timing_contended": false,
+      "worst_frame_delta": -0.7004459999999995,
+      "worst_delta_frame": 252,
+      "vmaf_mean_delta": -0.028503901041659674,
+      "vmaf_p5_delta": 0.1905049999999875,
+      "vmaf_p1_delta": 0.12042600000000903,
+      "ssim_delta": 8.206944444444364e-05,
+      "psnr_delta": 0.0176466543671836
+    }
+  ],
+  "quality_matched_estimates": [
+    {
+      "crf": 24.931278764364748,
+      "seconds_median": 4.811803884858294,
+      "vmaf_mean": 92.20380484027778,
+      "vmaf_p5": 89.89931334466733,
+      "vmaf_p1": 89.2136001014685,
+      "scene": "Film middle (1800s)",
+      "matched_metric": "vmaf_mean",
+      "interpolated": true,
+      "bytes_change_percent": 3.4955547934499176,
+      "time_reduction_percent": 7.064071258587468,
+      "remaining_mean_delta": 0.0,
+      "remaining_p5_delta": -0.0902596553326589
+    },
+    {
+      "crf": 24.70226251462124,
+      "seconds_median": 4.829957118293939,
+      "vmaf_mean": 92.26933664257776,
+      "vmaf_p5": 89.989573,
+      "vmaf_p1": 89.31549950769437,
+      "scene": "Film middle (1800s)",
+      "matched_metric": "vmaf_p5",
+      "interpolated": true,
+      "bytes_change_percent": 8.860187113019592,
+      "time_reduction_percent": 6.713456884150826,
+      "remaining_mean_delta": 0.06553180229997224,
+      "remaining_p5_delta": 0.0
+    },
+    {
+      "crf": 24.973039108276243,
+      "seconds_median": 5.498210502794133,
+      "vmaf_mean": 92.722882859375,
+      "vmaf_p5": 86.46399563898466,
+      "vmaf_p1": 81.37215816230635,
+      "scene": "Film late (3600s)",
+      "matched_metric": "vmaf_mean",
+      "interpolated": true,
+      "bytes_change_percent": 1.3588296549064793,
+      "time_reduction_percent": 6.473036831117884,
+      "remaining_mean_delta": 0.0,
+      "remaining_p5_delta": 0.04867463898465019
+    },
+    {
+      "crf": 25.069712430918713,
+      "seconds_median": 5.49766427208989,
+      "vmaf_mean": 92.6930879765874,
+      "vmaf_p5": 86.415321,
+      "vmaf_p1": 81.33404385544111,
+      "scene": "Film late (3600s)",
+      "matched_metric": "vmaf_p5",
+      "interpolated": true,
+      "bytes_change_percent": -0.5001524949468483,
+      "time_reduction_percent": 6.482328454079855,
+      "remaining_mean_delta": -0.029794882787598453,
+      "remaining_p5_delta": 0.0
+    },
+    {
+      "crf": 24.92454638863324,
+      "seconds_median": 4.550391379837375,
+      "vmaf_mean": 90.38226736631944,
+      "vmaf_p5": 86.82141168407928,
+      "vmaf_p1": 83.48384003790379,
+      "scene": "Film end (5400s)",
+      "matched_metric": "vmaf_mean",
+      "interpolated": true,
+      "bytes_change_percent": 3.9615472367769744,
+      "time_reduction_percent": 7.8440750158995876,
+      "remaining_mean_delta": 0.0,
+      "remaining_p5_delta": 0.22858168407927337
+    },
+    {
+      "crf": 25.44956826060585,
+      "seconds_median": 4.53968366309219,
+      "vmaf_mean": 90.20332431179017,
+      "vmaf_p5": 86.59283,
+      "vmaf_p1": 83.09724688596371,
+      "scene": "Film end (5400s)",
+      "matched_metric": "vmaf_p5",
+      "interpolated": true,
+      "bytes_change_percent": -6.531155424937218,
+      "time_reduction_percent": 8.060930986903013,
+      "remaining_mean_delta": -0.17894305452927028,
+      "remaining_p5_delta": 0.0
+    }
+  ],
+  "note": "Estimates interpolate between measured adjacent CRFs; CRF is integer in worker configuration. Matching one metric does not match all metrics."
+}

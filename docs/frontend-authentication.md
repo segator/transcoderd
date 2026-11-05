@@ -1,6 +1,6 @@
 # Frontend authentication, Authentik and Kubernetes
 
-The fleet UI is its own `transcoderd-frontend` Docker runtime. It can run on another server or a k3s cluster behind Traefik and Let's Encrypt. It needs network access to the API, and in OIDC mode to the identity provider, without media folders, PostgreSQL or FFmpeg. The published frontend image currently targets Linux amd64; the example selects matching Kubernetes nodes.
+The fleet UI is its own `transcoderd-frontend` Docker runtime. It can run on another server or a k3s cluster behind Traefik and Let's Encrypt. It needs network access to the API, and in OIDC mode to the identity provider, without media folders, PostgreSQL or FFmpeg. Frontend image publication now includes Linux amd64 and arm64 under the same tag. Select a released multi-platform version or index digest before scheduling ARM64 nodes; older published tags retain their original architecture. The Kubernetes example selects Linux without pinning one CPU architecture.
 
 ## Choose an authentication mode
 

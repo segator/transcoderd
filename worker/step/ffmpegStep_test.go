@@ -52,6 +52,11 @@ func TestFFMPEGGeneratorVideoProfiles(t *testing.T) {
 		{
 			name: "SVT CPU",
 			cfg:  config.FFMPEGConfig{VideoCodec: config.AV1SVT},
+			want: []string{"-pix_fmt", "yuv420p10le", "-c:v", "libsvtav1", "-preset", "4", "-crf", "26"},
+		},
+		{
+			name: "SVT CPU explicit previous quality",
+			cfg:  config.FFMPEGConfig{VideoCodec: config.AV1SVT, VideoCRF: 25},
 			want: []string{"-pix_fmt", "yuv420p10le", "-c:v", "libsvtav1", "-preset", "4", "-crf", "25"},
 		},
 		{

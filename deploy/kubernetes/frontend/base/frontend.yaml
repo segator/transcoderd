@@ -30,7 +30,14 @@ spec:
       automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/os: linux
-        kubernetes.io/arch: amd64
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values: [amd64, arm64]
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -39,7 +46,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: frontend
-          # Select a released version/digest containing the OIDC feature before deploying.
+          # Select a released multi-platform version/digest before using ARM64 nodes.
           image: ghcr.io/segator/transcoderd:frontend-main
           ports:
             - name: http

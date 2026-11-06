@@ -59,7 +59,7 @@ func seedDashboard(t *testing.T, repo Repository, now time.Time) {
 		}
 	}
 	for _, name := range []string{"gpu", "cpu"} {
-		if err := repo.PingServerUpdate(ctx, "127.0.0.1", model.PingEventType{Event: model.Event{WorkerName: name}, Runtime: &model.WorkerRuntime{Kind: name, Encoder: "av1_nvenc", MaxActiveJobs: 2, MaxEncodes: 2}}); err != nil {
+		if err := repo.PingServerUpdate(ctx, "127.0.0.1", model.PingEventType{Event: model.Event{WorkerName: name}, Runtime: &model.WorkerRuntime{Version: "v2.13.2", Kind: name, Encoder: "av1_nvenc", MaxActiveJobs: 2, MaxEncodes: 2}}); err != nil {
 			t.Fatal(err)
 		}
 	}

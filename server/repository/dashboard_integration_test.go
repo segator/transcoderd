@@ -161,6 +161,11 @@ func TestDashboardPostgres(t *testing.T) {
 		if len(d.Workers) != 2 || d.Workers[0].DesiredMax == nil || *d.Workers[0].DesiredMax != 4 || d.Workers[0].Runtime == nil {
 			t.Errorf("SQL workers = %+v, want telemetry and desired per-name limit", d.Workers)
 		}
+		for _, worker := range d.Workers {
+			if worker.Runtime == nil || worker.Runtime.Version != "v2.13.2" {
+				t.Fatalf("SQL worker version lost: %+v", worker.Runtime)
+			}
+		}
 		if len(d.Jobs) != 7 || d.Jobs[0].State != "active" {
 			t.Errorf("SQL jobs = %+v", d.Jobs)
 		}

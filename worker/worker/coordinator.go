@@ -7,6 +7,7 @@ import (
 	"sync"
 	"transcoder/model"
 	"transcoder/update"
+	"transcoder/version"
 	"transcoder/worker/console"
 	"transcoder/worker/serverclient"
 
@@ -202,7 +203,7 @@ func (e *JobExecutor) RuntimeTelemetry() *model.WorkerRuntime {
 	case status.GPUJobs > 0:
 		kind = "gpu"
 	}
-	runtime := &model.WorkerRuntime{ControlVersion: 2, Encoder: encoder, Kind: kind, Accepting: status.Accepting,
+	runtime := &model.WorkerRuntime{Version: version.Version, ControlVersion: 2, Encoder: encoder, Kind: kind, Accepting: status.Accepting,
 		WithinSchedule: status.WithinSchedule, ActiveJobs: status.ActiveJobs, ReservedJobs: status.ReservedJobs,
 		MaxActiveJobs: status.MaxActiveJobs, ActiveEncodes: status.ActiveEncodes, MaxEncodes: status.MaxEncodes,
 		CapacityVersion: 2, CPUJobs: status.CPUJobs, GPUJobs: status.GPUJobs,

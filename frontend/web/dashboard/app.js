@@ -513,7 +513,7 @@
     }
     const max = Math.max(1, ...workers.map((w) => w.completed + w.failed));
     $("worker-chart").innerHTML =
-      `<div class="horizontal-chart">${workers.map((w) => `<a class="worker-summary-link" href="${esc(resources.link(w.name))}"><div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} failures</span></div>${w.online ? resources.summary(w, Date.parse(data.generatedAt)) : badge("offline", "Offline")}<div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div><span class="worker-details-link">Resource details ↗</span></a>`).join("")}</div>`;
+      `<div class="horizontal-chart">${workers.map((w) => `<a class="worker-summary-link" href="${esc(resources.link(w.name))}"><div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} failures</span></div>${resources.softwareVersion(w)}${w.online ? resources.summary(w, Date.parse(data.generatedAt)) : badge("offline", "Offline")}<div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div><span class="worker-details-link">Resource details ↗</span></a>`).join("")}</div>`;
   }
   function renderActivity() {
     if (!data.activity.length) {
@@ -681,7 +681,7 @@
     $("worker-cards").innerHTML = visible
       .map((w, i) => {
         if (!w.online)
-          return `<article class="panel worker-card worker-offline"><div class="worker-heading"><div><h2>${esc(w.name)}</h2><p>Last seen ${age(w.lastSeen)}</p></div>${badge("offline", "Offline")}</div><p class="media-help">${esc(w.ip || "Address unavailable")} · Offline</p></article>`;
+          return `<article class="panel worker-card worker-offline"><div class="worker-heading"><div><h2>${esc(w.name)}</h2><p>Last seen ${age(w.lastSeen)}</p>${resources.softwareVersion(w)}</div>${badge("offline", "Offline")}</div><p class="media-help">${esc(w.ip || "Address unavailable")} · Offline</p></article>`;
         const rt = w.runtime,
           modern = rt?.capacityVersion >= 2;
         const profile = resources.profile(w);
@@ -747,7 +747,7 @@
                   : paused
                     ? "Queue stopped. Active encodes finish; queued encodes wait."
                     : "";
-        return `<article class="panel worker-card" data-worker="${esc(w.name)}"><div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${esc(profileLabel)}</p></div>${badge(...status)}</div><p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.managedProfile ? " · shared host resources" : ""}</p>${resources.summary(w, Date.parse(data.generatedAt))}${resources.compact(w, resourceHistory, Date.parse(data.generatedAt))}<a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">View resource details ↗</a><div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div><form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs">${input("cpu", profile.cpu)}${input("gpu", profile.gpu)}</div><div class="capacity-controls"><button class="button primary" type="submit" ${disabled ? "disabled" : ""}>${busy ? "Saving…" : "Save limits"}</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>${controls}${workerTasks(w)}<div class="worker-footer"><span>${esc(w.ip)} · ${age(w.lastSeen)}</span><span>Period: ${integer.format(w.completed)} completed · ${integer.format(w.failed)} failed · ${bytes(w.sourceBytes - w.targetBytes)} saved</span></div></article>`;
+        return `<article class="panel worker-card" data-worker="${esc(w.name)}"><div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${esc(profileLabel)}</p>${resources.softwareVersion(w)}</div>${badge(...status)}</div><p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.managedProfile ? " · shared host resources" : ""}</p>${resources.summary(w, Date.parse(data.generatedAt))}${resources.compact(w, resourceHistory, Date.parse(data.generatedAt))}<a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">View resource details ↗</a><div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div><form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs">${input("cpu", profile.cpu)}${input("gpu", profile.gpu)}</div><div class="capacity-controls"><button class="button primary" type="submit" ${disabled ? "disabled" : ""}>${busy ? "Saving…" : "Save limits"}</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>${controls}${workerTasks(w)}<div class="worker-footer"><span>${esc(w.ip)} · ${age(w.lastSeen)}</span><span>Period: ${integer.format(w.completed)} completed · ${integer.format(w.failed)} failed · ${bytes(w.sourceBytes - w.targetBytes)} saved</span></div></article>`;
       })
       .join("");
     applyWidths($("worker-cards"));

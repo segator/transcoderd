@@ -16,6 +16,7 @@ import (
 	"transcoder/server/repository"
 	"transcoder/server/scheduler"
 	"transcoder/server/web"
+	"transcoder/version"
 	"transcoder/worker/config"
 	"transcoder/worker/control"
 	localdashboard "transcoder/worker/dashboard"
@@ -42,6 +43,7 @@ func TestHardwareTelemetryHeartbeatToDashboard(t *testing.T) {
 	executor := testAdmissionWorker(1)
 	executor.resources = &fixedResourceSampler{sample: &model.WorkerResources{SampledAt: time.Now().UTC(), Hostname: "host", CPU: &model.CPUResources{Percent: &zero, Cores: 8, Scope: "host"}, Memory: &model.MemoryResources{UsedBytes: 50, TotalBytes: 100}, GPUStatus: "available", GPUs: []model.GPUResources{{UUID: "gpu-a", EncoderPercent: &encode}}}}
 	client := serverclient.NewServerClient(&web.Config{Domain: fleet.URL, Token: "worker-api"}, "hardware-node")
+	expectedVersion := version.Version
 	read := func() *model.WorkerResources {
 		t.Helper()
 		r, _ := http.NewRequestWithContext(t.Context(), "GET", fleet.URL+"/dashboard/api/stats", nil)
@@ -58,6 +60,9 @@ func TestHardwareTelemetryHeartbeatToDashboard(t *testing.T) {
 		if response.StatusCode != 200 || len(dashboard.Workers) != 1 {
 			t.Fatalf("dashboard response = %d %+v", response.StatusCode, dashboard.Workers)
 		}
+		if got := dashboard.Workers[0].Runtime.Version; got != expectedVersion {
+			t.Fatalf("heartbeat worker version = %q, want %q", got, expectedVersion)
+		}
 		return dashboard.Workers[0].Runtime.Resources
 	}
 	if err := client.PublishPingEvent(executor.RuntimeTelemetry()); err != nil {
@@ -73,6 +78,17 @@ func TestHardwareTelemetryHeartbeatToDashboard(t *testing.T) {
 	}
 	if got := read(); got != nil {
 		t.Fatalf("older worker readings fabricated: %+v", got)
+	}
+
+	// The API echoes the worker's value, including a different release and legacy omission.
+	for _, reported := range []string{"v2.10.0", ""} {
+		expectedVersion = reported
+		if err := client.PublishPingEvent(&model.WorkerRuntime{Version: reported}); err != nil {
+			t.Fatal(err)
+		}
+		if got := read(); got != nil {
+			t.Fatalf("resources fabricated for version-only heartbeat: %+v", got)
+		}
 	}
 }
 

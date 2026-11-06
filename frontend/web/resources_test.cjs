@@ -47,3 +47,14 @@ test('compact history plots only relevant profile measurements and identifies st
  w.runtime.encoder='av1_nvenc';html=r.compact(w,h,now);assert.match(html,/GPU/);assert.match(html,/NVENC/);assert.doesNotMatch(html,/>CPU</);
  assert.match(r.compact(w,h,now+21000),/live graph unavailable/);
 });
+
+test('software versions use reported values, preserve offline scope and escape text',()=>{
+ const w=worker();w.runtime.version='v2.13.3';
+ assert.match(r.softwareVersion(w),/Version v2.13.3/);
+ const h=new r.History();assert.match(r.details(w,h,now),/Version v2.13.3/);
+ w.online=false;assert.match(r.softwareVersion(w),/last reported/);
+ w.runtime.version='<img src=x onerror=alert(1)>';assert.doesNotMatch(r.softwareVersion(w),/<img/);assert.match(r.softwareVersion(w),/&lt;img/);
+ for(const runtime of [null,{}, {controlVersion:2}, {version:''}, {version:'   '}, {version:123}]) {
+  assert.match(r.softwareVersion({...w,runtime}),/Version unavailable/);
+ }
+});

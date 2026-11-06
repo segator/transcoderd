@@ -29,7 +29,7 @@ def job(state, index):
 def worker(name, kind="cpu", online=True):
     return dict(name=name, online=online, lastSeen=NOW, ip="127.0.0.1",
                 completed=0, failed=0, sourceBytes=0, targetBytes=0, activeJobs=0,
-                runtime=dict(managedProfile=True, capacityVersion=2, controlVersion=2, maxActiveJobs=2, kind=kind,
+                runtime=dict(version="v2.13.2", managedProfile=True, capacityVersion=2, controlVersion=2, maxActiveJobs=2, kind=kind,
                              encoder="libsvtav1" if kind == "cpu" else "av1_nvenc",
                              cpuEncoder="libsvtav1", gpuEncoder="av1_nvenc",
                              cpuJobs=2 if kind == "cpu" else 0,
@@ -173,6 +173,13 @@ def main():
             expect(gpu.locator('input[name="gpuJobs"]')).to_be_visible()
             expect(gpu.locator(".resource-summary")).not_to_contain_text("CPU")
             expect(cpu).to_contain_text("shared host windows-host")
+            expect(cpu.locator(".worker-version")).to_have_text("Version v2.13.2")
+            expect(page.locator(".worker-offline .worker-version").first).to_have_text("Version v2.13.2 · last reported")
+            workers[0]["runtime"]["version"] = "v2.13.3"
+            workers[1]["runtime"].pop("version")
+            page.locator("#refresh").click()
+            expect(cpu.locator(".worker-version")).to_have_text("Version v2.13.3")
+            expect(gpu.locator(".worker-version")).to_have_text("Version unavailable")
             expect(cpu.locator(".resource-card-history svg")).to_have_count(1)
             expect(gpu.locator(".resource-card-history svg")).to_have_count(1)
             expect(cpu.locator(".resource-card-history")).to_contain_text("RAM")
@@ -224,6 +231,7 @@ def main():
             expect(page.locator("#worker-cards > article")).to_have_count(2)
             page.evaluate("location.hash='workers?worker=windows-gpu'")
             expect(page.locator("#worker-resource-detail")).to_contain_text("NVIDIA Test GPU")
+            expect(page.locator("#worker-resource-detail .worker-version")).to_have_text("Version unavailable")
             expect(page.locator("#worker-resource-detail")).not_to_contain_text("Host CPU")
 
             # Worker snapshots show tasks outside the overview cap, and target only one encode.
@@ -261,6 +269,7 @@ def main():
             # Custom dates include the chosen last day, respecting a DST change.
             page.evaluate("location.hash='overview'")
             expect(page.locator("#page-title")).to_have_text("Overview")
+            expect(page.locator("#worker-chart .worker-version").first).to_have_text("Version v2.13.3")
             page.locator("#period").select_option("custom")
             page.locator("#period-start").fill("2026-10-24")
             page.locator("#period-end").fill("2026-10-26")
@@ -311,6 +320,7 @@ def main():
             workers[0]["runtime"] = None
             page.locator("#refresh").click()
             expect(cpu).to_contain_text("Update worker")
+            expect(cpu.locator(".worker-version")).to_have_text("Version unavailable")
             expect(cpu.locator(".worker-task")).to_have_count(1)
             assert cpu.locator(".worker-task button").count() == 0
             workers[0]["runtime"] = saved_runtime

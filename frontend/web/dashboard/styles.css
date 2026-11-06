@@ -2564,3 +2564,5 @@
     }
   }
 }
+
+.worker-version { display:block; font-size:11px; line-height:1.5; color:var(--muted,#98a5b8); overflow-wrap:anywhere; }

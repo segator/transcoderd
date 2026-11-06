@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.13.2](https://github.com/segator/transcoderd/compare/v2.13.1...v2.13.2) (2026-11-06)
+
+
+### 🐛 Bug Fixes
+
+* **frontend:** streamline fleet UI, reporting ranges and individual encode controls ([#212](https://github.com/segator/transcoderd/issues/212)) ([9779dec](https://github.com/segator/transcoderd/commit/9779dec0ca257dfc3cf53b09c2bab5762aab47e7))
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/go-jose/go-jose/v4 from 4.1.7 to 4.1.8 ([#211](https://github.com/segator/transcoderd/issues/211)) ([b1b7bb8](https://github.com/segator/transcoderd/commit/b1b7bb8e8d2ec6f8fd7b94160bb0334f7c7bf885))
+
 ## [2.13.1](https://github.com/segator/transcoderd/compare/v2.13.0...v2.13.1) (2026-11-05)
 
 

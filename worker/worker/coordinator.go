@@ -202,7 +202,7 @@ func (e *JobExecutor) RuntimeTelemetry() *model.WorkerRuntime {
 	case status.GPUJobs > 0:
 		kind = "gpu"
 	}
-	runtime := &model.WorkerRuntime{ControlVersion: 1, Encoder: encoder, Kind: kind, Accepting: status.Accepting,
+	runtime := &model.WorkerRuntime{ControlVersion: 2, Encoder: encoder, Kind: kind, Accepting: status.Accepting,
 		WithinSchedule: status.WithinSchedule, ActiveJobs: status.ActiveJobs, ReservedJobs: status.ReservedJobs,
 		MaxActiveJobs: status.MaxActiveJobs, ActiveEncodes: status.ActiveEncodes, MaxEncodes: status.MaxEncodes,
 		CapacityVersion: 2, CPUJobs: status.CPUJobs, GPUJobs: status.GPUJobs,
@@ -214,7 +214,13 @@ func (e *JobExecutor) RuntimeTelemetry() *model.WorkerRuntime {
 		runtime.Resources = e.resources.Snapshot()
 	}
 	for _, j := range status.Jobs {
-		runtime.Jobs = append(runtime.Jobs, model.WorkerJobRuntime{ID: j.JobID, Phase: j.Phase, State: j.State, IndividuallyPaused: j.IndividuallyPaused, PausedByWorker: j.PausedByWorker})
+		item := model.WorkerJobRuntime{ID: j.JobID, Name: j.Name, CanPause: j.CanPause, Phase: j.Phase, State: j.State, IndividuallyPaused: j.IndividuallyPaused, PausedByWorker: j.PausedByWorker}
+		for _, p := range status.Progress {
+			if p.JobID == j.JobID && p.Phase == j.Phase {
+				item.Progress = append(item.Progress, model.DashboardProgress{ID: p.StepID, Phase: p.Phase, Percent: p.Percent, ETASeconds: float64(p.ETASeconds), UpdatedAt: time.Now().UTC()})
+			}
+		}
+		runtime.Jobs = append(runtime.Jobs, item)
 	}
 	if cpu, gpu, err := e.workerConfig.EncoderProfiles(); err == nil {
 		if video, err := cpu.ResolveVideoSettings(); err == nil {

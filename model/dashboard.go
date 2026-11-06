@@ -7,11 +7,14 @@ import (
 
 // WorkerRuntime is optional so older workers can continue publishing presence.
 type WorkerJobRuntime struct {
-	ID                 string `json:"id"`
-	Phase              string `json:"phase"`
-	State              string `json:"state"`
-	IndividuallyPaused bool   `json:"individuallyPaused"`
-	PausedByWorker     bool   `json:"pausedByWorker"`
+	Name               string              `json:"name,omitempty"`
+	CanPause           bool                `json:"canPause,omitempty"`
+	Progress           []DashboardProgress `json:"progress,omitempty"`
+	ID                 string              `json:"id"`
+	Phase              string              `json:"phase"`
+	State              string              `json:"state"`
+	IndividuallyPaused bool                `json:"individuallyPaused"`
+	PausedByWorker     bool                `json:"pausedByWorker"`
 }
 
 type WorkerRuntime struct {
@@ -48,6 +51,8 @@ type WorkerRuntime struct {
 type Dashboard struct {
 	GeneratedAt time.Time           `json:"generatedAt"`
 	Hours       int                 `json:"hours"`
+	Range       DashboardRange      `json:"range"`
+	Period      DashboardSummary    `json:"period"`
 	Summary     DashboardSummary    `json:"summary"`
 	Timeline    []DashboardBucket   `json:"timeline"`
 	Workers     []DashboardWorker   `json:"workers"`
@@ -158,6 +163,12 @@ type DashboardJobPage struct {
 }
 
 func (d *Dashboard) Finalize() {
+	d.Period.SavedBytes = d.Period.SourceBytes - d.Period.TargetBytes
+	if d.Period.SourceBytes > 0 {
+		d.Period.CompressionPercent = 100 * float64(d.Period.SavedBytes) / float64(d.Period.SourceBytes)
+	}
+	d.Period.Completed, d.Period.Failed = d.Summary.CompletedInRange, d.Summary.FailedInRange
+	d.Period.AverageSeconds = d.Summary.AverageSeconds
 	d.Summary.SavedBytes = d.Summary.SourceBytes - d.Summary.TargetBytes
 	if d.Summary.SourceBytes > 0 {
 		d.Summary.CompressionPercent = 100 * float64(d.Summary.SavedBytes) / float64(d.Summary.SourceBytes)

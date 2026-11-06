@@ -35,26 +35,10 @@
     Upload: "Upload",
   };
   const titles = {
-    library: [
-      "Library",
-      "Your library, visually",
-      "Browse, play and choose which videos to queue.",
-    ],
-    overview: [
-      "Overview",
-      "Your fleet in motion",
-      "Every job, every worker and every byte you save.",
-    ],
-    workers: [
-      "Workers",
-      "Your processing power, your control",
-      "Manage each worker profile and its supported encoders, without restarting.",
-    ],
-    jobs: [
-      "Jobs",
-      "Every file has a story",
-      "Track the phases, progress and outcome of every job.",
-    ],
+    overview: "Overview",
+    workers: "Workers",
+    jobs: "Jobs",
+    library: "Library",
   };
   const resources = window.TranscoderResources;
   const resourceHistory = new resources.History();
@@ -65,6 +49,7 @@
     jobSearchTimer;
   let data = null,
     hours = 168,
+    customRange = null,
     filter = "all",
     fetching = false,
     refreshQueued = false,
@@ -101,7 +86,7 @@
     return `${Math.floor(seconds / 86400)} d ago`;
   }
   function empty(title, detail = "") {
-    return `<div class="empty-state"><span class="empty-icon" aria-hidden="true">◌</span><strong>${esc(title)}</strong><p>${esc(detail)}</p></div>`;
+    return `<div class="empty-state"><strong>${esc(title)}</strong>${detail ? `<p>${esc(detail)}</p>` : ""}</div>`;
   }
   function badge(state, label) {
     return `<span class="badge ${esc(state)}">${esc(label ?? stateNames[state] ?? state)}</span>`;
@@ -164,10 +149,10 @@
     }
     fetching = true;
     $("refresh").disabled = true;
-    const requestedHours = hours;
+    const requestedPeriod = periodQuery();
     try {
-      const next = await api(`stats?hours=${requestedHours}`);
-      if (requestedHours !== hours) return;
+      const next = await api(`stats?${requestedPeriod}`);
+      if (requestedPeriod !== periodQuery()) return;
       data = next;
       $("error-banner").hidden = true;
       $("loading").hidden = true;
@@ -191,7 +176,7 @@
     } finally {
       fetching = false;
       $("refresh").disabled = false;
-      if (requestedHours !== hours || refreshQueued) {
+      if (requestedPeriod !== periodQuery() || refreshQueued) {
         refreshQueued = false;
         refresh();
       } else schedule();
@@ -214,6 +199,7 @@
       .map((w) => `<i class="${w.online ? "" : "offline"}"></i>`)
       .join("");
     renderMetrics();
+    $("period-scope").textContent = rangeLabel();
     renderThroughput();
     renderImpact();
     renderQueue();
@@ -256,46 +242,122 @@
     const success = outcomes
       ? number.format((100 * s.completedInRange) / outcomes)
       : "—";
-    const saved = bytes(s.savedBytes).split(" ");
+    const p = periodSummary();
+    const saved = bytes(p.savedBytes).split(" ");
     const cards = [
       [
         "Space saved",
         "↙",
         `${saved[0]}<small>${saved[1]}</small>`,
-        `<span class="positive">${s.sourceBytes ? `${number.format(s.compressionPercent)} % less space` : "Waiting for the first result"}</span> · all time`,
+        p.sourceBytes
+          ? `${number.format(p.compressionPercent)}% reduction`
+          : "No measured sizes",
       ],
       [
-        "Completed jobs",
+        "Completed",
         "✓",
         integer.format(s.completedInRange),
-        `${integer.format(s.completed)} total · <span class="positive">${integer.format(s.queued)} queued</span>`,
-      ],
-      [
-        "Active encodes",
-        "ϟ",
-        live.length ? `${encodes}<small>/ ${target} slots</small>` : "—",
-        split.length
-          ? `<span class="positive">CPU ${cpuActive}</span> · <span class="purple-text">GPU ${gpuActive}</span> · ${integer.format(s.active)} active jobs`
-          : `${integer.format(s.active)} active jobs · CPU/GPU breakdown unavailable`,
+        `${integer.format(s.failedInRange)} failed`,
       ],
       [
         "Success rate",
         "↗",
         `${success}${outcomes ? "<small>%</small>" : ""}`,
-        `${integer.format(s.failedInRange)} failed · average ${duration(s.averageSeconds)} / job`,
+        "Excludes canceled jobs",
+      ],
+      ["Average time", "◷", duration(s.averageSeconds), "Per completed job"],
+    ];
+    const global = [
+      [
+        "Space saved · All time",
+        "↙",
+        bytes(s.savedBytes),
+        `${number.format(s.compressionPercent)}% reduction`,
+      ],
+      [
+        "Completed · All time",
+        "✓",
+        integer.format(s.completed),
+        `${integer.format(s.failed)} failed`,
+      ],
+      [
+        "Active encodes · Live",
+        "ϟ",
+        live.length ? `${encodes}<small>/ ${target}</small>` : "—",
+        split.length
+          ? `CPU ${cpuActive} · GPU ${gpuActive}`
+          : `${integer.format(s.active)} active jobs`,
+      ],
+      [
+        "Queue · Live",
+        "▥",
+        integer.format(s.queued),
+        `${integer.format(s.active)} active jobs`,
       ],
     ];
-    $("metrics").innerHTML = cards
-      .map(
-        (c) =>
-          `<article class="metric-card"><div class="metric-label"><span>${c[0]}</span><span class="metric-symbol" aria-hidden="true">${c[1]}</span></div><div class="metric-value">${c[2]}</div><p class="metric-caption">${c[3]}</p></article>`,
-      )
-      .join("");
+    const card = (c) =>
+      `<article class="metric-card"><div class="metric-label"><span>${c[0]}</span><span class="metric-symbol" aria-hidden="true">${c[1]}</span></div><div class="metric-value">${c[2]}</div><p class="metric-caption">${c[3]}</p></article>`;
+    $("metrics").innerHTML = cards.map(card).join("");
+    $("global-metrics").innerHTML = global.map(card).join("");
+  }
+  function periodSummary() {
+    // Range sizes can also be calculated from the same filtered timeline when
+    // a frontend is deployed before its API upgrade.
+    const p =
+      data.period ||
+      data.timeline.reduce(
+        (p, b) => ({
+          sourceBytes: p.sourceBytes + b.sourceBytes,
+          targetBytes: p.targetBytes + b.targetBytes,
+        }),
+        { sourceBytes: 0, targetBytes: 0 },
+      );
+    const savedBytes = p.sourceBytes - p.targetBytes;
+    return {
+      ...p,
+      savedBytes,
+      compressionPercent: p.sourceBytes
+        ? (100 * savedBytes) / p.sourceBytes
+        : 0,
+    };
+  }
+  function periodQuery() {
+    return customRange
+      ? new URLSearchParams(customRange).toString()
+      : `hours=${hours}`;
+  }
+  function rangeLabel() {
+    const start = customRange?.start || data?.range?.start;
+    const end = customRange?.end || data?.range?.end;
+    if (!start || !end) return $("period").selectedOptions[0].textContent;
+    const format = (date) =>
+      new Date(date).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    if (customRange) {
+      const day = (date) =>
+        new Date(date).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+      return `${day(start)} – ${day(Date.parse(end) - 1)} · local dates`;
+    }
+    return `${format(start)} – ${format(end)}`;
   }
   const chartDate = (time) =>
     new Date(time).toLocaleString(
       "en-US",
-      hours === 24
+      (
+        data.range
+          ? Date.parse(data.range.end) - Date.parse(data.range.start) <=
+            86400000
+          : hours === 24
+      )
         ? { hour: "2-digit", minute: "2-digit" }
         : { day: "numeric", month: "short" },
     );
@@ -305,10 +367,7 @@
     $("throughput-total").textContent =
       `${integer.format(s.completedInRange)} completed`;
     if (!s.completedInRange && !s.failedInRange) {
-      $("throughput-chart").innerHTML = empty(
-        "Your next result starts here",
-        "Completions and failures will appear in this chart as they arrive.",
-      );
+      $("throughput-chart").innerHTML = empty("No outcomes in this period", "");
       return;
     }
     const width = 660,
@@ -349,12 +408,9 @@
       `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${s.completedInRange} completed jobs and ${s.failedInRange} failed in the selected period"><defs><linearGradient id="throughput-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#b7ef79" stop-opacity=".16"/><stop offset="100%" stop-color="#b7ef79" stop-opacity="0"/></linearGradient></defs>${grid}<path class="chart-area" d="${points("completed")} L${x(buckets.length - 1)},${y(0)} L${x(0)},${y(0)} Z"/><path class="chart-line" d="${points("completed")}"/><path class="chart-failed" d="${points("failed")}"/>${buckets.map((b, i) => `<circle class="chart-point" cx="${x(i)}" cy="${y(b.completed)}" r="${b.completed > 0 ? 3 : 0}"/><rect class="chart-hover" x="${Math.max(left, x(i) - 8)}" y="${top}" width="16" height="${height - bottom - top}"><title>${esc(chartDate(b.time))}: ${b.completed} completed · ${b.failed} failed</title></rect>`).join("")}${labelIndices.map((i, n) => `<text class="chart-label" x="${x(i)}" y="${height - 7}" text-anchor="${n === 0 ? "start" : n === labelIndices.length - 1 ? "end" : "middle"}">${esc(chartDate(buckets[i].time))}</text>`).join("")}</svg>`;
   }
   function renderImpact() {
-    const s = data.summary;
+    const s = periodSummary();
     if (!s.sourceBytes) {
-      $("storage-impact").innerHTML = empty(
-        "Savings are measured on completion",
-        "Verified final sizes are compared with their source files.",
-      );
+      $("storage-impact").innerHTML = empty("No measured savings", "");
       return;
     }
     $("storage-impact").innerHTML =
@@ -363,10 +419,7 @@
   function renderQueue() {
     const s = data.summary;
     if (!s.total) {
-      $("queue-chart").innerHTML = empty(
-        "Ready to get started",
-        "Add files through the library or TranscoderD API to see your queue.",
-      );
+      $("queue-chart").innerHTML = empty("No jobs", "");
       return;
     }
     const segments = [
@@ -396,10 +449,7 @@
       0,
     );
     if (!buckets.some((b) => b.sourceBytes)) {
-      $("savings-chart").innerHTML = empty(
-        "See your savings over time",
-        "See how much space you save in each interval.",
-      );
+      $("savings-chart").innerHTML = empty("No savings in this period", "");
       return;
     }
     const width = 360,
@@ -429,10 +479,7 @@
   }
   function renderCodecs() {
     if (!data.codecs.length) {
-      $("codec-chart").innerHTML = empty(
-        "No codecs to compare yet",
-        "Based on finalized file sizes, grouped by output codec.",
-      );
+      $("codec-chart").innerHTML = empty("No completed outputs", "");
       return;
     }
     $("codec-chart").innerHTML = `<div class="horizontal-chart">${data.codecs
@@ -454,22 +501,16 @@
       )
       .slice(0, 6);
     if (!workers.length) {
-      $("worker-chart").innerHTML = empty(
-        "Your fleet is on its way",
-        "Workers appear after their first heartbeat.",
-      );
+      $("worker-chart").innerHTML = empty("No recent workers", "");
       return;
     }
     const max = Math.max(1, ...workers.map((w) => w.completed + w.failed));
     $("worker-chart").innerHTML =
-      `<div class="horizontal-chart">${workers.map((w) => `<a class="worker-summary-link" href="${esc(resources.link(w.name))}"><div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} failures</span></div>${w.online ? resources.summary(w, Date.parse(data.generatedAt)) : badge("offline", "Offline")}<div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div><span class="worker-details-link">Resource details ↗</span></a>`).join("")}</div><p class="worker-chart-footer">Job outcomes in the selected period · measured host/device usage. Multi-GPU summaries show the highest reported value for each metric.</p>`;
+      `<div class="horizontal-chart">${workers.map((w) => `<a class="worker-summary-link" href="${esc(resources.link(w.name))}"><div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} failures</span></div>${w.online ? resources.summary(w, Date.parse(data.generatedAt)) : badge("offline", "Offline")}<div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div><span class="worker-details-link">Resource details ↗</span></a>`).join("")}</div>`;
   }
   function renderActivity() {
     if (!data.activity.length) {
-      $("activity-feed").innerHTML = empty(
-        "No events in this period",
-        "Assignments, completions and errors will appear here.",
-      );
+      $("activity-feed").innerHTML = empty("No events in this period", "");
       return;
     }
     $("activity-feed").innerHTML = data.activity
@@ -499,7 +540,7 @@
       j.progress.reduce((n, p) => n + p.percent, 0) / j.progress.length;
     const eta = Math.max(...j.progress.map((p) => p.etaSeconds));
     const stale = j.progress.some((p) => p.stale);
-    return `<div class="load-labels"><span>${esc((phases[j.phase] ?? j.phase) + (j.message ? " · " + j.message : ""))}</span><strong>${number.format(percent)} %</strong></div><div class="progress-track"><span data-width="${percent}"></span></div><div class="progress-caption ${stale ? "stale" : ""}"><span>${stale ? "Outdated progress" : "Phase ETA: " + duration(eta)}</span><span>${j.progress.length > 1 ? `${j.progress.length} subtasks` : ""}</span></div>`;
+    return `<div class="load-labels"><span>${esc((phases[j.phase] ?? j.phase) + (j.message ? " · " + j.message : ""))}</span><strong>${number.format(percent)} %</strong></div><div class="progress-track"><span data-width="${percent}"></span></div><div class="progress-caption ${stale ? "stale" : ""}"><span>${stale ? "Outdated progress" : j.held ? "Progress retained" : "Phase ETA: " + duration(eta)}</span><span>${j.progress.length > 1 ? `${j.progress.length} subtasks` : ""}</span></div>`;
   }
   function observedJob(job) {
     if (job.state !== "active") return null;
@@ -528,17 +569,12 @@
   function observedProgress(job) {
     const local = observedJob(job);
     if (local?.state === "paused")
-      return `<span class="muted">${job.progress?.length ? number.format(job.progress[0].percent) + "% · " : ""}Paused in RAM · progress retained</span>`;
-    if (local?.queueHeld)
-      return '<span class="muted">Waiting for the queue to resume</span>';
+      return `<span class="muted">${job.progress?.length ? number.format(job.progress[0].percent) + "% · " : ""}Paused in RAM</span>`;
+    if (local?.queueHeld) return '<span class="muted">Queue held</span>';
     return jobProgress(job);
   }
   function jobsTable(jobs) {
-    if (!jobs.length)
-      return empty(
-        "No jobs to display",
-        "Files appear here when they are queued or you change the filter.",
-      );
+    if (!jobs.length) return empty("No jobs", "");
     return `<table><thead><tr><th>File</th><th>Status</th><th>Worker</th><th>Progress / result</th><th>Updated</th><th>Video</th></tr></thead><tbody>${jobs.map((j) => `<tr><td class="file-cell"><div class="file-name"><span aria-hidden="true">▹</span><div><strong title="${esc(j.sourcePath)}">${esc(basename(j.sourcePath))}</strong><small title="${esc(j.id)}">${bytes(j.sourceBytes)} · ${esc(j.id.slice(0, 8))}</small></div></div></td><td>${jobBadge(j)}</td><td>${esc(j.worker || "—")}</td><td><div class="job-progress">${observedProgress(j)}</div></td><td title="${esc(new Date(j.updatedAt).toLocaleString("en-US"))}">${age(j.updatedAt)}</td><td>${["queued", "completed"].includes(j.state) ? `<button type="button" class="button media-job-play" data-job-media="${esc(j.id)}" aria-label="Play ${j.state === "completed" ? "completed output" : "queued source"} ${esc(basename(j.sourcePath))}">▷ View ${j.state === "completed" ? "output" : "source"}</button>` : `<span class="muted">—</span>`}</td></tr>`).join("")}</tbody></table>`;
   }
   function pagination(total, offset, limit, kind) {
@@ -601,22 +637,25 @@
   }
   function visibleWorkers() {
     if (!data) return [];
-    const since = Date.parse(data.generatedAt) - hours * 3600000;
+    const since = customRange
+      ? Date.parse(customRange.start)
+      : Date.parse(data.generatedAt) - hours * 3600000;
+    const until = customRange ? Date.parse(customRange.end) : Infinity;
     return data.workers.filter(
-      (w) => w.lastSeen && Date.parse(w.lastSeen) >= since,
+      (w) =>
+        w.lastSeen &&
+        Date.parse(w.lastSeen) >= since &&
+        Date.parse(w.lastSeen) < until,
     );
   }
   function renderWorkers() {
     if (!data) return;
     const periodWorkers = visibleWorkers();
     $("worker-scope-note").textContent =
-      `${periodWorkers.length} workers seen in the last ${hours === 24 ? "24 hours" : hours === 168 ? "7 days" : "30 days"} · online and active first. Offline workers show basic information.`;
+      `${periodWorkers.length} workers · last seen in selected period (up to 30 days) · live resources`;
     if (!periodWorkers.length) {
       $("worker-pagination").innerHTML = "";
-      $("worker-cards").innerHTML = empty(
-        "Connect your first worker",
-        "Its name, encoders and status will appear automatically.",
-      );
+      $("worker-cards").innerHTML = empty("No workers in this period", "");
       return;
     }
     const all = periodWorkers.filter(
@@ -635,7 +674,7 @@
     $("worker-cards").innerHTML = visible
       .map((w, i) => {
         if (!w.online)
-          return `<article class="panel worker-card worker-offline"><div class="worker-heading"><div><h2>${esc(w.name)}</h2><p>Last seen ${age(w.lastSeen)}</p></div>${badge("offline", "Offline")}</div><p class="media-help">${esc(w.ip || "Address unavailable")} · Controls become available when this worker reconnects.</p></article>`;
+          return `<article class="panel worker-card worker-offline"><div class="worker-heading"><div><h2>${esc(w.name)}</h2><p>Last seen ${age(w.lastSeen)}</p></div>${badge("offline", "Offline")}</div><p class="media-help">${esc(w.ip || "Address unavailable")} · Offline</p></article>`;
         const rt = w.runtime,
           modern = rt?.capacityVersion >= 2;
         const profile = resources.profile(w);
@@ -668,12 +707,12 @@
         const controlDisabled =
           disabled || !(rt?.controlVersion >= 1) || rt?.draining;
         const controlNote = pendingControl
-          ? `Waiting for worker confirmation: ${command.action}. Usually within 5 seconds.`
+          ? `Waiting for worker confirmation: ${command.action}. `
           : command?.state === "failed"
             ? command.error || "The worker could not apply the control."
             : !(rt?.controlVersion >= 1)
               ? "Update this worker to enable remote RAM and queue controls."
-              : "Pause in RAM suspends active encodes and retains RAM/VRAM. Stop after current lets active encodes finish and holds the queue. Resuming one preserves the other and individual pauses.";
+              : "";
         const controls = `<div class="worker-controls"><button class="button subtle" type="button" data-worker-control="${rt?.ramPaused ? "resume-encodes" : "pause-encodes"}" data-worker-name="${esc(w.name)}" ${controlDisabled || rt?.finishing ? "disabled" : ""}>${rt?.ramPaused ? "Resume encodes" : "Pause in RAM"}</button><button class="button subtle" type="button" data-worker-control="${rt?.maxActiveJobs === 0 ? "resume-queue" : "stop-after-current"}" data-worker-name="${esc(w.name)}" ${controlDisabled ? "disabled" : ""}>${rt?.maxActiveJobs === 0 ? "Resume queue" : "Stop after current"}</button></div><p class="pending-note ${pendingControl ? "pending" : command?.state === "failed" ? "control-error" : ""}">${esc(controlNote)}</p>`;
         const lane = (kind) => {
           const active =
@@ -687,9 +726,9 @@
             : `<input type="hidden" name="${kind}Jobs" value="0">`;
         const profileLabel = rt?.managedProfile
           ? `Windows ${profile.cpu ? "CPU" : "GPU"} profile · shared host${rt.resources?.hostname ? " " + rt.resources.hostname : ""}`
-          : "Independent CPU + GPU worker";
+          : "CPU + GPU worker";
         const note = pending
-          ? `Desired limits pending synchronization${rt.managedProfile ? " for this profile" : ""}.`
+          ? `Limits pending${rt.managedProfile ? " for this profile" : ""}.`
           : !modern
             ? "Update this worker to enable controls."
             : rt.draining
@@ -700,11 +739,57 @@
                   ? `RAM pause · ${rt.suspendedEncodes || 0} encodes suspended; limits retained.`
                   : paused
                     ? "Queue stopped. Active encodes finish; queued encodes wait."
-                    : `Limits applied · up to ${rt.cpuJobs + rt.gpuJobs + 1} jobs in the pipeline`;
-        return `<article class="panel worker-card" data-worker="${esc(w.name)}"><div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${esc(profileLabel)}</p></div>${badge(...status)}</div><p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.managedProfile ? " · This profile controls only its own encoder. Hardware readings are shared with other processes and profiles." : ""}</p>${resources.summary(w, Date.parse(data.generatedAt))}${resources.compact(w, resourceHistory, Date.parse(data.generatedAt))}<a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">View resource details ↗</a><div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div><form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs">${input("cpu", profile.cpu)}${input("gpu", profile.gpu)}</div><div class="capacity-controls"><button class="button primary" type="submit" ${disabled ? "disabled" : ""}>${busy ? "Saving…" : "Save limits"}</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>${controls}<div class="worker-footer"><span>${esc(w.ip)} · ${age(w.lastSeen)}</span><span>${integer.format(w.completed)} completed · ${integer.format(w.failed)} failures · ${bytes(w.sourceBytes - w.targetBytes)}</span></div></article>`;
+                    : "";
+        return `<article class="panel worker-card" data-worker="${esc(w.name)}"><div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${esc(profileLabel)}</p></div>${badge(...status)}</div><p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.managedProfile ? " · shared host resources" : ""}</p>${resources.summary(w, Date.parse(data.generatedAt))}${resources.compact(w, resourceHistory, Date.parse(data.generatedAt))}<a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">View resource details ↗</a><div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div><form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs">${input("cpu", profile.cpu)}${input("gpu", profile.gpu)}</div><div class="capacity-controls"><button class="button primary" type="submit" ${disabled ? "disabled" : ""}>${busy ? "Saving…" : "Save limits"}</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>${controls}${workerTasks(w)}<div class="worker-footer"><span>${esc(w.ip)} · ${age(w.lastSeen)}</span><span>Period: ${integer.format(w.completed)} completed · ${integer.format(w.failed)} failed · ${bytes(w.sourceBytes - w.targetBytes)} saved</span></div></article>`;
       })
       .join("");
     applyWidths($("worker-cards"));
+  }
+  function workerTasks(worker) {
+    const rt = worker.runtime || {};
+    const known = data.jobs.filter(
+      (j) => j.worker === worker.name && j.state === "active",
+    );
+    const tasks = rt?.jobs?.length
+      ? rt.jobs
+      : known.map((j) => ({ id: j.id, phase: j.phase, state: "running" }));
+    if (!tasks.length)
+      return '<section class="worker-tasks"><h3>Tasks</h3><p class="muted">Idle</p></section>';
+    return `<section class="worker-tasks"><h3>Tasks <span class="muted">${tasks.length}</span></h3>${tasks
+      .map((task) => {
+        const job = known.find((j) => j.id === task.id);
+        const progress = task.progress?.length
+          ? task.progress
+          : job?.progress || [];
+        const paused = task.state === "paused";
+        const held =
+          task.state === "queued" && (rt.paused || rt.maxActiveJobs === 0);
+        const control =
+          rt.controlVersion >= 2 &&
+          task.canPause &&
+          task.phase === "FFMPEG" &&
+          ["running", "paused"].includes(task.state);
+        const unavailable =
+          saving.has(worker.name) ||
+          worker.control?.state === "pending" ||
+          rt.draining ||
+          rt.finishing;
+        const name =
+          task.name || (job ? basename(job.sourcePath) : task.id.slice(0, 8));
+        const state = task.individuallyPaused
+          ? "Paused individually"
+          : task.pausedByWorker
+            ? "Worker RAM hold"
+            : held
+              ? "Queue held"
+              : task.state === "queued"
+                ? "Waiting"
+                : "";
+        return `<article class="worker-task" data-task-id="${esc(task.id)}"><div class="task-heading"><strong title="${esc(name)}">${esc(name)}</strong>${control ? `<button type="button" class="button subtle" data-worker-control="${task.individuallyPaused ? "resume-job" : "pause-job"}" data-worker-name="${esc(worker.name)}" data-job-id="${esc(task.id)}" ${unavailable ? "disabled" : ""} aria-label="${task.individuallyPaused ? "Resume" : "Pause"} ${esc(name)}">${task.individuallyPaused ? "Resume" : "Pause"}</button>` : ""}</div>${state ? `<p class="task-phase">${esc(state)}${task.individuallyPaused && task.pausedByWorker ? " · Worker RAM hold" : ""}</p>` : ""}<div class="job-progress">${jobProgress({ state: "active", held: paused || held, phase: task.phase, progress: progress.map((p) => ({ ...p, etaSeconds: paused || held ? 0 : p.etaSeconds })) })}</div></article>`;
+      })
+      .join(
+        "",
+      )}${rt.controlVersion < 2 ? '<p class="media-help">Update worker for individual pause controls.</p>' : ""}</section>`;
   }
   function renderWorkerDetails() {
     const show = view === "workers" && selectedWorker !== null;
@@ -790,10 +875,10 @@
     selectedWorker =
       view === "workers" ? new URLSearchParams(query).get("worker") : null;
     if (!titles[view]) view = "overview";
-    const [label, title, description] = titles[view];
+    const label = titles[view];
     $("breadcrumb-view").textContent = label;
-    $("page-title").innerHTML = `${esc(title)}<span class="accent">.</span>`;
-    $("page-description").textContent = description;
+    $("page-title").textContent = label;
+    $("reporting-control").hidden = !["overview", "workers"].includes(view);
     document.title = `${label} · TranscoderD`;
     for (const key of Object.keys(titles))
       $(`${key}-view`).hidden = key !== view;
@@ -807,7 +892,40 @@
     renderWorkerDetails();
   }
   $("period").addEventListener("change", () => {
+    const custom = $("period").value === "custom";
+    $("custom-period").hidden = !custom;
+    if (custom) {
+      if (!$("period-start").value) {
+        const date = new Date();
+        const localDate = (d) =>
+          `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        $("period-end").value = localDate(date);
+        date.setDate(date.getDate() - 6);
+        $("period-start").value = localDate(date);
+      }
+      return;
+    }
+    customRange = null;
     hours = Number($("period").value);
+    workerPage = 0;
+    refresh();
+  });
+  $("custom-period").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const start = new Date(`${$("period-start").value}T00:00:00`);
+    const end = new Date(`${$("period-end").value}T00:00:00`);
+    end.setDate(end.getDate() + 1);
+    if (
+      !Number.isFinite(start.getTime()) ||
+      !Number.isFinite(end.getTime()) ||
+      end <= start ||
+      end - start > 3660 * 86400000
+    ) {
+      showToast("Choose dates in order, spanning at most 3660 days.", true);
+      return;
+    }
+    customRange = { start: start.toISOString(), end: end.toISOString() };
+    workerPage = 0;
     refresh();
   });
   $("refresh").addEventListener("click", refresh);
@@ -864,7 +982,7 @@
       gpu: event.target.elements.gpuJobs.value,
     });
   });
-  async function controlWorker(name, action) {
+  async function controlWorker(name, action, jobId) {
     const worker = data?.workers.find((w) => w.name === name);
     if (
       !worker?.online ||
@@ -880,7 +998,7 @@
     try {
       const command = await api(`workers/${encodeURIComponent(name)}/control`, {
         method: "POST",
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, ...(jobId ? { jobId } : {}) }),
       });
       worker.control = command;
       showToast(`${name}: command queued; waiting for worker confirmation.`);
@@ -895,7 +1013,11 @@
   $("worker-cards").addEventListener("click", (event) => {
     const button = event.target.closest("[data-worker-control]");
     if (button && !button.disabled)
-      controlWorker(button.dataset.workerName, button.dataset.workerControl);
+      controlWorker(
+        button.dataset.workerName,
+        button.dataset.workerControl,
+        button.dataset.jobId,
+      );
   });
   window.addEventListener("hashchange", setView);
   document.addEventListener("visibilitychange", () => {

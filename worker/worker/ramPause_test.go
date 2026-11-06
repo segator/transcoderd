@@ -64,6 +64,12 @@ func runningRAMWorker(t *testing.T) (*JobExecutor, string) {
 
 func startRAMWorkerEncode(t *testing.T, worker *JobExecutor) (string, string) {
 	t.Helper()
+	id, path, _ := startRAMWorkerEncodeWithCancel(t, worker)
+	return id, path
+}
+
+func startRAMWorkerEncodeWithCancel(t *testing.T, worker *JobExecutor) (string, string, context.CancelFunc) {
+	t.Helper()
 	id := uuid.New()
 	worker.jobs.set(&job.Context{JobId: id}, model.FFMPEGSNotification, "running")
 	exe, err := os.Executable()
@@ -86,7 +92,7 @@ func startRAMWorkerEncode(t *testing.T, worker *JobExecutor) (string, string) {
 		}
 	})
 	awaitRAMWorker(t, func() bool { return ramProgressSize(path) > 2 })
-	return id.String(), path
+	return id.String(), path, cancel
 }
 
 func TestRAMWorkerPauseModeChangesAndResume(t *testing.T) {

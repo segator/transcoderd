@@ -22,12 +22,13 @@ const dashboardJobsSQL = `WITH fleet AS (
  FROM jobs j JOIN job_status s ON s.job_id=j.id
 ) `
 
-func (s *SQLRepository) GetDashboard(ctx context.Context, hours int, now time.Time) (*model.Dashboard, error) {
-	if hours != 24 && hours != 168 && hours != 720 {
-		return nil, fmt.Errorf("dashboard hours must be 24, 168, or 720")
+func (s *SQLRepository) GetDashboard(ctx context.Context, hours int, now time.Time, ranges ...model.DashboardRange) (*model.Dashboard, error) {
+	period, err := model.ResolveDashboardRange(hours, now, ranges...)
+	if err != nil {
+		return nil, err
 	}
 	if s.tx != nil {
-		return s.readDashboard(ctx, hours, now)
+		return s.readDashboard(ctx, hours, now, period)
 	}
 	// Every panel sees the same committed state during a refresh.
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
@@ -36,7 +37,7 @@ func (s *SQLRepository) GetDashboard(ctx context.Context, hours int, now time.Ti
 	}
 	defer func() { _ = tx.Rollback() }()
 	r := &SQLRepository{tx: &SQLTransaction{tx: tx}}
-	d, err := r.readDashboard(ctx, hours, now)
+	d, err := r.readDashboard(ctx, hours, now, period)
 	if err != nil {
 		return nil, err
 	}
@@ -46,13 +47,14 @@ func (s *SQLRepository) GetDashboard(ctx context.Context, hours int, now time.Ti
 	return d, nil
 }
 
-func (s *SQLRepository) readDashboard(ctx context.Context, hours int, now time.Time) (*model.Dashboard, error) {
+func (s *SQLRepository) readDashboard(ctx context.Context, hours int, now time.Time, period model.DashboardRange) (*model.Dashboard, error) {
 	d := model.NewDashboard(now, hours)
+	d.Range = period
 	db, err := s.getConnection()
 	if err != nil {
 		return nil, err
 	}
-	since := now.UTC().Add(-time.Duration(hours) * time.Hour)
+	since, until := period.Start, period.End
 	valid := `state='completed' AND source_size>0 AND target_size>0`
 	query := dashboardJobsSQL + `SELECT count(*),
  count(*) FILTER (WHERE state='queued'), count(*) FILTER (WHERE state='active'),
@@ -60,31 +62,33 @@ func (s *SQLRepository) readDashboard(ctx context.Context, hours int, now time.T
  count(*) FILTER (WHERE state='canceled'),
  COALESCE(sum(source_size) FILTER (WHERE ` + valid + `),0),
  COALESCE(sum(target_size) FILTER (WHERE ` + valid + `),0),
- count(*) FILTER (WHERE state='completed' AND event_time >= $1),
- count(*) FILTER (WHERE state='failed' AND event_time >= $1),
+ count(*) FILTER (WHERE state='completed' AND event_time >= $1 AND event_time < $2),
+ count(*) FILTER (WHERE state='failed' AND event_time >= $1 AND event_time < $2),
  COALESCE(avg(EXTRACT(EPOCH FROM (event_time-(SELECT max(e.event_time) FROM job_events e
    WHERE e.job_id=fleet.id AND e.notification_type='Job' AND e.status='started'
    AND e.job_event_id < fleet.job_event_id))))
-   FILTER (WHERE state='completed' AND event_time >= $1),0)
+   FILTER (WHERE state='completed' AND event_time >= $1 AND event_time < $2),0),
+ COALESCE(sum(source_size) FILTER (WHERE ` + valid + ` AND event_time >= $1 AND event_time < $2),0),
+ COALESCE(sum(target_size) FILTER (WHERE ` + valid + ` AND event_time >= $1 AND event_time < $2),0)
  FROM fleet`
 	v := &d.Summary
-	err = db.QueryRowContext(ctx, query, since).Scan(&v.Total, &v.Queued, &v.Active, &v.Completed,
-		&v.Failed, &v.Canceled, &v.SourceBytes, &v.TargetBytes, &v.CompletedInRange, &v.FailedInRange, &v.AverageSeconds)
+	err = db.QueryRowContext(ctx, query, since, until).Scan(&v.Total, &v.Queued, &v.Active, &v.Completed,
+		&v.Failed, &v.Canceled, &v.SourceBytes, &v.TargetBytes, &v.CompletedInRange, &v.FailedInRange, &v.AverageSeconds, &d.Period.SourceBytes, &d.Period.TargetBytes)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard summary: %w", err)
 	}
-	unit, step := "day", 24*time.Hour
-	if hours == 24 {
-		unit, step = "hour", time.Hour
+	unit, step := "day", period.Step()
+	if step == time.Hour {
+		unit = "hour"
 	}
-	for t := since.Truncate(step); !t.After(now); t = t.Add(step) {
+	for t := since.Truncate(step); t.Before(until); t = t.Add(step) {
 		d.Timeline = append(d.Timeline, model.DashboardBucket{Time: t})
 	}
 	rows, err := db.QueryContext(ctx, dashboardJobsSQL+`SELECT date_trunc($2,event_time),
  count(*) FILTER (WHERE state='completed'), count(*) FILTER (WHERE state='failed'),
  COALESCE(sum(source_size) FILTER (WHERE `+valid+`),0),
  COALESCE(sum(target_size) FILTER (WHERE `+valid+`),0)
- FROM fleet WHERE event_time >= $1 AND state IN ('completed','failed') GROUP BY 1 ORDER BY 1`, since, unit)
+ FROM fleet WHERE event_time >= $1 AND event_time < $3 AND state IN ('completed','failed') GROUP BY 1 ORDER BY 1`, since, unit, until)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard timeline: %w", err)
 	}
@@ -107,7 +111,7 @@ func (s *SQLRepository) readDashboard(ctx context.Context, hours int, now time.T
 	if err != nil {
 		return nil, err
 	}
-	if err := s.readDashboardWorkers(ctx, db, d, since); err != nil {
+	if err := s.readDashboardWorkers(ctx, db, d, since, until); err != nil {
 		return nil, err
 	}
 	if err := s.readDashboardJobs(ctx, db, d, model.DashboardJobsQuery{Limit: 100}); err != nil {
@@ -116,7 +120,7 @@ func (s *SQLRepository) readDashboard(ctx context.Context, hours int, now time.T
 	rows, err = db.QueryContext(ctx, dashboardJobsSQL+`SELECT COALESCE((SELECT stream->>'codec_name'
  FROM jsonb_array_elements(COALESCE(target_probe::jsonb->'streams','[]'::jsonb)) stream
  WHERE stream->>'codec_type'='video' LIMIT 1),'unknown'), count(*), sum(source_size),sum(target_size)
- FROM fleet WHERE `+valid+` AND event_time >= $1 GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 12`, since)
+ FROM fleet WHERE `+valid+` AND event_time >= $1 AND event_time < $2 GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 12`, since, until)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard codecs: %w", err)
 	}
@@ -135,8 +139,8 @@ func (s *SQLRepository) readDashboard(ctx context.Context, hours int, now time.T
 	}
 	rows, err = db.QueryContext(ctx, `SELECT e.job_id,j.source_path,e.worker_name,e.notification_type,e.status,
  COALESCE(e.message,''),e.event_time FROM job_events e JOIN jobs j ON j.id=e.job_id
- WHERE e.event_time >= $1 AND (e.notification_type='Job' OR e.status='failed')
- ORDER BY e.event_time DESC,e.job_id,e.job_event_id DESC LIMIT 30`, since)
+ WHERE e.event_time >= $1 AND e.event_time < $2 AND (e.notification_type='Job' OR e.status='failed')
+ ORDER BY e.event_time DESC,e.job_id,e.job_event_id DESC LIMIT 30`, since, until)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard activity: %w", err)
 	}
@@ -155,22 +159,22 @@ func (s *SQLRepository) readDashboard(ctx context.Context, hours int, now time.T
 	return d, nil
 }
 
-func (s *SQLRepository) readDashboardWorkers(ctx context.Context, db SQLDBOperations, d *model.Dashboard, since time.Time) error {
+func (s *SQLRepository) readDashboardWorkers(ctx context.Context, db SQLDBOperations, d *model.Dashboard, since, until time.Time) error {
 	rows, err := db.QueryContext(ctx, dashboardJobsSQL+`, stats AS (
  SELECT worker_name, count(*) FILTER (WHERE state='active') active,
- count(*) FILTER (WHERE state='completed' AND event_time >= $1) completed,
- count(*) FILTER (WHERE state='failed' AND event_time >= $1) failed,
- COALESCE(sum(source_size) FILTER (WHERE state='completed' AND source_size>0 AND target_size>0 AND event_time >= $1),0) source_bytes,
- COALESCE(sum(target_size) FILTER (WHERE state='completed' AND source_size>0 AND target_size>0 AND event_time >= $1),0) target_bytes
+ count(*) FILTER (WHERE state='completed' AND event_time >= $1 AND event_time < $3) completed,
+ count(*) FILTER (WHERE state='failed' AND event_time >= $1 AND event_time < $3) failed,
+ COALESCE(sum(source_size) FILTER (WHERE state='completed' AND source_size>0 AND target_size>0 AND event_time >= $1 AND event_time < $3),0) source_bytes,
+ COALESCE(sum(target_size) FILTER (WHERE state='completed' AND source_size>0 AND target_size>0 AND event_time >= $1 AND event_time < $3),0) target_bytes
  FROM fleet GROUP BY worker_name
 )
  SELECT w.name,COALESCE(w.ip,''),w.last_seen,w.runtime,ws.max_active_jobs,ws.cpu_jobs,ws.gpu_jobs,
  COALESCE(st.active,0),COALESCE(st.completed,0),COALESCE(st.failed,0),
  COALESCE(st.source_bytes,0),COALESCE(st.target_bytes,0),
- CASE WHEN wc.id IS NOT NULL THEN jsonb_build_object('id',wc.id,'action',wc.action,'state',wc.state,'error',wc.error) END
+ CASE WHEN wc.id IS NOT NULL THEN jsonb_build_object('id',wc.id,'action',wc.action,'state',wc.state,'error',wc.error,'jobId',COALESCE(wc.job_id::text,'')) END
  FROM workers w LEFT JOIN worker_controls wc ON wc.worker_name=w.name
  LEFT JOIN worker_settings ws ON ws.worker_name=w.name LEFT JOIN stats st ON st.worker_name=w.name
- WHERE w.last_seen >= $2 ORDER BY w.name`, since, d.GeneratedAt.Add(-30*24*time.Hour))
+ WHERE w.last_seen >= $2 ORDER BY w.name`, since, d.GeneratedAt.Add(-30*24*time.Hour), until)
 	if err != nil {
 		return fmt.Errorf("dashboard workers: %w", err)
 	}

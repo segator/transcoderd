@@ -48,6 +48,8 @@ func (q *ServerCoordinator) executeRemoteControl(ctx context.Context, c *model.W
 		return errors.New("worker is draining accepted work")
 	}
 	switch c.Action {
+	case "pause-job", "resume-job":
+		return q.worker.SetJobPaused(c.JobID, c.Action == "pause-job")
 	case "pause-encodes":
 		return q.worker.SetRAMPaused(true)
 	case "resume-encodes":

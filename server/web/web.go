@@ -89,12 +89,13 @@ func (s *Server) getWorkerSettings(writer http.ResponseWriter, request *http.Req
 	if webError(writer, err, http.StatusInternalServerError) {
 		return
 	}
-	if request.Header.Get("workerControlVersion") == model.RemoteControlCapability {
+	controlVersion := request.Header.Get("workerControlVersion")
+	if controlVersion == "1" || controlVersion == model.RemoteControlCapability {
 		c, err := s.scheduler.GetWorkerControl(request.Context(), workerName)
 		if webError(writer, err, http.StatusInternalServerError) {
 			return
 		}
-		if c != nil && c.State == "pending" {
+		if c != nil && c.State == "pending" && ((c.Action != "pause-job" && c.Action != "resume-job") || controlVersion == model.RemoteControlCapability) {
 			settings.Control = c
 		}
 	}

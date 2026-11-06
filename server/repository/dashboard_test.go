@@ -243,3 +243,54 @@ func checkDashboardWorkerRecency(t *testing.T, repo Repository) {
 func TestDashboardWorkerRecency(t *testing.T) {
 	checkDashboardWorkerRecency(t, NewInMemoryRepository())
 }
+
+func checkDashboardCustomRange(t *testing.T, repo Repository) {
+	t.Helper()
+	now := time.Now().UTC().Truncate(time.Second)
+	period := model.DashboardRange{Start: now.Add(-72 * time.Hour), End: now.Add(-48 * time.Hour)}
+	for i, at := range []time.Time{period.Start.Add(-time.Second), period.Start, period.End.Add(-time.Second), period.End, now.Add(time.Hour)} {
+		j := &model.Job{Id: uuid.New(), SourcePath: fmt.Sprintf("range-%d.mkv", i), SourceSize: 100, TargetSize: 40, TargetProbe: &model.MediaProbe{Streams: []model.MediaStream{{CodecType: "video", CodecName: "av1"}}}}
+		if err := repo.AddJob(t.Context(), j); err != nil {
+			t.Fatal(err)
+		}
+		e := &model.TaskEventType{Event: model.Event{EventTime: at, WorkerName: "range-worker"}, JobId: j.Id, NotificationType: model.JobNotification, Status: model.CompletedNotificationStatus}
+		if err := repo.AddNewTaskEvent(t.Context(), e); err != nil {
+			t.Fatal(err)
+		}
+		if r, ok := repo.(*SQLRepository); ok {
+			for _, table := range []string{"job_events", "job_status"} {
+				if _, err := r.db.ExecContext(t.Context(), "UPDATE "+table+" SET event_time=$1 WHERE job_id=$2", at, j.Id); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	// Baseline may contain other fixtures; compare global totals separately from period results.
+	d, err := repo.GetDashboard(t.Context(), 0, now, period)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Period.Completed != 2 || d.Period.SourceBytes != 200 || d.Period.TargetBytes != 80 || d.Period.SavedBytes != 120 || d.Period.CompressionPercent != 60 {
+		t.Fatalf("range summary = %+v, want 2 completions, 200→80, 60%%", d.Period)
+	}
+	if d.Summary.Completed < 5 || d.Summary.SourceBytes < 500 {
+		t.Fatalf("global totals changed: %+v", d.Summary)
+	}
+	var count, source int64
+	for _, b := range d.Timeline {
+		count += b.Completed
+		source += b.SourceBytes
+	}
+	if count != 2 || source != 200 {
+		t.Fatalf("range timeline=%d, %d, want 2,200", count, source)
+	}
+	if len(d.Codecs) != 1 || d.Codecs[0].Jobs != 2 {
+		t.Fatalf("range codecs=%+v", d.Codecs)
+	}
+	for _, a := range d.Activity {
+		if !period.Contains(a.Time) {
+			t.Fatalf("out-of-range activity: %+v", a)
+		}
+	}
+}
+func TestDashboardCustomRange(t *testing.T) { checkDashboardCustomRange(t, NewInMemoryRepository()) }

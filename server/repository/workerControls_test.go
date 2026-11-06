@@ -54,6 +54,15 @@ func checkWorkerControlRepository(t *testing.T, repo Repository) {
 	if got.State != "applied" {
 		t.Fatalf("control state = %s", got.State)
 	}
+	c.ID, c.Action, c.JobID = uuid.NewString(), "pause-job", uuid.NewString()
+	if err := repo.SetWorkerControl(ctx, "remote", c); err != nil {
+		t.Fatal(err)
+	}
+	got, err = repo.GetWorkerControl(ctx, "remote")
+	if err != nil || got.JobID != c.JobID || got.Action != "pause-job" {
+		t.Fatalf("individual control=%+v %v", got, err)
+	}
+
 	if err := repo.SetWorkerMaxActiveJobs(ctx, "remote", 4); err != nil {
 		t.Fatal(err)
 	}

@@ -251,7 +251,7 @@ func TestOIDCSessionsAcrossReplicasAndRevocation(t *testing.T) {
 	first := oidcTestFrontend(t, config)
 	second := oidcTestFrontend(t, config)
 	page := dashboardRequest(first, "GET", "/dashboard/login", "", "", nil)
-	if page.Code != 200 || !strings.Contains(page.Body.String(), "Continue with single sign-on") || strings.Contains(page.Body.String(), `id="token"`) {
+	if page.Code != 200 || !strings.Contains(page.Body.String(), "Sign in with SSO") || strings.Contains(page.Body.String(), `id="token"`) {
 		t.Fatal("OIDC login page did not select SSO-only UI")
 	}
 	callback, transaction := oidcAuthorization(t, first, p)

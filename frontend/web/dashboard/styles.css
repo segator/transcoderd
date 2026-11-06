@@ -1974,7 +1974,7 @@
       font-size: 16px;
     }
     .table-wrap::before {
-      content: "Desliza para ver todas las columnas →";
+      content: "Swipe for more columns →";
       display: block;
       font-size: 9px;
       color: var(--muted);
@@ -2182,3 +2182,385 @@
 .resource-path.resource-line-2, .resource-path.resource-line-3 { fill:none; }
 .resource-legend .resource-line-2 { background:#7eb8ff; }
 .resource-legend .resource-line-3 { background:#ffbe78; }
+
+@layer components {
+  .page-heading {
+    margin-bottom: 20px;
+    gap: 16px;
+  }
+  .page-heading h1 {
+    margin: 0;
+    font-size: 30px;
+  }
+  .scope-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 16px;
+    margin: 20px 0 12px;
+  }
+  .scope-heading h2 {
+    margin: 0;
+    font-size: 16px;
+  }
+  .scope-heading > span {
+    font-size: 11px;
+  }
+  .reporting-control {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .reporting-control[hidden],
+  .custom-period[hidden] {
+    display: none;
+  }
+  .custom-period {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .custom-period label {
+    display: grid;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .custom-period input {
+    min-width: 0;
+    padding: 8px;
+    color: var(--text);
+    background: #101722;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .worker-help {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .worker-help summary {
+    cursor: pointer;
+    width: fit-content;
+  }
+  .worker-help p {
+    max-width: 720px;
+    margin: 8px 0;
+    line-height: 1.6;
+  }
+  .worker-tasks {
+    border-top: 1px solid var(--border);
+    margin-top: 16px;
+    padding-top: 12px;
+  }
+  .worker-tasks h3 {
+    font-size: 12px;
+    margin: 0 0 8px;
+  }
+  .worker-task {
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+    min-width: 0;
+  }
+  .task-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .task-heading strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+  .task-heading .button {
+    flex-shrink: 0;
+    min-height: 36px;
+  }
+  .task-phase {
+    color: var(--muted);
+    font-size: 11px;
+    margin: 5px 0;
+  }
+  .worker-card .pending-note:empty {
+    display: none;
+  }
+  .login-layout {
+    display: flex;
+    flex-direction: column;
+    width: min(440px, 100%);
+    min-height: 100vh;
+    margin: auto;
+    justify-content: center;
+  }
+  .login-story {
+    min-height: 0;
+    padding: 24px 32px 0;
+    border: 0;
+    background: none;
+  }
+  .login-story .brand {
+    padding: 0;
+  }
+  .login-panel {
+    padding: 32px;
+  }
+  .login-box > p:empty {
+    display: none;
+  }
+}
+
+@layer responsive {
+  @media (min-width: 600px) and (max-width: 1000px) {
+    .worker-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .worker-card {
+      padding: 16px;
+    }
+  }
+  @media (max-width: 720px) {
+    main#main {
+      padding: 16px 12px 0;
+    }
+    .page-heading {
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .page-heading h1 {
+      font-size: 24px;
+    }
+    .reporting-control {
+      margin-left: auto;
+      max-width: 100%;
+    }
+    .period-control {
+      gap: 8px;
+      width: auto;
+    }
+    .custom-period {
+      justify-content: flex-end;
+    }
+    .custom-period label {
+      flex: 1;
+      min-width: 100px;
+    }
+    .custom-period input {
+      width: 100%;
+    }
+    .scope-heading {
+      margin-top: 16px;
+    }
+    .scope-heading > span {
+      font-size: 10px;
+    }
+    .metric-card {
+      min-height: 100px;
+      padding: 12px;
+    }
+    .metric-value {
+      margin-top: 10px;
+      font-size: 24px;
+      overflow-wrap: anywhere;
+    }
+    .metric-caption {
+      font-size: 10px;
+      line-height: 1.4;
+      margin-top: 8px;
+    }
+    .metric-label {
+      font-size: 11px;
+    }
+    .primary-grid,
+    .analytics-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .primary-grid .throughput-panel {
+      grid-column: 1 / -1;
+    }
+    .primary-grid .savings-panel {
+      grid-column: 1 / -1;
+    }
+    .analytics-grid .activity-panel {
+      grid-column: 1 / -1;
+    }
+    .panel {
+      padding: 12px;
+      min-width: 0;
+    }
+    .panel-header {
+      margin-bottom: 12px;
+      gap: 8px;
+    }
+    .panel-header h2 {
+      font-size: 14px;
+    }
+    .panel-header p {
+      font-size: 10px;
+    }
+    .horizontal-chart {
+      min-width: 0;
+    }
+    .horizontal-row {
+      min-width: 0;
+    }
+    .horizontal-label {
+      overflow-wrap: anywhere;
+    }
+    .queue-layout {
+      gap: 20px;
+    }
+    .worker-card {
+      padding: 14px;
+    }
+    .worker-heading {
+      gap: 8px;
+    }
+    .worker-heading h2 {
+      font-size: 15px;
+      overflow-wrap: anywhere;
+    }
+    .encoder-lanes {
+      margin-top: 12px;
+      gap: 10px;
+    }
+    .encoder-inputs {
+      gap: 10px;
+    }
+    .worker-resource-link {
+      margin-bottom: 8px;
+    }
+    .login-story {
+      padding: 24px 24px 0;
+    }
+    .login-panel {
+      padding: 24px;
+    }
+  }
+}
+/* Resource panels share rows independently of the complex worker control cards. */
+.worker-resource-detail {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr));
+  gap: 12px;
+}
+.resource-panel .resource-help {
+  margin-top: 8px;
+}
+.resource-panel .resource-help summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+@media (min-width: 360px) and (max-width: 720px) {
+  .worker-resource-detail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .resource-panel {
+    padding: 12px;
+  }
+  .resource-panel .resource-heading h2,
+  .resource-panel .resource-heading h3 {
+    font-size: 14px;
+  }
+  .resource-panel .resource-heading p,
+  .resource-panel .resource-identity {
+    font-size: 10px;
+  }
+  .resource-panel .resource-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 8px;
+    margin: 14px 0;
+  }
+  .resource-panel .resource-stat strong {
+    font-size: 14px;
+  }
+  .resource-panel .resource-stat small,
+  .resource-panel .resource-stat span {
+    font-size: 10px;
+  }
+  .resource-panel .resource-legend {
+    gap: 8px;
+    font-size: 10px;
+  }
+  .resource-panel .badge {
+    max-width: 100%;
+    white-space: normal;
+  }
+}
+
+@layer components {
+  .empty-state {
+    min-height: 90px;
+    padding: 18px 10px;
+  }
+  .chart-frame .empty-state {
+    min-height: 110px;
+  }
+  .worker-tasks .job-progress {
+    width: 100%;
+    max-width: none;
+  }
+}
+@layer responsive {
+  @media (max-width: 720px) {
+    .chart-frame {
+      min-height: 0;
+    }
+    .chart-frame svg {
+      height: auto;
+    }
+    .chart-frame.compact svg {
+      height: auto;
+      min-height: 90px;
+    }
+    .empty-state {
+      min-height: 70px;
+      padding: 12px 6px;
+    }
+    .chart-frame .empty-state {
+      min-height: 100px;
+    }
+    .panel:has(> #activity-feed > .empty-state) {
+      padding-bottom: 12px;
+    }
+    .sidebar {
+      flex-wrap: nowrap;
+      height: 52px;
+      gap: 8px;
+    }
+    .sidebar .brand {
+      flex-shrink: 0;
+      font-size: 13px;
+      gap: 5px;
+    }
+    .sidebar .brand-mark {
+      width: 22px;
+      height: 25px;
+      font-size: 18px;
+    }
+    .sidebar nav {
+      flex: 1;
+      justify-content: space-between;
+      margin-left: 0;
+    }
+    .sidebar .nav-link {
+      font-size: 10px;
+      padding: 0 5px;
+    }
+    .topbar .breadcrumb {
+      display: none;
+    }
+    .topbar {
+      min-height: 40px;
+      padding: 6px 12px;
+    }
+  }
+}

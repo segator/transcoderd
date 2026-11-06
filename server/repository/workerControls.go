@@ -26,7 +26,7 @@ func (s *SQLRepository) GetWorkerControl(ctx context.Context, name string) (*mod
 		return nil, err
 	}
 	c := &model.WorkerControl{}
-	err = db.QueryRowContext(ctx, `SELECT id,action,state,error,cpu_jobs,gpu_jobs,max_active_jobs FROM worker_controls WHERE worker_name=$1`, name).Scan(&c.ID, &c.Action, &c.State, &c.Error, &c.CPUJobs, &c.GPUJobs, &c.MaxActiveJobs)
+	err = db.QueryRowContext(ctx, `SELECT id,action,state,error,cpu_jobs,gpu_jobs,max_active_jobs,COALESCE(job_id::text,'') FROM worker_controls WHERE worker_name=$1`, name).Scan(&c.ID, &c.Action, &c.State, &c.Error, &c.CPUJobs, &c.GPUJobs, &c.MaxActiveJobs, &c.JobID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -37,8 +37,8 @@ func (s *SQLRepository) SetWorkerControl(ctx context.Context, name string, c mod
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO worker_controls(worker_name,id,action,state,error,cpu_jobs,gpu_jobs,max_active_jobs) VALUES($1,$2,$3,'pending','',$4,$5,$6)
- ON CONFLICT(worker_name) DO UPDATE SET id=$2,action=$3,state='pending',error='',cpu_jobs=$4,gpu_jobs=$5,max_active_jobs=$6`, name, c.ID, c.Action, c.CPUJobs, c.GPUJobs, c.MaxActiveJobs)
+	_, err = db.ExecContext(ctx, `INSERT INTO worker_controls(worker_name,id,action,state,error,cpu_jobs,gpu_jobs,max_active_jobs,job_id) VALUES($1,$2,$3,'pending','',$4,$5,$6,NULLIF($7,'')::uuid)
+ ON CONFLICT(worker_name) DO UPDATE SET id=$2,action=$3,state='pending',error='',cpu_jobs=$4,gpu_jobs=$5,max_active_jobs=$6,job_id=NULLIF($7,'')::uuid`, name, c.ID, c.Action, c.CPUJobs, c.GPUJobs, c.MaxActiveJobs, c.JobID)
 	return err
 }
 func (s *SQLRepository) AckWorkerControl(ctx context.Context, name string, ack model.WorkerControlAck) error {

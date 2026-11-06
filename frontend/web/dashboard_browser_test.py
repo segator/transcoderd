@@ -29,7 +29,7 @@ def job(state, index):
 def worker(name, kind="cpu", online=True):
     return dict(name=name, online=online, lastSeen=NOW, ip="127.0.0.1",
                 completed=0, failed=0, sourceBytes=0, targetBytes=0, activeJobs=0,
-                runtime=dict(managedProfile=True, capacityVersion=2, controlVersion=1, maxActiveJobs=2, kind=kind,
+                runtime=dict(managedProfile=True, capacityVersion=2, controlVersion=2, maxActiveJobs=2, kind=kind,
                              encoder="libsvtav1" if kind == "cpu" else "av1_nvenc",
                              cpuEncoder="libsvtav1", gpuEncoder="av1_nvenc",
                              cpuJobs=2 if kind == "cpu" else 0,
@@ -46,7 +46,8 @@ def worker(name, kind="cpu", online=True):
 def main():
     jobs = [job("active", 0), job("failed", 0)] + [job("queued", i) for i in range(130)] + [job("completed", i) for i in range(28)]
     workers = [worker("windows-cpu"), worker("windows-gpu", "gpu")] + [worker(f"offline-{i:02d}", online=False) for i in range(24)]
-    writes, requests, errors, controls = [], [], [], []
+    workers[0]["runtime"]["jobs"] = [dict(id="active-0", name="active-movie-0.mkv",phase="FFMPEG",state="running",canPause=True,progress=[dict(id="video",phase="FFMPEG",percent=42,etaSeconds=120,stale=False)]),dict(id="beyond-overview-cap", name="Second movie.mkv",phase="FFMPEG",state="running",canPause=True,progress=[dict(id="video",phase="FFMPEG",percent=18,etaSeconds=300,stale=False)])]
+    writes, requests, errors, controls, periods, job_controls = [], [], [], [], [], []
     media = dict(id="demo", name="Original test.mp4", path="Original test.mp4", root="source",
                  size=10000, eligible=True,
                  metadata=dict(codec="h264", width=320, height=240, durationSeconds=8, bitrateMbps=5))
@@ -67,7 +68,7 @@ def main():
         with sync_playwright() as playwright:
             executable = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
             browser = playwright.chromium.launch(**({"executable_path": executable} if executable else {}))
-            context = browser.new_context(viewport=dict(width=1440, height=1000), service_workers="block")
+            context = browser.new_context(viewport=dict(width=1440, height=1000), service_workers="block", timezone_id="Europe/Madrid")
 
             def route(request_route):
                 request = request_route.request
@@ -79,8 +80,13 @@ def main():
                     request_route.fulfill(status=status, json=value, headers={"Cache-Control": "no-store"})
 
                 if path == "/dashboard/api/stats":
-                    reply(dict(generatedAt=NOW, summary=summary, workers=copy.deepcopy(workers),
-                               jobs=jobs[:100], timeline=[dict(time=NOW, completed=28, failed=1, sourceBytes=28000000, targetBytes=14000000)], codecs=[], activity=[]))
+                    periods.append(query)
+                    custom = "start" in query
+                    selected = dict(summary, completedInRange=2, failedInRange=0, averageSeconds=90) if custom else summary
+                    reply(dict(generatedAt=NOW, summary=selected, workers=copy.deepcopy(workers),
+                               period=dict(sourceBytes=1000000 if custom else 28000000,targetBytes=400000 if custom else 14000000),
+                               range=dict(start=query["start"][0],end=query["end"][0]) if custom else dict(start=(datetime.now(timezone.utc)-timedelta(hours=int(query.get("hours",["168"])[0]))).isoformat(),end=NOW),
+                               jobs=jobs[:100], timeline=[dict(time=NOW, completed=2 if custom else 28, failed=0 if custom else 1, sourceBytes=1000000 if custom else 28000000, targetBytes=400000 if custom else 14000000)], codecs=[], activity=[]))
                 elif path == "/dashboard/api/identity":
                     reply(dict(mode="oidc", name="Isaac Aymerich", username="isaac", email="isaac@example.test"))
                 elif path == "/dashboard/api/jobs":
@@ -91,7 +97,9 @@ def main():
                 elif path.endswith("/control"):
                     action = request.post_data_json["action"]
                     controls.append(action)
-                    workers[0]["control"] = dict(id=f"command-{len(controls)}", action=action, state="pending")
+                    if request.post_data_json.get("jobId"):
+                        job_controls.append(request.post_data_json)
+                    workers[0]["control"] = dict(id=f"command-{len(controls)}", action=action, state="pending",jobId=request.post_data_json.get("jobId",""))
                     reply(workers[0]["control"], 202)
                 elif path.endswith("/settings"):
                     writes.append(request.post_data_json)
@@ -153,9 +161,9 @@ def main():
             assert page.locator("#media-video").get_attribute("src") is None
 
             page.evaluate("location.hash='workers'")
-            expect(page.locator("#worker-cards article")).to_have_count(12)
-            cpu = page.locator('#worker-cards article[data-worker="windows-cpu"]')
-            gpu = page.locator('#worker-cards article[data-worker="windows-gpu"]')
+            expect(page.locator("#worker-cards > article")).to_have_count(12)
+            cpu = page.locator('#worker-cards > article[data-worker="windows-cpu"]')
+            gpu = page.locator('#worker-cards > article[data-worker="windows-gpu"]')
             expect(cpu.locator('input[type="number"]')).to_have_count(1)
             expect(cpu.locator('input[name="cpuJobs"]')).to_be_visible()
             expect(cpu.locator('input[name="gpuJobs"]')).to_have_attribute("type", "hidden")
@@ -210,23 +218,91 @@ def main():
             assert offline.count() == 10
             assert offline.locator("input, button, .resource-summary").count() == 0
             page.locator("#worker-pagination").get_by_text("Next", exact=True).click()
-            expect(page.locator("#worker-cards article")).to_have_count(12)
+            expect(page.locator("#worker-cards > article")).to_have_count(12)
             page.locator("#worker-pagination").get_by_text("Next", exact=True).click()
-            expect(page.locator("#worker-cards article")).to_have_count(2)
+            expect(page.locator("#worker-cards > article")).to_have_count(2)
             page.evaluate("location.hash='workers?worker=windows-gpu'")
             expect(page.locator("#worker-resource-detail")).to_contain_text("NVIDIA Test GPU")
             expect(page.locator("#worker-resource-detail")).not_to_contain_text("Host CPU")
+
+            # Worker snapshots show tasks outside the overview cap, and target only one encode.
+            page.evaluate("location.hash='workers'")
+            expect(cpu.locator(".worker-task")).to_have_count(2)
+            expect(cpu).to_contain_text("Second movie.mkv")
+            first = cpu.locator('[data-task-id="active-0"]')
+            second = cpu.locator('[data-task-id="beyond-overview-cap"]')
+            expect(first).to_contain_text("42 %")
+            expect(second).to_contain_text("18 %")
+            first.get_by_role("button", name="Pause active-movie-0.mkv", exact=True).click()
+            expect(cpu).to_contain_text("Waiting for worker confirmation")
+            expect(second.get_by_role("button")).to_be_disabled()
+            workers[0]["runtime"]["jobs"][0].update(state="paused",individuallyPaused=True)
+            acknowledge()
+            expect(first).to_contain_text("Paused individually")
+            expect(first).not_to_contain_text("2 min")
+            expect(second.get_by_role("button",name="Pause Second movie.mkv",exact=True)).to_be_enabled()
+            first.get_by_role("button",name="Resume active-movie-0.mkv",exact=True).click()
+            expect(cpu).to_contain_text("Waiting for worker confirmation")
+            workers[0]["runtime"]["jobs"][0].update(state="running",individuallyPaused=False)
+            acknowledge()
+            assert job_controls == [dict(action="pause-job",jobId="active-0"),dict(action="resume-job",jobId="active-0")]
 
             # Reporting period changes membership before pagination, including details.
             page.evaluate("location.hash='workers'")
             workers[-1]["lastSeen"] = (datetime.now(timezone.utc)-timedelta(days=2)).isoformat()
             workers[-2]["lastSeen"] = (datetime.now(timezone.utc)-timedelta(days=10)).isoformat()
             page.locator("#period").select_option("24")
-            expect(page.locator("#worker-scope-note")).to_contain_text("24 workers seen in the last 24 hours")
+            expect(page.locator("#worker-scope-note")).to_contain_text("24 workers · last seen in selected period")
             page.locator("#period").select_option("168")
-            expect(page.locator("#worker-scope-note")).to_contain_text("25 workers seen in the last 7 days")
+            expect(page.locator("#worker-scope-note")).to_contain_text("25 workers · last seen in selected period")
             page.locator("#period").select_option("720")
-            expect(page.locator("#worker-scope-note")).to_contain_text("26 workers seen in the last 30 days")
+            expect(page.locator("#worker-scope-note")).to_contain_text("26 workers · last seen in selected period")
+            # Custom dates include the chosen last day, respecting a DST change.
+            page.evaluate("location.hash='overview'")
+            expect(page.locator("#page-title")).to_have_text("Overview")
+            page.locator("#period").select_option("custom")
+            page.locator("#period-start").fill("2026-10-24")
+            page.locator("#period-end").fill("2026-10-26")
+            page.locator("#custom-period button").click()
+            expect(page.locator("#metrics")).to_contain_text("585.9")
+            expect(page.locator("#global-metrics")).to_contain_text("13.4")
+            assert periods[-1] == dict(start=["2026-10-23T22:00:00.000Z"],end=["2026-10-26T23:00:00.000Z"]), periods[-1]
+            expect(page.locator("#period-scope")).to_contain_text("Oct 24")
+            page.locator("#period-start").fill("2026-10-27")
+            count = len(periods)
+            page.locator("#custom-period button").click()
+            expect(page.locator("#toast")).to_contain_text("Choose dates in order")
+            assert len(periods) == count
+            page.evaluate("location.hash='jobs'")
+            expect(page.locator("#reporting-control")).not_to_be_visible()
+            page.evaluate("location.hash='workers'")
+            expect(page.locator("#worker-scope-note")).to_contain_text("0 workers")
+            page.locator("#period").select_option("720")
+            expect(cpu).to_be_visible()
+            # Multiple columns for mobile analytics and resource panels, without overflow.
+            page.set_viewport_size(dict(width=390,height=844))
+            page.evaluate("location.hash='overview'")
+            expect(page.locator("#savings-chart")).to_be_visible()
+            assert page.locator(".analytics-grid").evaluate("el=>getComputedStyle(el).gridTemplateColumns.split(' ').length") == 2
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            page.screenshot(path="/tmp/transcoderd-overview-mobile.png",full_page=True)
+            page.evaluate("location.hash='workers?worker=windows-gpu'")
+            expect(page.locator("#worker-resource-detail .resource-panel")).to_have_count(2)
+            assert page.locator("#worker-resource-detail").evaluate("el=>getComputedStyle(el).gridTemplateColumns.split(' ').length") == 2
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            page.screenshot(path="/tmp/transcoderd-worker-mobile.png",full_page=True)
+            page.evaluate("location.hash='workers?worker=windows-cpu'")
+            expect(first.get_by_role("button")).to_be_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            page.set_viewport_size(dict(width=1440,height=1000))
+            # Legacy/no-telemetry workers retain a usable card and known task progress.
+            saved_runtime = workers[0]["runtime"]
+            workers[0]["runtime"] = None
+            page.locator("#refresh").click()
+            expect(cpu).to_contain_text("Update worker")
+            expect(cpu.locator(".worker-task")).to_have_count(1)
+            assert cpu.locator(".worker-task button").count() == 0
+            workers[0]["runtime"] = saved_runtime
             page.evaluate("location.hash='library'")
             expect(page.locator("#media-files")).to_contain_text("Previous encode failed · Retry eligible")
             page.locator("#media-filters").evaluate("form => form.requestSubmit()")

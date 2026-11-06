@@ -2,11 +2,12 @@ package model
 
 import "fmt"
 
-const RemoteControlCapability = "1"
+const RemoteControlCapability = "2"
 
 // WorkerControl is a durable per-worker command; limits are its queue-resume snapshot.
 type WorkerControl struct {
 	ID            string `json:"id"`
+	JobID         string `json:"jobId,omitempty"`
 	Action        string `json:"action"`
 	State         string `json:"state"`
 	Error         string `json:"error,omitempty"`
@@ -17,7 +18,7 @@ type WorkerControl struct {
 
 func ValidateWorkerAction(action string) error {
 	switch action {
-	case "pause-encodes", "resume-encodes", "stop-after-current", "resume-queue":
+	case "pause-encodes", "resume-encodes", "stop-after-current", "resume-queue", "pause-job", "resume-job":
 		return nil
 	}
 	return fmt.Errorf("unknown worker control action")

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.14.0](https://github.com/segator/transcoderd/compare/v2.13.2...v2.14.0) (2026-11-06)
+
+
+### 🎉 Features
+
+* **dashboard:** show each worker’s running version ([#214](https://github.com/segator/transcoderd/issues/214)) ([a5c3e76](https://github.com/segator/transcoderd/commit/a5c3e76ecc01215240eef87e0f808277e708f357))
+
 ## [2.13.2](https://github.com/segator/transcoderd/compare/v2.13.1...v2.13.2) (2026-11-06)
 
 

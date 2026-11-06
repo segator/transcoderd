@@ -24,4 +24,4 @@ Keep preset API compatibility and independent frontend hosting. Historical filte
 
 ## Migration Plan
 
-Apply additive migration 011 before serving new controls. Upgrade workers to enable individual buttons. Existing controls and old preset queries remain supported. Rollback binaries can ignore the added column; do not remove production command history.
+Apply additive migration 011 before serving new controls. Upgrade workers to enable individual buttons. Existing controls and old preset queries remain supported. A newer frontend rejects custom-range results whose returned boundaries are missing or differ, so an older API cannot silently relabel its preset results during a rolling deployment. Rollback binaries can ignore the added column; do not remove production command history.

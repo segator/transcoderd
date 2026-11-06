@@ -55,6 +55,7 @@ def main():
     scan = dict(id="scan-1", kind="scan", state="completed", stage="completed", matched=1,
                 examined=1, candidates=1, discovered=1, failed=0, skipped=0,
                 filters=dict(root="source"), files=[retry], results=[])
+    range_support = True
     summary = dict(total=len(jobs), active=1, queued=130, completed=28, failed=1,
                    canceled=0, sourceBytes=28000000, targetBytes=14000000,
                    savedBytes=14000000, compressionPercent=50, completedInRange=28,
@@ -85,7 +86,7 @@ def main():
                     selected = dict(summary, completedInRange=2, failedInRange=0, averageSeconds=90) if custom else summary
                     reply(dict(generatedAt=NOW, summary=selected, workers=copy.deepcopy(workers),
                                period=dict(sourceBytes=1000000 if custom else 28000000,targetBytes=400000 if custom else 14000000),
-                               range=dict(start=query["start"][0],end=query["end"][0]) if custom else dict(start=(datetime.now(timezone.utc)-timedelta(hours=int(query.get("hours",["168"])[0]))).isoformat(),end=NOW),
+                               range=(dict(start=query["start"][0],end=query["end"][0]) if range_support else None) if custom else dict(start=(datetime.now(timezone.utc)-timedelta(hours=int(query.get("hours",["168"])[0]))).isoformat(),end=NOW),
                                jobs=jobs[:100], timeline=[dict(time=NOW, completed=2 if custom else 28, failed=0 if custom else 1, sourceBytes=1000000 if custom else 28000000, targetBytes=400000 if custom else 14000000)], codecs=[], activity=[]))
                 elif path == "/dashboard/api/identity":
                     reply(dict(mode="oidc", name="Isaac Aymerich", username="isaac", email="isaac@example.test"))
@@ -268,6 +269,16 @@ def main():
             expect(page.locator("#global-metrics")).to_contain_text("13.4")
             assert periods[-1] == dict(start=["2026-10-23T22:00:00.000Z"],end=["2026-10-26T23:00:00.000Z"]), periods[-1]
             expect(page.locator("#period-scope")).to_contain_text("Oct 24")
+            # An older API ignoring new parameters must not relabel its preset data as a custom range.
+            range_support = False
+            page.locator("#period-start").fill("2026-10-20")
+            page.locator("#period-end").fill("2026-10-22")
+            page.locator("#custom-period button").click()
+            expect(page.locator("#error-banner")).to_contain_text("Update the API to use custom date ranges")
+            expect(page.locator("#period-scope")).to_contain_text("Oct 24")
+            range_support = True
+            page.locator("#refresh").click()
+            expect(page.locator("#error-banner")).not_to_be_visible()
             page.locator("#period-start").fill("2026-10-27")
             count = len(periods)
             page.locator("#custom-period button").click()

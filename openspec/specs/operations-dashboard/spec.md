@@ -272,6 +272,10 @@ Custom ranges SHALL use start-inclusive/end-exclusive RFC3339 boundaries, spanni
 - **WHEN** a range has a missing, invalid or reversed boundary, exceeds 3660 days or is combined with hours
 - **THEN** it returns HTTP 400 without running a dashboard query
 
+#### Scenario: API without custom-range support
+- **WHEN** a custom-range response omits its boundaries or returns boundaries different from the request
+- **THEN** the frontend shows an API upgrade error and retains the previous results with their previous period label
+
 ### Requirement: Individual remote encode control
 Online worker cards SHALL show each current task's filename, phase, progress and pause state. Capable workers SHALL offer authenticated same-origin acknowledged task Pause/Resume. Commands SHALL validate UUID and fresh controllable ownership at submission and application, preserve unrelated holds, and report pending/failure. Older workers SHALL retain worker-wide controls without receiving individual commands.
 

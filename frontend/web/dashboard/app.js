@@ -153,6 +153,13 @@
     try {
       const next = await api(`stats?${requestedPeriod}`);
       if (requestedPeriod !== periodQuery()) return;
+      if (
+        customRange &&
+        (!next.range ||
+          Date.parse(next.range.start) !== Date.parse(customRange.start) ||
+          Date.parse(next.range.end) !== Date.parse(customRange.end))
+      )
+        throw new Error("Update the API to use custom date ranges.");
       data = next;
       $("error-banner").hidden = true;
       $("loading").hidden = true;

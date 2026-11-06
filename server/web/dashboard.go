@@ -45,6 +45,19 @@ func dashboardHeaders(next http.Handler) http.Handler {
 
 func (s *Server) dashboardStats(w http.ResponseWriter, r *http.Request) {
 	hours := 168
+	q := r.URL.Query()
+	var ranges []model.DashboardRange
+	if q.Has("start") || q.Has("end") {
+		start, errStart := time.Parse(time.RFC3339, q.Get("start"))
+		end, errEnd := time.Parse(time.RFC3339, q.Get("end"))
+		period, err := model.ResolveDashboardRange(0, time.Now(), model.DashboardRange{Start: start, End: end})
+		if q.Has("hours") || errStart != nil || errEnd != nil || err != nil {
+			http.Error(w, "Use start and end timestamps, start before end, at most 3660 days, without hours", 400)
+			return
+		}
+		hours = 0
+		ranges = append(ranges, period)
+	}
 	if raw := r.URL.Query().Get("hours"); raw != "" {
 		var err error
 		hours, err = strconv.Atoi(raw)
@@ -55,7 +68,7 @@ func (s *Server) dashboardStats(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	data, err := s.scheduler.GetDashboard(ctx, hours)
+	data, err := s.scheduler.GetDashboard(ctx, hours, ranges...)
 	if err != nil {
 		log.WithError(err).Error("Could not read dashboard statistics")
 		http.Error(w, "Could not load statistics", http.StatusInternalServerError)
@@ -159,6 +172,7 @@ func (s *Server) dashboardWorkerControl(w http.ResponseWriter, r *http.Request) 
 	}
 	var input struct {
 		Action string `json:"action"`
+		JobID  string `json:"jobId"`
 	}
 	if err := decodeDashboardJSON(w, r, &input); err != nil {
 		http.Error(w, "Invalid control request", 400)
@@ -166,7 +180,7 @@ func (s *Server) dashboardWorkerControl(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	c, err := s.scheduler.ControlWorker(ctx, name, input.Action)
+	c, err := s.scheduler.ControlWorker(ctx, name, input.Action, input.JobID)
 	if err != nil {
 		code := 500
 		if errors.Is(err, scheduler.ErrInvalidWorkerSettings) {

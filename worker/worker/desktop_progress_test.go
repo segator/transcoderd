@@ -31,6 +31,11 @@ func TestLocalProgressSnapshotLifecycle(t *testing.T) {
 	if len(got) != 1 || got[0].JobID != id.String() || got[0].Name != "film renamed.mkv" || got[0].StepID != "video" || got[0].Percent != 45 || got[0].Codec != config.AV1NVENC || got[0].Profile != "gpu" {
 		t.Fatalf("snapshot = %+v, want video at 45%%", got)
 	}
+	executor.jobs.set(&job.Context{JobId: id, Source: &job.VideoData{OriginalName: "film.mkv"}}, model.FFMPEGSNotification, "running")
+	runtime := executor.RuntimeTelemetry()
+	if runtime.ControlVersion != 2 || len(runtime.Jobs) != 1 || runtime.Jobs[0].Name != "film.mkv" || len(runtime.Jobs[0].Progress) != 1 || runtime.Jobs[0].Progress[0].Percent != 45 {
+		t.Fatalf("fleet runtime snapshot=%+v,want named task and 45%% progress", runtime)
+	}
 	tracker.Done()
 	tracker.updateSnapshot() // A late FFmpeg progress event must not resurrect it.
 	if got := executor.progress.snapshot(); len(got) != 0 {

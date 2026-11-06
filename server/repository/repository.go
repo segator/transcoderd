@@ -45,7 +45,7 @@ type Repository interface {
 	RetrieveQueuedJob(ctx context.Context) (*model.Job, error)
 	ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error)
 	GetAllProgressJobs(ctx context.Context) ([]model.TaskProgressType, error)
-	GetDashboard(ctx context.Context, hours int, now time.Time) (*model.Dashboard, error)
+	GetDashboard(ctx context.Context, hours int, now time.Time, ranges ...model.DashboardRange) (*model.Dashboard, error)
 	GetDashboardJobs(ctx context.Context, query model.DashboardJobsQuery) (*model.DashboardJobPage, error)
 	GetMediaProbe(ctx context.Context, root, path string, size, modified int64) (*model.MediaProbe, error)
 	PutMediaProbe(ctx context.Context, root, path string, size, modified int64, probe *model.MediaProbe) error

@@ -3,6 +3,8 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"github.com/google/uuid"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -92,5 +94,70 @@ func TestRemoteControlAuthenticationAndCapabilities(t *testing.T) {
 	}
 	if response := dashboardRequest(s, "POST", "/api/v1/worker/control/ack", `{"id":"`+settings.Control.ID+`"}`, "encoding123", nil); response.Code != 401 {
 		t.Fatalf("dashboard credentials acknowledged worker command: %d", response.Code)
+	}
+}
+
+func TestIndividualRemoteControlValidationAndDelivery(t *testing.T) {
+	repo := repository.NewInMemoryRepository()
+	sch, err := scheduler.NewScheduler(&scheduler.Config{SourcePath: t.TempDir()}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewWebServer(&Config{Token: "worker-secret", DashboardToken: "dashboard"}, sch, nil)
+	id := uuid.NewString()
+	runtime := &model.WorkerRuntime{ControlVersion: 2, CPUJobs: 2, Jobs: []model.WorkerJobRuntime{{ID: id, Phase: "FFMPEG", State: "running", CanPause: true}}}
+	publish := func() {
+		t.Helper()
+		if err := repo.PingServerUpdate(t.Context(), "127.0.0.1", model.PingEventType{Event: model.Event{WorkerName: "remote"}, Runtime: runtime}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish()
+	tests := []struct {
+		action, id, token string
+		want              int
+	}{
+		{"pause-job", id, "", 401}, {"pause-job", id, "worker-secret", 401},
+		{"pause-job", "bad", "dashboard", 400}, {"pause-job", "", "dashboard", 400},
+		{"pause-job", uuid.NewString(), "dashboard", 409}, {"pause-encodes", id, "dashboard", 400},
+		{"pause-job", id, "dashboard", 202}, {"resume-job", id, "dashboard", 202},
+	}
+	for _, tt := range tests {
+		body, _ := json.Marshal(map[string]string{"action": tt.action, "jobId": tt.id})
+		w := dashboardRequest(server, "POST", "/dashboard/api/workers/remote/control", string(body), tt.token, nil)
+		if w.Code != tt.want {
+			t.Errorf("%s %s=%d %s,want %d", tt.action, tt.id, w.Code, w.Body.String(), tt.want)
+		}
+	}
+	for _, version := range []string{"", "1", "2"} {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/worker/settings", nil)
+		r.Header.Set("Authorization", "Bearer worker-secret")
+		r.Header.Set("workerName", "remote")
+		r.Header.Set("workerControlVersion", version)
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, r)
+		if strings.Contains(w.Body.String(), `"jobId"`) != (version == "2") {
+			t.Fatalf("version %q delivery: %s", version, w.Body.String())
+		}
+	}
+	runtime.ControlVersion = 1
+	publish()
+	if _, err := sch.ControlWorker(t.Context(), "remote", "pause-job", id); err == nil {
+		t.Fatal("v1 accepted job control")
+	}
+	if _, err := sch.ControlWorker(t.Context(), "remote", "pause-encodes"); err != nil {
+		t.Fatal("v1 lost worker control", err)
+	}
+	runtime.ControlVersion = 2
+	runtime.Jobs[0].CanPause = false
+	publish()
+	if _, err := sch.ControlWorker(t.Context(), "remote", "pause-job", id); err == nil {
+		t.Fatal("noncontrollable task accepted")
+	}
+	runtime.Jobs[0].CanPause = true
+	runtime.Jobs[0].Phase = "Upload"
+	publish()
+	if _, err := sch.ControlWorker(t.Context(), "remote", "pause-job", id); err == nil {
+		t.Fatal("nonencoding task accepted")
 	}
 }

@@ -134,27 +134,39 @@
       </header>
       <main id="main" tabindex="-1">
         <div class="page-heading">
-          <div>
-            <span class="eyebrow">TRANSCODING CONTROL CENTER</span>
-            <h1 id="page-title">
-              Your fleet in motion<span class="accent">.</span>
-            </h1>
-            <p id="page-description">
-              Every job, every worker and every byte you save.
-            </p>
-          </div>
-          <div class="period-control">
-            <label for="period">Reporting period</label
-            ><select id="period">
-              <option value="24">Last 24 hours</option>
-              <option value="168" selected>Last 7 days</option>
-              <option value="720">Last 30 days</option>
-            </select>
+          <h1 id="page-title">Overview</h1>
+          <div id="reporting-control" class="reporting-control">
+            <div class="period-control">
+              <label for="period">Reporting period</label
+              ><select id="period">
+                <option value="24">Last 24 hours</option>
+                <option value="168" selected>Last 7 days</option>
+                <option value="720">Last 30 days</option>
+                <option value="custom">Custom dates</option>
+              </select>
+            </div>
+            <form id="custom-period" class="custom-period" hidden>
+              <label
+                >From<input
+                  id="period-start"
+                  type="date"
+                  required
+                  aria-label="Period start date"
+              /></label>
+              <label
+                >Through<input
+                  id="period-end"
+                  type="date"
+                  required
+                  aria-label="Period end date"
+              /></label>
+              <button class="button" type="submit">Apply</button>
+            </form>
           </div>
         </div>
         <div id="error-banner" class="error-banner" role="alert" hidden></div>
         <div id="loading" class="loading-state">
-          <span class="spinner"></span>Loading your fleet activity…
+          <span class="spinner"></span>Loading…
         </div>
         <div id="dashboard-content" hidden>
           <section
@@ -162,15 +174,15 @@
             class="view"
             aria-label="Operations overview"
           >
+            <div class="scope-heading">
+              <h2>Selected period</h2>
+              <span id="period-scope" class="muted"></span>
+            </div>
             <div id="metrics" class="metric-grid"></div>
             <div class="primary-grid">
               <section class="panel throughput-panel">
                 <div class="panel-header">
-                  <div>
-                    <span class="eyebrow muted">THROUGHPUT</span>
-                    <h2>Your fleet throughput</h2>
-                    <p>Job outcomes over the selected period</p>
-                  </div>
+                  <h2>Completed / failed</h2>
                   <span class="panel-tag" id="throughput-total">—</span>
                 </div>
                 <div class="chart-legend">
@@ -180,82 +192,49 @@
                 <div id="throughput-chart" class="chart-frame"></div>
               </section>
               <section class="panel savings-panel">
-                <div class="panel-header">
-                  <div>
-                    <span class="eyebrow muted">ALL-TIME IMPACT</span>
-                    <h2>More room for what comes next</h2>
-                  </div>
-                  <span class="panel-icon" aria-hidden="true">↙</span>
-                </div>
+                <div class="panel-header"><h2>Period compression</h2></div>
                 <div id="storage-impact"></div>
-                <p class="panel-footnote">
-                  Verified final sizes only. Storage savings do not measure
-                  visual quality.
-                </p>
               </section>
             </div>
             <div class="analytics-grid">
               <section class="panel">
-                <div class="panel-header">
-                  <div>
-                    <span class="eyebrow muted">RIGHT NOW</span>
-                    <h2>Your queue at a glance</h2>
-                  </div>
-                </div>
+                <div class="panel-header"><h2>Space saved</h2></div>
+                <div id="savings-chart" class="chart-frame compact"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header"><h2>By codec</h2></div>
+                <div id="codec-chart"></div>
+              </section>
+              <section class="panel activity-panel">
+                <div class="panel-header"><h2>Activity</h2></div>
+                <div id="activity-feed"></div>
+              </section>
+            </div>
+            <div class="scope-heading">
+              <h2>Live / All time</h2>
+              <span class="muted">Independent of reporting period</span>
+            </div>
+            <div id="global-metrics" class="metric-grid"></div>
+            <div class="detail-grid">
+              <section class="panel">
+                <div class="panel-header"><h2>Job totals · All time</h2></div>
                 <div id="queue-chart"></div>
               </section>
               <section class="panel">
                 <div class="panel-header">
                   <div>
-                    <span class="eyebrow muted">SPACE SAVED</span>
-                    <h2>Storage savings over time</h2>
-                    <p>Measured bytes per interval · selected period</p>
+                    <h2>Workers · Live</h2>
+                    <p>Outcomes: selected period</p>
                   </div>
-                </div>
-                <div id="savings-chart" class="chart-frame compact"></div>
-              </section>
-              <section class="panel">
-                <div class="panel-header">
-                  <div>
-                    <span class="eyebrow muted">COMPRESSION BY CODEC</span>
-                    <h2>From source to output</h2>
-                    <p>Weighted reduction · selected period</p>
-                  </div>
-                </div>
-                <div id="codec-chart"></div>
-              </section>
-            </div>
-            <div class="detail-grid">
-              <section class="panel">
-                <div class="panel-header">
-                  <div>
-                    <span class="eyebrow muted">TEAMWORK</span>
-                    <h2>Workers at a glance</h2>
-                    <p>Live resources · job outcomes in selected period</p>
-                  </div>
-                  <a href="#workers" class="text-link">Manage ↗</a>
+                  <a href="#workers" class="text-link">Workers ↗</a>
                 </div>
                 <div id="worker-chart"></div>
-              </section>
-              <section class="panel">
-                <div class="panel-header">
-                  <div>
-                    <span class="eyebrow muted">RECENT ACTIVITY</span>
-                    <h2>What is happening</h2>
-                  </div>
-                  <span class="small muted">Live events</span>
-                </div>
-                <div id="activity-feed"></div>
               </section>
             </div>
             <section class="panel jobs-panel">
               <div class="panel-header">
-                <div>
-                  <span class="eyebrow muted">IN PROGRESS</span>
-                  <h2>Jobs at a glance</h2>
-                  <p>Current phase progress · worker updates every ~15 s</p>
-                </div>
-                <a href="#jobs" class="text-link">View jobs ↗</a>
+                <h2>Jobs · Live</h2>
+                <a href="#jobs" class="text-link">All jobs ↗</a>
               </div>
               <div id="overview-jobs" class="table-wrap"></div>
             </section>
@@ -266,19 +245,14 @@
             aria-label="Worker management"
             hidden
           >
-            <div class="info-strip">
-              <span aria-hidden="true">ⓘ</span>
+            <details class="worker-help">
+              <summary>Control help</summary>
               <p>
-                Windows installations run separate CPU and GPU worker profiles
-                on the same host. Each profile shows its own limit and relevant
-                shared hardware readings. Independent workers can run both
-                encoders. Limits apply without restarting.
-                <strong
-                  >0 stops new encodes for that profile or encoder.</strong
-                >
-                Accepted jobs continue.
+                Pause in RAM holds encodes in memory. Stop after current holds
+                new work. Each Windows CPU/GPU profile has its own limits;
+                hardware readings cover the shared host.
               </p>
-            </div>
+            </details>
             <div
               id="worker-detail-navigation"
               class="worker-detail-navigation"
@@ -292,8 +266,7 @@
               hidden
             ></div>
             <p id="worker-scope-note" class="table-note">
-              Workers seen in the last 30 days · online and active first.
-              Offline workers show basic information.
+              Workers seen in the selected period.
             </p>
             <div id="worker-cards" class="worker-grid"></div>
             <nav
@@ -332,9 +305,8 @@
                 /></label>
               </div>
               <p class="table-note">
-                Filters and search cover all jobs, with 25 per page. Queued
-                playback shows the source; completed playback shows the output.
-                Counters and charts cover the entire database.
+                All jobs · View source for queued jobs; output for completed
+                jobs.
               </p>
               <div id="job-list" class="table-wrap"></div>
               <nav
@@ -354,9 +326,8 @@
               <section class="panel media-filter-panel">
                 <div class="panel-header">
                   <div>
-                    <span class="eyebrow muted">FROM FILE TO QUEUE</span>
-                    <h2>Find your next batch</h2>
-                    <p>Review the results before adding jobs.</p>
+                    <h2>Library scan</h2>
+                    <p>Select files before adding to the queue.</p>
                   </div>
                 </div>
                 <form id="media-filters">
@@ -385,10 +356,7 @@
                     <option value="movies">Movies · high bitrate</option>
                     <option value="series">TV shows · high bitrate</option>
                   </select>
-                  <p class="media-help">
-                    Presets based on the Unraid scripts. All criteria can be
-                    edited.
-                  </p>
+                  <p class="media-help">Presets can be edited.</p>
                   <label for="media-contains">Path contains</label
                   ><input
                     id="media-contains"
@@ -511,7 +479,7 @@
                       <span class="eyebrow muted"
                         >EXPLORE BEFORE SELECTING</span
                       >
-                      <h2>Your videos, one click away</h2>
+                      <h2>Files</h2>
                     </div>
                     <span class="panel-tag" id="media-file-count"
                       >Loading…</span
@@ -548,7 +516,7 @@
                   <div class="panel-header">
                     <div>
                       <span class="eyebrow muted">REVIEW YOUR SELECTION</span>
-                      <h2>Your matching files</h2>
+                      <h2>Scan results</h2>
                       <p id="media-review-count"></p>
                     </div>
                     <button id="media-select-all" class="button" type="button">
@@ -590,15 +558,6 @@
               </div>
             </div>
           </section>
-          <footer class="page-footer">
-            <span
-              ><span class="footer-mark" aria-hidden="true">◈</span> TranscoderD
-              <span class="muted">/ Operations</span></span
-            ><span
-              >Real data. Clear decisions.
-              <span class="muted">· Refreshes every 5 s</span></span
-            >
-          </footer>
         </div>
       </main>
     </div>
@@ -635,11 +594,7 @@
       <p id="media-player-info" class="media-help">
         Loading video information…
       </p>
-      <p class="media-help">
-        Original file · no conversion. Playback and seeking use your browser’s
-        native controls and require supported container, video and audio
-        formats.
-      </p>
+      <p class="media-help">Original file · browser-supported formats only.</p>
     </dialog>
     <div id="toast" class="toast" role="status" hidden></div>
   </body>

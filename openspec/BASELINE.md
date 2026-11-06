@@ -103,3 +103,8 @@ The original frontend image recipe explicitly compiled amd64 and its Kubernetes 
 ### Remote pause and reporting-period review (2026-11-05)
 
 The fleet's former Pause both/Profile button wrote zero limits, which stopped new work but did not invoke the worker RAM controller and offered no restore action. `align-remote-worker-controls` separates worker-acknowledged RAM and queue commands, retains positive resume capacity and preserves independent holds. Its Workers view applies the selected presence window inside the 30-day maximum and adds compact in-tab hardware history. Real child-process tests cover suspension, queue drain semantics, independent holds and acknowledgement retry; PostgreSQL and Chromium regressions cover storage, filtered pages and controls.
+
+
+### Reporting scope and individual fleet controls (2026-11-06)
+
+Investigation found the headline savings used all-time sizes while period filters applied only lower bounds to outcomes. `refine-fleet-controls-reporting` adds explicit two-boundary ranges and a measured period summary, preserving live/all-time fields and labeling their scope. Current worker snapshots now carry task names, controllability and progress so worker cards do not lose active tasks behind the overview cap. Individual fleet controls reuse local owned-process pause with v2 negotiation and additive migration 011, retaining v1 worker-wide delivery. The previously documented Pause both wording is replaced with the shipped queue/RAM controls. Chromium regressions cover date/DST conversion, range scope, task targeting and compact mobile grids; PostgreSQL and real-process regressions cover boundaries, persistence and hold isolation.

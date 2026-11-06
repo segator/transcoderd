@@ -195,3 +195,26 @@ func TestDashboardJobsQueryValidation(t *testing.T) {
 		t.Fatalf("anonymous jobs = %d", got.Code)
 	}
 }
+
+func TestDashboardRangeValidation(t *testing.T) {
+	s := newWorkerSettingsTestServer(t)
+	tests := []struct {
+		query string
+		want  int
+	}{
+		{"start=2026-10-01T00:00:00Z&end=2026-10-03T00:00:00Z", 200},
+		{"start=2026-10-01T00:00:00Z", 400},
+		{"end=2026-10-03T00:00:00Z", 400},
+		{"start=bad&end=2026-10-03T00:00:00Z", 400},
+		{"start=2026-10-03T00:00:00Z&end=2026-10-01T00:00:00Z", 400},
+		{"start=2026-10-01T00:00:00Z&end=2026-10-01T00:00:00Z", 400},
+		{"start=2000-10-01T00:00:00Z&end=2026-10-01T00:00:00Z", 400},
+		{"hours=24&start=2026-10-01T00:00:00Z&end=2026-10-03T00:00:00Z", 400},
+	}
+	for _, tt := range tests {
+		w := dashboardRequest(s, "GET", "/dashboard/api/stats?"+tt.query, "", "encoding123", nil)
+		if w.Code != tt.want {
+			t.Errorf("range %s = %d %s, want %d", tt.query, w.Code, w.Body.String(), tt.want)
+		}
+	}
+}

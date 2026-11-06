@@ -43,9 +43,14 @@ func TestRemoteControlsUseOwnedProcessesAndPreserveHolds(t *testing.T) {
 		}
 	}
 	publish()
-	issue := func(action string) *model.WorkerControl {
+	issue := func(action string, ids ...string) *model.WorkerControl {
 		t.Helper()
-		req, _ := http.NewRequest("POST", server.URL+"/dashboard/api/workers/remote-node/control", strings.NewReader(`{"action":"`+action+`"}`))
+		jobID := ""
+		if len(ids) > 0 {
+			jobID = ids[0]
+		}
+		body, _ := json.Marshal(map[string]string{"action": action, "jobId": jobID})
+		req, _ := http.NewRequest("POST", server.URL+"/dashboard/api/workers/remote-node/control", strings.NewReader(string(body)))
 		req.Header.Set("Authorization", "Bearer dashboard")
 		req.Header.Set("X-Dashboard-Request", "1")
 		response, err := http.DefaultClient.Do(req)
@@ -53,7 +58,7 @@ func TestRemoteControlsUseOwnedProcessesAndPreserveHolds(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer response.Body.Close()
-		body, _ := io.ReadAll(response.Body)
+		body, _ = io.ReadAll(response.Body)
 		if response.StatusCode != 202 {
 			t.Fatalf("control %s = %d %s", action, response.StatusCode, body)
 		}
@@ -121,6 +126,46 @@ func TestRemoteControlsUseOwnedProcessesAndPreserveHolds(t *testing.T) {
 	if executor.AdmissionStatus().RAMPaused {
 		t.Fatal("ack retry replayed remote pause over local Resume")
 	}
+	// Targeting one encode must leave another owned child running.
+	firstID := executor.AdmissionStatus().Jobs[0].JobID
+	_, secondPath := startRAMWorkerEncode(t, executor)
+	publish()
+	issue("pause-job", firstID)
+	if err := coordinator.syncWorkerSettings(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	before = ramProgressSize(path)
+	otherBefore := ramProgressSize(secondPath)
+	awaitRAMWorker(t, func() bool { return ramProgressSize(secondPath) > otherBefore })
+	if ramProgressSize(path) != before {
+		t.Fatal("individual remote pause did not suspend selected process")
+	}
+	apply("pause-encodes")
+	issue("resume-job", firstID)
+	if err := coordinator.syncWorkerSettings(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !executor.AdmissionStatus().RAMPaused || executor.AdmissionStatus().SuspendedEncodes != 2 {
+		t.Fatal("individual resume cleared general RAM hold")
+	}
+	apply("resume-encodes")
+	awaitRAMWorker(t, func() bool { return ramProgressSize(path) > before })
+	// A real process exits between acceptance and command application.
+	completedID, _, stop := startRAMWorkerEncodeWithCancel(t, executor)
+	publish()
+	issue("pause-job", completedID)
+	stop()
+	awaitRAMWorker(t, func() bool { _, present := executor.encodeProcesses.PauseStates()[completedID]; return !present })
+	executor.jobs.remove(completedID)
+
+	if err := coordinator.syncWorkerSettings(t.Context()); err == nil {
+		t.Fatal("stale job control succeeded")
+	}
+	result, _ := repo.GetWorkerControl(t.Context(), "remote-node")
+	if result.State != "failed" {
+		t.Fatalf("stale control=%+v", result)
+	}
+
 	// Independent job pauses survive general remote controls.
 	id := executor.AdmissionStatus().Jobs[0].JobID
 	if err := executor.SetJobPaused(id, true); err != nil {

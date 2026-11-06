@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -10,23 +9,21 @@ import (
 	"transcoder/model"
 )
 
-func (r *InMemoryRepository) GetDashboard(ctx context.Context, hours int, now time.Time) (*model.Dashboard, error) {
-	return r.dashboard(ctx, hours, now, nil)
+func (r *InMemoryRepository) GetDashboard(ctx context.Context, hours int, now time.Time, ranges ...model.DashboardRange) (*model.Dashboard, error) {
+	return r.dashboard(ctx, hours, now, nil, ranges...)
 }
 
-func (r *InMemoryRepository) dashboard(ctx context.Context, hours int, now time.Time, query *model.DashboardJobsQuery) (*model.Dashboard, error) {
-	if hours != 24 && hours != 168 && hours != 720 {
-		return nil, fmt.Errorf("dashboard hours must be 24, 168, or 720")
+func (r *InMemoryRepository) dashboard(ctx context.Context, hours int, now time.Time, query *model.DashboardJobsQuery, ranges ...model.DashboardRange) (*model.Dashboard, error) {
+	period, err := model.ResolveDashboardRange(hours, now, ranges...)
+	if err != nil {
+		return nil, err
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	d := model.NewDashboard(now, hours)
-	since := now.Add(-time.Duration(hours) * time.Hour)
-	step := 24 * time.Hour
-	if hours == 24 {
-		step = time.Hour
-	}
-	for t := since.UTC().Truncate(step); !t.After(now); t = t.Add(step) {
+	d.Range = period
+	since, until, step := period.Start, period.End, period.Step()
+	for t := since.UTC().Truncate(step); t.Before(until); t = t.Add(step) {
 		d.Timeline = append(d.Timeline, model.DashboardBucket{Time: t})
 	}
 	workers := map[string]*model.DashboardWorker{}
@@ -81,7 +78,7 @@ func (r *InMemoryRepository) dashboard(ctx context.Context, hours int, now time.
 			d.Summary.SourceBytes += j.SourceSize
 			d.Summary.TargetBytes += j.TargetSize
 		}
-		inRange := !last.EventTime.Before(since)
+		inRange := period.Contains(last.EventTime)
 		var w *model.DashboardWorker
 		if last.WorkerName != "" {
 			w = worker(last.WorkerName)
@@ -123,6 +120,8 @@ func (r *InMemoryRepository) dashboard(ctx context.Context, hours int, now time.
 				}
 			}
 			if valid {
+				d.Period.SourceBytes += j.SourceSize
+				d.Period.TargetBytes += j.TargetSize
 				if w != nil {
 					w.SourceBytes += j.SourceSize
 					w.TargetBytes += j.TargetSize
@@ -160,7 +159,7 @@ func (r *InMemoryRepository) dashboard(ctx context.Context, hours int, now time.
 		}
 		d.Jobs = append(d.Jobs, job)
 		for _, e := range events {
-			if !e.EventTime.Before(since) && (e.NotificationType == model.JobNotification || e.Status == model.FailedNotificationStatus) {
+			if period.Contains(e.EventTime) && (e.NotificationType == model.JobNotification || e.Status == model.FailedNotificationStatus) {
 				d.Activity = append(d.Activity, model.DashboardActivity{JobID: id, SourcePath: j.SourcePath, Worker: e.WorkerName,
 					Phase: string(e.NotificationType), Status: string(e.Status), Message: e.Message, Time: e.EventTime})
 			}

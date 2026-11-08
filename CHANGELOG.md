@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.14.0](https://github.com/segator/transcoderd/compare/v2.13.2...v2.14.0) (2026-11-08)
+
+
+### 🎉 Features
+
+* **dashboard:** show each worker’s running version ([#214](https://github.com/segator/transcoderd/issues/214)) ([a5c3e76](https://github.com/segator/transcoderd/commit/a5c3e76ecc01215240eef87e0f808277e708f357))
+* **worker:** use NVDEC and avoid unnecessary scaling ([#217](https://github.com/segator/transcoderd/issues/217)) ([c5a564a](https://github.com/segator/transcoderd/commit/c5a564a5acaf061530cbf828e1e99ee74387ce98))
+
+
+### 🐛 Bug Fixes
+
+* recover subtitle and color encode failures and classify retries ([#216](https://github.com/segator/transcoderd/issues/216)) ([48166f9](https://github.com/segator/transcoderd/commit/48166f9c43d41ede52e91a3cd1e8cfb2c07d60c3))
+
 ## [2.13.2](https://github.com/segator/transcoderd/compare/v2.13.1...v2.13.2) (2026-11-06)
 
 

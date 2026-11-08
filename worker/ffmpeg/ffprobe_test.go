@@ -146,6 +146,8 @@ func TestSubtitleNeedsDirectSRTConversion(t *testing.T) {
 	}{
 		{"mov_text", "mov_text", true},
 		{"mov_text case insensitive", "MOV_TEXT", true},
+		{"EIA-608 captions", "eia_608", true},
+		{"EIA-608 case insensitive", "EIA_608", true},
 		{"SRT", "srt", false},
 		{"unknown format", "none", false},
 	}
@@ -155,6 +157,54 @@ func TestSubtitleNeedsDirectSRTConversion(t *testing.T) {
 				t.Errorf("NeedsDirectSRTConversion() = %v, want %v for format %q", got, tt.want, tt.format)
 			}
 		})
+	}
+}
+
+func TestVideoColorMatrixNormalization(t *testing.T) {
+	tests := []struct {
+		name, pixelFormat, colorSpace string
+		want                          bool
+	}{
+		{"invalid YUV", "yuv420p", "gbr", true},
+		{"invalid ten bit YUV", "yuv420p10le", "gbr", true},
+		{"invalid semiplanar YUV", "p010le", "gbr", true},
+		{"valid RGB", "gbrp", "gbr", false},
+		{"valid packed RGB", "rgb24", "gbr", false},
+		{"valid SDR", "yuv420p", "bt709", false},
+		{"valid HDR", "yuv420p10le", "bt2020nc", false},
+		{"unspecified color", "yuv420p", "", false},
+		{"legacy context", "", "", false},
+		{"unknown pixel format", "", "gbr", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &Video{PixelFormat: tt.pixelFormat, ColorSpace: tt.colorSpace}
+			if got := v.NeedsColorMatrixNormalization(); got != tt.want {
+				t.Errorf("NeedsColorMatrixNormalization() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizedProbePersistsColorMetadata(t *testing.T) {
+	var raw ffprobe.ProbeData
+	if err := json.Unmarshal([]byte(`{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","avg_frame_rate":"24/1","pix_fmt":"yuv420p","color_space":"gbr"}],"format":{"duration":"1"}}`), &raw); err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := NormalizeFFProbeData(&raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored NormalizedFFProbe
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.Video.PixelFormat != "yuv420p" || restored.Video.ColorSpace != "gbr" || !restored.Video.NeedsColorMatrixNormalization() {
+		t.Fatalf("restored video = %+v, want persisted invalid YUV matrix", restored.Video)
 	}
 }
 

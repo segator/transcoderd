@@ -211,11 +211,15 @@ func (f *FFMPEGGenerator) setVideoFilters(container *ffmpeg.NormalizedFFProbe) e
 	if err != nil {
 		return err
 	}
+	videoFilter := "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease"
+	if container.Video.NeedsColorMatrixNormalization() {
+		videoFilter += ",setparams=colorspace=unknown"
+	}
 	f.VideoFilter = []string{
 		"-map", fmt.Sprintf("0:%d", container.Video.Id),
 		"-avoid_negative_ts", "make_zero", "-copyts", "-map_chapters", "-1",
 		"-flags", "+global_header",
-		"-filter:v", "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease",
+		"-filter:v", videoFilter,
 		"-pix_fmt", settings.PixelFormat, "-c:v", settings.Codec,
 	}
 	switch settings.Codec {

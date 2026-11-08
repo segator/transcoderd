@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
+	"strings"
+
 	"transcoder/helper"
 	"transcoder/helper/command"
 	"transcoder/model"
@@ -36,6 +38,7 @@ func (m *MKVExtractStepExecutor) actions(jobContext *job.Context) []Action {
 func (m *MKVExtractStepExecutor) mkvExtract(ctx context.Context, tracker Tracker, jobContext *job.Context) error {
 	tracker.SetTotal(100)
 	var outLog string
+	var errLog strings.Builder
 	progressRegex := regexp.MustCompile(`Progress: (\d+)%`)
 	mkvExtractCommand := command.NewCommand(helper.GetMKVExtractPath(), "tracks", jobContext.Source.FilePath).
 		SetWorkDir(jobContext.WorkingDir).
@@ -52,6 +55,7 @@ func (m *MKVExtractStepExecutor) mkvExtract(ctx context.Context, tracker Tracker
 				tracker.UpdateValue(int64(p))
 			}
 		})
+	mkvExtractCommand.SetStderrFunc(func(buffer []byte, _ bool) { errLog.Write(buffer) })
 
 	mkvExtractCommand.AddEnv("LC_ALL=C")
 	mkvExtractCommand.AddEnv(fmt.Sprintf("LD_LIBRARY_PATH=%s", filepath.Dir(helper.GetMKVExtractPath())))
@@ -70,7 +74,7 @@ func (m *MKVExtractStepExecutor) mkvExtract(ctx context.Context, tracker Tracker
 	_, err := mkvExtractCommand.RunWithContext(ctx, command.NewAllowedCodesOption(0, 1))
 	if err != nil {
 		tracker.Logger().Cmdf("MKVExtract Command:%s", mkvExtractCommand.GetFullCommand())
-		return fmt.Errorf("MKVExtract unexpected error:%v", err)
+		return fmt.Errorf("MKVExtract unexpected error: %w: stdout: %s, stderr: %s", err, outLog, errLog.String())
 	}
 
 	// Convert extracted subtitle tracks to SRT using FFmpeg
@@ -89,9 +93,16 @@ func (m *MKVExtractStepExecutor) mkvExtract(ctx context.Context, tracker Tracker
 func (m *MKVExtractStepExecutor) convertExtractedToSrt(ctx context.Context, tracker Tracker, jobContext *job.Context, trackId uint8) error {
 	inputPath := filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%d.extract", trackId))
 	outputPath := filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%d.srt", trackId))
+	normalizedInput, expectedCues, cleanup, err := prepareExtractedSubtitle(inputPath)
+	if err != nil {
+		return fmt.Errorf("prepare extracted subtitle track %d: %w", trackId, err)
+	}
+	defer cleanup()
 
-	ffmpegCmd := command.NewCommand(helper.GetFFmpegPath(), "-i", inputPath, "-c:s", "srt", outputPath, "-y").
+	var errLog strings.Builder
+	ffmpegCmd := command.NewCommand(helper.GetFFmpegPath(), "-nostdin", "-hide_banner", "-i", normalizedInput, "-c:s", "srt", outputPath, "-y").
 		SetWorkDir(jobContext.WorkingDir)
+	ffmpegCmd.SetStderrFunc(func(buffer []byte, _ bool) { errLog.Write(buffer) })
 
 	if runtime.GOOS == "linux" {
 		ffmpegCmd.AddEnv(fmt.Sprintf("LD_LIBRARY_PATH=%s", filepath.Dir(helper.GetFFmpegPath())))
@@ -100,11 +111,14 @@ func (m *MKVExtractStepExecutor) convertExtractedToSrt(ctx context.Context, trac
 	tracker.Logger().Cmdf("Converting extracted subtitle to SRT: %s %s", helper.GetFFmpegPath(), ffmpegCmd.GetFullCommand())
 	exitCode, err := ffmpegCmd.RunWithContext(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to convert extracted subtitle track %d to SRT: %v", trackId, err)
+		return fmt.Errorf("failed to convert extracted subtitle track %d to SRT: %w: %s", trackId, err, errLog.String())
 	}
 	if exitCode != 0 {
 		return fmt.Errorf("ffmpeg subtitle conversion for track %d exited with code %d", trackId, exitCode)
 	}
 
+	if err := validateConvertedSRT(outputPath, expectedCues); err != nil {
+		return fmt.Errorf("subtitle track %d: %w: %s", trackId, err, errLog.String())
+	}
 	return nil
 }

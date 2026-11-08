@@ -850,116 +850,37 @@ func (r *RuntimeScheduler) updateJobByRequest(job *model.Job, jobRequest *model.
 	return eventsToAdd, nil
 }
 
-func simpleRegex(pattern string, string string) bool {
-	m, err := regexp.MatchString(strings.ToLower(pattern), strings.ToLower(string))
-	if err != nil {
-		panic(err)
-	}
-	return m
-}
-
 func verifyFailureMessage(message string) bool {
-	if simpleRegex(`job not found`, message) {
-		return false
+	message = strings.ToLower(message)
+	// Causal input failures take precedence over incidental probe warnings and
+	// transient-looking text elsewhere in FFmpeg's complete diagnostic output.
+	for _, permanent := range []string{
+		"job not found", "runtime error:", "download code 404", "dowload code 404",
+		"source file size ", "source file duration ", "source video duration ",
+		"subtitle codec eia_608", "invalid color configuration", "identity matrix",
+		"invalid data found when processing input", "could not parse subtitles",
+		"invalid converted subtitle", "no items converted", "with 0 items",
+		"probably corrupt input", "scale/rate is 0/0 which is invalid",
+	} {
+		if strings.Contains(message, permanent) {
+			return false
+		}
 	}
-	if simpleRegex(`runtime error: index out of range`, message) {
-		return false
+	// A stream listing, an unsupported-codec warning or FFmpeg's generic
+	// encoder-parameter hint does not establish a recoverable cause.
+	for _, transient := range []string{
+		"disk quota exceeded", "no space left on device",
+		"download code 500", "dowload code 500", "checksum error on download source",
+		"received signal 15", "no such host", "server misbehaving", "i/o timeout",
+		"connection failed because connected host has failed to respond",
+		"connection refused", "connection reset by peer", "connection timed out",
+		"cannot allocate memory", "allocate memory failed", "failed to allocate output packet",
+		"out of memory", "cuda_error_out_of_memory",
+	} {
+		if strings.Contains(message, transient) {
+			return true
+		}
 	}
-
-	if simpleRegex(`not 200 respose in dowload code 404`, message) {
-		return false
-	}
-	if simpleRegex(`source File size `, message) {
-		return false
-	}
-	if simpleRegex(`source File duration `, message) {
-		return false
-	}
-
-	if simpleRegex(`Disk quota exceeded`, message) || simpleRegex(`No space left on device`, message) {
-		return true
-	}
-	// if simpleRegex(`At least one output file must be specified`, message) {
-	//	return true
-	//}
-	if simpleRegex(`MKVExtract unexpected error`, message) {
-		return true
-	}
-	// if simpleRegex(`core dumped`, message) {
-	//	return true
-	//}
-	if simpleRegex(`dow(n)?load code 500`, message) {
-		return true
-	}
-	// TODO al arreglar el tema del trailing descomentar
-	// if simpleRegex(`Trailing option\(s\) found in the command`, message) {
-	//	return true
-	//}
-	// if simpleRegex(`signal: killed`, message) {
-	//	return true
-	//}
-	// if simpleRegex(`signal: aborted`, message) {
-	//	return true
-	//}
-	// if simpleRegex(`error getting data`, message) {
-	//	return true
-	//}
-	if message == "exit status 1: stder: stdout:" {
-		return true
-	}
-	if simpleRegex(`runtime error: invalid memory address or nil pointer dereference`, message) {
-		return true
-	}
-	if simpleRegex(`CHecksum error on download source`, message) {
-		return true
-	}
-	if simpleRegex(`maybe incorrect parameters such as bit_rate`, message) || simpleRegex(`Could not find codec parameters for stream`, message) {
-		return true
-	}
-	if simpleRegex(`GLIBC_2.34 not found`, message) || simpleRegex(`libc.so.6: version`, message) {
-		return true
-	}
-	if simpleRegex(`received signal 15`, message) {
-		return true
-	}
-	if simpleRegex(`no such host`, message) || simpleRegex(`server misbehaving`, message) || simpleRegex(`i/o timeout`, message) || simpleRegex(`connection failed because connected host has failed to respond`, message) {
-		return true
-	}
-	if simpleRegex(`connection refused`, message) {
-		return true
-	}
-
-	if simpleRegex(`with 0 items`, message) {
-		return false
-	}
-
-	// if simpleRegex(`srt: Invalid data found when processing input`, message) {
-	//	return true
-	//}
-	// if simpleRegex(`segmentation fault`, message) {
-	//	return true
-	//}
-	// mov_text and S_TEXT/WEBVTT are now handled by the worker via mkvextract+convert,
-	// so retry jobs that previously failed with these messages.
-	if simpleRegex(`Subtitle: mov_text`, message) {
-		return true
-	}
-	if simpleRegex(`unsupported AVCodecID S_TEXT/WEBVTT`, message) {
-		return true
-	}
-	if simpleRegex(`Errorf while decoding stream`, message) {
-		return false
-	}
-	if simpleRegex(`Data: bin_data`, message) {
-		return false
-	}
-	if simpleRegex(`scale/rate is 0/0 which is invalid`, message) {
-		return false
-	}
-	if simpleRegex(`probably corrupt input`, message) {
-		return false
-	}
-
 	return false
 }
 

@@ -188,7 +188,7 @@ func TestVideoColorMatrixNormalization(t *testing.T) {
 
 func TestNormalizedProbePersistsColorMetadata(t *testing.T) {
 	var raw ffprobe.ProbeData
-	if err := json.Unmarshal([]byte(`{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","avg_frame_rate":"24/1","pix_fmt":"yuv420p","color_space":"gbr"}],"format":{"duration":"1"}}`), &raw); err != nil {
+	if err := json.Unmarshal([]byte(`{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"avg_frame_rate":"24/1","pix_fmt":"yuv420p","color_space":"gbr"}],"format":{"duration":"1"}}`), &raw); err != nil {
 		t.Fatal(err)
 	}
 	normalized, err := NormalizeFFProbeData(&raw)
@@ -203,7 +203,7 @@ func TestNormalizedProbePersistsColorMetadata(t *testing.T) {
 	if err := json.Unmarshal(data, &restored); err != nil {
 		t.Fatal(err)
 	}
-	if restored.Video.PixelFormat != "yuv420p" || restored.Video.ColorSpace != "gbr" || !restored.Video.NeedsColorMatrixNormalization() {
+	if restored.Video.Codec != "h264" || restored.Video.Width != 1920 || restored.Video.Height != 1080 || restored.Video.PixelFormat != "yuv420p" || restored.Video.ColorSpace != "gbr" || !restored.Video.NeedsColorMatrixNormalization() {
 		t.Fatalf("restored video = %+v, want persisted invalid YUV matrix", restored.Video)
 	}
 }

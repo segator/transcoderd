@@ -35,6 +35,8 @@ These observations are not normative requirements. They need separate fixes or e
 
 ## Resolved implementation discrepancies
 
+- Before `nvdec-gpu-encoding`, the CPU width filter cleared HEVC 10-bit chroma sample position (`left` to unspecified) in two matching-size excerpts. The [pipeline experiment](../docs/av1-pipeline-results.md) found identical decoded pixel hashes but differing AV1 metadata; omitting unnecessary scaling retains `left` on those tested inputs. Chroma handling for sources that still require the filter remains outside that comparison.
+
 - Before `pause-queued-encodes`, the implemented two-job prefetch buffer exceeded the unsynchronized main admission contract; zero admission continued prefetched encodes, and Windows startup could replace local profile limits with stale server values. The change reduces the buffer to one, separates user pause from maintenance drain and gives service-owned profiles authoritative startup limits.
 
 - Native Windows CPU CI exposed a download close failure: syncing the read-only source invokes Windows FlushFileBuffers without write access and prevents checksum publication. Download streams now close without a write flush, then publish their checksum; upload streams retain their sync. A read-only download regression and the complete native E2E cover this fix.

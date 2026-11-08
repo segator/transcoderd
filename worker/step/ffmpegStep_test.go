@@ -33,9 +33,151 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(24)
 		}
+		if os.Getenv("TRANSCODERD_TEST_FAIL_NVDEC") != "" && slices.Contains(os.Args, "-hwaccel") {
+			fmt.Fprintln(os.Stderr, "Device creation failed: CUDA_ERROR_NOT_SUPPORTED")
+		}
 		os.Exit(23)
 	}
 	os.Exit(m.Run())
+}
+
+func TestHardwareDecodeSelectionAndArguments(t *testing.T) {
+	tests := []struct {
+		name, codec, pixel, color string
+		width                     int
+		config                    config.FFMPEGConfig
+		wantHardware, wantScale   bool
+	}{
+		{"h264 8 bit", "h264", "yuv420p", "bt709", 1920, config.FFMPEGConfig{}, true, false},
+		{"hevc 10 bit", "hevc", "yuv420p10le", "bt709", 1280, config.FFMPEGConfig{}, true, false},
+		{"near 1080", "h264", "yuv420p", "bt709", 1952, config.FFMPEGConfig{}, true, false},
+		{"upper margin", "h264", "yuv420p", "bt709", 2000, config.FFMPEGConfig{}, true, false},
+		{"above margin", "h264", "yuv420p", "bt709", 2001, config.FFMPEGConfig{}, false, true},
+		{"4k", "hevc", "yuv420p10le", "bt709", 3840, config.FFMPEGConfig{}, false, true},
+		{"unknown legacy width", "h264", "yuv420p", "bt709", 0, config.FFMPEGConfig{}, false, true},
+		{"unsupported codec", "mpeg2video", "yuv420p", "bt709", 1920, config.FFMPEGConfig{}, false, false},
+		{"unsupported pixel format", "hevc", "yuv444p", "bt709", 1920, config.FFMPEGConfig{}, false, false},
+		{"invalid matrix", "h264", "yuv420p", "gbr", 1920, config.FFMPEGConfig{}, false, false},
+		{"custom arguments", "h264", "yuv420p", "bt709", 1920, config.FFMPEGConfig{ExtraArgs: "-foo bar"}, false, false},
+		{"CPU encoder", "h264", "yuv420p", "bt709", 1920, config.FFMPEGConfig{VideoCodec: config.AV1SVT}, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			height := 1080
+			if tt.width == 0 {
+				height = 0
+			}
+			v := &ffmpeg.Video{Id: 0, Codec: tt.codec, PixelFormat: tt.pixel, ColorSpace: tt.color, Width: tt.width, Height: height}
+			g := FFMPEGGenerator{Config: &tt.config, inputPaths: []string{"source.mkv", "subtitle.srt"}, hardwareDecode: useHardwareDecode(&tt.config, v)}
+			if g.hardwareDecode != tt.wantHardware {
+				t.Fatalf("useHardwareDecode() = %v, want %v", g.hardwareDecode, tt.wantHardware)
+			}
+			if err := g.setVideoFilters(&ffmpeg.NormalizedFFProbe{Video: v}); err != nil {
+				t.Fatal(err)
+			}
+			args := g.buildArguments(0, "", "output.mkv")
+			if slices.Contains(args, "-hwaccel") != tt.wantHardware {
+				t.Errorf("hardware flags = %v", args)
+			}
+			if slices.Contains(args, "-filter:v") != (tt.wantScale || tt.color == "gbr") {
+				t.Errorf("video filters = %v", args)
+			}
+			if tt.wantHardware {
+				if !containsSequence(args, []string{"-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", "source.mkv"}) || slices.Contains(args, "-pix_fmt") {
+					t.Errorf("hardware pipeline = %v", args)
+				}
+				if slices.Contains(args, "-highbitdepth") != (tt.pixel == "yuv420p") {
+					t.Errorf("conversion options = %v", args)
+				}
+			}
+		})
+	}
+}
+
+func TestHardwareDecoderFailureClassification(t *testing.T) {
+	for _, tt := range []struct {
+		message string
+		want    bool
+	}{
+		{"Device creation failed: CUDA_ERROR_NOT_SUPPORTED", true},
+		{"No device available for decoder", true},
+		{"No space left on device", false},
+		{"unsupported subtitle codec", false},
+	} {
+		if got := hardwareDecoderFailure(tt.message); got != tt.want {
+			t.Errorf("hardwareDecoderFailure(%q) = %v, want %v", tt.message, got, tt.want)
+		}
+	}
+}
+
+func TestTallVideoKeepsScaleForPossibleRotation(t *testing.T) {
+	profile := &config.FFMPEGConfig{}
+	video := &ffmpeg.Video{Codec: "h264", PixelFormat: "yuv420p", Width: 1080, Height: 2160}
+	if useHardwareDecode(profile, video) {
+		t.Fatal("tall video unexpectedly enabled hardware decoding")
+	}
+	g := FFMPEGGenerator{Config: profile}
+	if err := g.setVideoFilters(&ffmpeg.NormalizedFFProbe{Video: video}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(g.VideoFilter, "-filter:v") {
+		t.Errorf("rotation-safe scale missing: %v", g.VideoFilter)
+	}
+}
+
+func TestVideoScaleHeightMargin(t *testing.T) {
+	for _, tt := range []struct {
+		height int
+		want   bool
+	}{{2000, false}, {2001, true}} {
+		video := &ffmpeg.Video{Codec: "h264", PixelFormat: "yuv420p", Width: 1080, Height: tt.height}
+		if got := requiresVideoScale(video); got != tt.want {
+			t.Errorf("requiresVideoScale(height %d) = %v, want %v", tt.height, got, tt.want)
+		}
+		if got := useHardwareDecode(&config.FFMPEGConfig{}, video); got == tt.want {
+			t.Errorf("useHardwareDecode(height %d) = %v, want %v", tt.height, got, !tt.want)
+		}
+	}
+}
+
+func TestHardwareDecoderFailureRetriesSoftware(t *testing.T) {
+	dir := t.TempDir()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "ffmpeg"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), binary, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	argsPath := filepath.Join(dir, "args.json")
+	t.Setenv(ffmpegCapturePathEnv, argsPath)
+	t.Setenv("TRANSCODERD_TEST_FAIL_NVDEC", "1")
+	profile := &config.FFMPEGConfig{}
+	j := &job.Context{WorkingDir: dir, Source: &job.VideoData{FilePath: filepath.Join(dir, "source.mkv"), FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{Codec: "h264", Width: 1920, Height: 1080, PixelFormat: "yuv420p"}}}}
+	err = (&FFMPEGStepExecutor{ffmpegConfig: profile}).ffmpeg(t.Context(), &mockLogger{}, j, make(chan ffmpegProgress, 1))
+	if err == nil {
+		t.Fatal("ffmpeg() unexpectedly succeeded")
+	}
+	raw, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args []string
+	if err := json.Unmarshal(raw, &args); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(args, "-hwaccel") || !containsSequence(args, []string{"-pix_fmt", "p010le"}) {
+		t.Errorf("software fallback arguments = %v", args)
+	}
 }
 
 func TestFFMPEGGeneratorVideoProfiles(t *testing.T) {

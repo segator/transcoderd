@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,141 @@ import (
 	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
 )
+
+func TestGeneratedNVDECPipelineRealMedia(t *testing.T) {
+	binary := os.Getenv("AV1_TEST_FFMPEG")
+	if binary == "" {
+		t.Skip("set AV1_TEST_FFMPEG")
+	}
+	for _, variable := range []string{"AV1_TEST_SOURCE_8BIT", "AV1_TEST_SOURCE_10BIT"} {
+		source := os.Getenv(variable)
+		if source == "" {
+			t.Skip("set AV1_TEST_SOURCE_8BIT and AV1_TEST_SOURCE_10BIT")
+		}
+		t.Run(variable, func(t *testing.T) {
+			probe, err := ffmpeg.ExtractFFProbeData(t.Context(), source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			media, err := ffmpeg.NormalizeFFProbeData(probe)
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile := &config.FFMPEGConfig{}
+			g := FFMPEGGenerator{Config: profile, inputPaths: []string{source}, hardwareDecode: useHardwareDecode(profile, media.Video)}
+			if !g.hardwareDecode {
+				t.Fatalf("source not eligible: %+v", media.Video)
+			}
+			if err := g.setVideoFilters(media); err != nil {
+				t.Fatal(err)
+			}
+			output := filepath.Join(t.TempDir(), "result.mkv")
+			args := g.buildArguments(0, "", output)
+			args = slices.Insert(args, len(args)-1, "-frames:v", "96")
+			if out, err := exec.CommandContext(t.Context(), binary, args...).CombinedOutput(); err != nil {
+				t.Fatalf("NVDEC encode: %v\n%s", err, out)
+			}
+			result, err := ffmpeg.ExtractFFProbeData(t.Context(), output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream := result.StreamType("video")[0]
+			if stream.CodecName != "av1" || stream.PixFmt != "yuv420p10le" || stream.Width != media.Video.Width {
+				t.Fatalf("unexpected output: %+v", stream)
+			}
+			if out, err := exec.CommandContext(t.Context(), binary, "-v", "error", "-xerror", "-i", output, "-f", "null", "-").CombinedOutput(); err != nil {
+				t.Fatalf("decode: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
+func TestGeneratedGPU4KUsesSoftwareDecodeAndScales(t *testing.T) {
+	binary, source := os.Getenv("AV1_TEST_FFMPEG"), os.Getenv("AV1_TEST_SOURCE_4K")
+	if binary == "" || source == "" {
+		t.Skip("set AV1_TEST_FFMPEG and AV1_TEST_SOURCE_4K")
+	}
+	probe, err := ffmpeg.ExtractFFProbeData(t.Context(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	media, err := ffmpeg.NormalizeFFProbeData(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := &config.FFMPEGConfig{}
+	g := FFMPEGGenerator{Config: profile, inputPaths: []string{source}, hardwareDecode: useHardwareDecode(profile, media.Video)}
+	if g.hardwareDecode {
+		t.Fatal("4K should use software decoding")
+	}
+	if err := g.setVideoFilters(media); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "result.mkv")
+	args := g.buildArguments(0, "", output)
+	args = slices.Insert(args, len(args)-1, "-frames:v", "48")
+	if out, err := exec.CommandContext(t.Context(), binary, args...).CombinedOutput(); err != nil {
+		t.Fatalf("4K encode: %v\n%s", err, out)
+	}
+	result, err := ffmpeg.ExtractFFProbeData(t.Context(), output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := result.StreamType("video")[0]
+	if stream.CodecName != "av1" || stream.PixFmt != "yuv420p10le" || stream.Width != 1920 {
+		t.Fatalf("unexpected output: %+v", stream)
+	}
+	if out, err := exec.CommandContext(t.Context(), binary, "-v", "error", "-xerror", "-i", output, "-f", "null", "-").CombinedOutput(); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+}
+
+func TestGeneratedNVDECPreservesHDRColorMetadata(t *testing.T) {
+	binary, source := os.Getenv("AV1_TEST_FFMPEG"), os.Getenv("AV1_TEST_SOURCE_HDR")
+	if binary == "" || source == "" {
+		t.Skip("set AV1_TEST_FFMPEG and AV1_TEST_SOURCE_HDR")
+	}
+	input := filepath.Join(t.TempDir(), "hdr-hevc.mkv")
+	args := []string{"-v", "error", "-i", source, "-frames:v", "24", "-an", "-vf", "scale=1920:1080", "-pix_fmt", "yuv420p10le", "-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "pools=2:frame-threads=1:log-level=error", input}
+	if out, err := exec.CommandContext(t.Context(), binary, args...).CombinedOutput(); err != nil {
+		t.Fatalf("create HDR source: %v\n%s", err, out)
+	}
+	probe, err := ffmpeg.ExtractFFProbeData(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	media, err := ffmpeg.NormalizeFFProbeData(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := probe.StreamType("video")[0]
+	if original.ColorTransfer != "smpte2084" || original.ColorPrimaries != "bt2020" || original.ColorSpace != "bt2020nc" {
+		t.Fatalf("input HDR metadata = %+v", original)
+	}
+	profile := &config.FFMPEGConfig{}
+	g := FFMPEGGenerator{Config: profile, inputPaths: []string{input}, hardwareDecode: useHardwareDecode(profile, media.Video)}
+	if !g.hardwareDecode {
+		t.Fatalf("HDR source not eligible: %+v", media.Video)
+	}
+	if err := g.setVideoFilters(media); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "hdr-av1.mkv")
+	if out, err := exec.CommandContext(t.Context(), binary, g.buildArguments(0, "", output)...).CombinedOutput(); err != nil {
+		t.Fatalf("HDR NVDEC encode: %v\n%s", err, out)
+	}
+	result, err := ffmpeg.ExtractFFProbeData(t.Context(), output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := result.StreamType("video")[0]
+	if stream.PixFmt != "yuv420p10le" || stream.ColorTransfer != original.ColorTransfer || stream.ColorPrimaries != original.ColorPrimaries || stream.ColorSpace != original.ColorSpace {
+		t.Fatalf("output HDR metadata = %+v", stream)
+	}
+	if out, err := exec.CommandContext(t.Context(), binary, "-v", "error", "-xerror", "-i", output, "-f", "null", "-").CombinedOutput(); err != nil {
+		t.Fatalf("decode HDR: %v\n%s", err, out)
+	}
+}
 
 func TestGeneratedAV1CommandsEncodeAndDecode(t *testing.T) {
 	ffmpegBinary := os.Getenv("AV1_TEST_FFMPEG")
@@ -64,7 +200,7 @@ func TestGeneratedAV1CommandsEncodeAndDecode(t *testing.T) {
 				}
 			}
 			cfg := &config.FFMPEGConfig{VideoCodec: tt.codec, VideoCRF: tt.crf, AudioCodec: "libfdk_aac", AudioVBR: 5}
-			generator := FFMPEGGenerator{Config: cfg}
+			generator := FFMPEGGenerator{Config: cfg, hardwareDecode: useHardwareDecode(cfg, normalized.Video)}
 			jobContext := &job.Context{WorkingDir: workingDir, Source: &job.VideoData{FilePath: source, FFProbeData: normalized}}
 			generator.setInputFilters(jobContext)
 			if err := generator.setVideoFilters(normalized); err != nil {

@@ -11,7 +11,6 @@ separate CPU/GPU worker examples are in [deployment](worker-deployment.md).
 
 ```text
 -threads 0
--filter:v "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease"
 -pix_fmt p010le -c:v av1_nvenc -preset p7 -tune uhq
 -rc vbr -cq 38 -b:v 0 -multipass fullres
 -bf 4 -b_ref_mode middle -split_encode_mode disabled
@@ -20,9 +19,9 @@ separate CPU/GPU worker examples are in [deployment](worker-deployment.md).
 
 | Parameter | Meaning and reason |
 | --- | --- |
-| `-threads 0` | Let FFmpeg decide applicable CPU threading; software decode and scaling still use CPU. It does not set the number of GPU sessions. |
-| `scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease` | Existing CPU scaling filter: cap width at 1920 without enlarging narrower sources, preserving aspect ratio. A 4K source is reduced; this is a separate size/quality change from AV1 compression. |
-| `-pix_fmt p010le` | Supply 10-bit 4:2:0 surfaces to NVENC. AV1 is encoded as 10-bit; converting 8-bit input does not recover missing source detail. |
+| `-threads 0` | Let FFmpeg decide applicable CPU threading. It does not set the number of GPU sessions. |
+| `scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease` | CPU scaling filter used when either source dimension exceeds 2000 pixels or dimensions are unknown. The 80-pixel margin avoids resizing sources close to 1920; larger widths are reduced to 1920. This accounts for possible autorotation; a tall unrotated source might pass through without resizing. A 4K source is reduced; this is a separate size/quality change from AV1 compression. |
+| 10-bit input to NVENC | Software decoding supplies `p010le`; hardware decoding supplies CUDA frames and requests internal conversion for 8-bit sources. AV1 remains 10-bit; conversion does not recover missing source detail. |
 | `-c:v av1_nvenc` | Encode AV1 using NVIDIA's hardware video encoder. |
 | `-preset p7` | Most quality-oriented NVENC preset. The user-approved film used it; it is not the fastest preset. Preset numbers cannot be compared to SVT preset numbers. |
 | `-tune uhq` | Request ultra-high-quality tuning and its additional encoder analysis. More work can improve compression/quality; it is not a guarantee for every scene. |
@@ -40,12 +39,21 @@ The remaining settings form the selected profile. AV1 uses the encoder's AV1
 profile selection; the HEVC-specific `main10` option is not passed to AV1.
 `videoCRF` and `videoProfile` are rejected with this encoder.
 
-There is no `-hwaccel cuda` or `scale_cuda` in this recipe. Decode and the width
-filter remain on CPU; encode runs on GPU. Earlier 1080p trials found effectively
-the same throughput with GPU decode/scale, while actual resizing changed the
-image and needed separate quality validation. This is the tested reference
-path. HDR preservation and 4K-to-1080p treatment need their own deployment
-validation; the full-film pilot was SDR 1080p.
+For eligible H.264 and HEVC 4:2:0 sources with dimensions at most 2000, the worker
+uses NVDEC and feeds CUDA frames directly to NVENC. Eight-bit inputs use NVENC's
+internal conversion to 10-bit output. It omits the explicit resize filter for
+sources with both known dimensions at most 2000 pixels; FFmpeg may still insert a pixel
+format converter when needed. Larger inputs retain software decoding
+and the width filter shown above. Sources with missing probe metadata,
+unsupported formats, invalid YUV color matrices or custom input arguments also
+use software decoding. Recognizable hardware decoder initialization failures
+before encoding starts retry once with software decoding. CPU encoders continue
+to use software decoding. HDR preservation and 4K-to-1080p treatment need
+their own deployment validation; the full-film pilot was SDR 1080p.
+
+The [2026-11-08 pipeline experiment](av1-pipeline-results.md) separately measures
+NVDEC under simultaneous SVT load, 8/10-bit output and retaining original 4K
+dimensions, including the quality and size effect of the NVENC conversion.
 
 ## AV1 CPU: selectable SVT-AV1
 
@@ -58,7 +66,6 @@ quality trade-off; these scenes do not establish whole-film quality.
 
 ```text
 -threads 0
--filter:v "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease"
 -pix_fmt yuv420p10le -c:v libsvtav1 -preset 4 -crf 26
 ```
 
@@ -79,6 +86,10 @@ The [CPU preset comparison](av1-cpu-preset-comparison.md) records measured
 trade-offs and balanced alternatives. A fixed CRF is not a promise that every
 title meets the p5 VMAF target. CPU and GPU quality values are different scales;
 equal numeric CRF/CQ settings are not a fair comparison.
+
+The [SVT decoding comparison](svt-nvdec-decode-comparison.md) measured CPU and
+NVDEC decoding both alone and alongside an NVENC job. On its two short source
+excerpts NVDEC did not improve total time, so SVT continues to decode on CPU.
 
 An earlier comparison used three representative 15-second clips and the
 previous CRF25 CPU candidate. CQ38 produced 24.6–48.6% smaller video segments, with p5

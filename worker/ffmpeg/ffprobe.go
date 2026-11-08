@@ -26,6 +26,9 @@ type Video struct {
 	FrameRate   int
 	PixelFormat string `json:",omitempty"`
 	ColorSpace  string `json:",omitempty"`
+	Codec       string `json:",omitempty"`
+	Width       int    `json:",omitempty"`
+	Height      int    `json:",omitempty"`
 }
 
 // NeedsColorMatrixNormalization identifies an impossible RGB identity matrix on
@@ -306,6 +309,9 @@ func NormalizeFFProbeData(data *ffprobe.ProbeData) (container *NormalizedFFProbe
 		FrameRate:   frameRate,
 		PixelFormat: videoStream.PixFmt,
 		ColorSpace:  videoStream.ColorSpace,
+		Codec:       videoStream.CodecName,
+		Width:       videoStream.Width,
+		Height:      videoStream.Height,
 	}
 
 	betterAudioStreamPerLanguage := make(map[string]*Audio)

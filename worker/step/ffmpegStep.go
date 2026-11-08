@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"transcoder/helper"
@@ -92,6 +93,7 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 		profile = jobContext.EncodeConfig
 	}
 	ffmpegGenerator := &FFMPEGGenerator{Config: profile}
+	ffmpegGenerator.hardwareDecode = useHardwareDecode(profile, jobContext.Source.FFProbeData.Video)
 	ffmpegGenerator.setInputFilters(jobContext)
 	if err := ffmpegGenerator.setVideoFilters(jobContext.Source.FFProbeData); err != nil {
 		return err
@@ -99,6 +101,7 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 	ffmpegGenerator.setAudioFilters(jobContext.Source.FFProbeData)
 	ffmpegGenerator.setSubtFilters(jobContext.Source.FFProbeData)
 	ffmpegErrLog := ""
+	var started atomic.Bool
 
 	checkPercentageFFMPEG := func(buffer []byte, exit bool) {
 		ffmpegErrLog += string(buffer)
@@ -110,6 +113,9 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 			return
 		}
 		s := cfg.Section("")
+		if frame, frameErr := s.Key("frame").Int64(); frameErr == nil && frame > 0 {
+			started.Store(true)
+		}
 		progress := s.Key("progress").String()
 		if progress == "continue" {
 			var progressValue int64
@@ -140,15 +146,27 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 	encodedFilePath := fmt.Sprintf("%s-encoded.%s", strings.TrimSuffix(sourceFileName, filepath.Ext(sourceFileName)), "mkv")
 	targetPath := filepath.Join(jobContext.WorkingDir, encodedFilePath)
 
-	ffmpegArguments := ffmpegGenerator.buildArguments(uint8(profile.Threads), profile.ExtraArgs, targetPath)
-	ffmpegCommand := command.NewCommand(helper.GetFFmpegPath(), ffmpegArguments...).SetPauseController(f.pauseController, jobContext.JobId.String())
-	logger.Cmdf("FFMPEG Command: %s", ffmpegCommand.GetFullCommand())
-	ffmpegCommand = ffmpegCommand.
-		SetWorkDir(jobContext.WorkingDir).
-		SetStdoutFunc(stdoutFFMPEG).
-		SetStderrFunc(checkPercentageFFMPEG)
-
-	exitCode, err := ffmpegCommand.RunWithContext(ctx)
+	run := func() (int, error) {
+		args := ffmpegGenerator.buildArguments(uint8(profile.Threads), profile.ExtraArgs, targetPath)
+		cmd := command.NewCommand(helper.GetFFmpegPath(), args...).SetPauseController(f.pauseController, jobContext.JobId.String())
+		logger.Cmdf("FFMPEG Command: %s", cmd.GetFullCommand())
+		return cmd.SetWorkDir(jobContext.WorkingDir).SetStdoutFunc(stdoutFFMPEG).SetStderrFunc(checkPercentageFFMPEG).RunWithContext(ctx)
+	}
+	exitCode, err := run()
+	hardwareErrLog := ""
+	if ffmpegGenerator.hardwareDecode && ctx.Err() == nil && !started.Load() && (err != nil || exitCode != 0) && hardwareDecoderFailure(ffmpegErrLog) {
+		logger.Warnf("NVIDIA decoder initialization failed; retrying with software decoding")
+		hardwareErrLog = ffmpegErrLog
+		ffmpegGenerator.hardwareDecode = false
+		if filterErr := ffmpegGenerator.setVideoFilters(jobContext.Source.FFProbeData); filterErr != nil {
+			return filterErr
+		}
+		ffmpegErrLog = ""
+		exitCode, err = run()
+	}
+	if hardwareErrLog != "" && (err != nil || exitCode != 0) {
+		ffmpegErrLog = "hardware attempt: " + hardwareErrLog + "\nsoftware retry: " + ffmpegErrLog
+	}
 	if err != nil {
 		return fmt.Errorf("%w: stder:%s", err, ffmpegErrLog)
 	}
@@ -193,6 +211,32 @@ type FFMPEGGenerator struct {
 	VideoFilter    []string
 	AudioFilter    [][]string
 	SubtitleFilter [][]string
+	hardwareDecode bool
+}
+
+const maxUnscaledDimension = 2000
+
+func requiresVideoScale(video *ffmpeg.Video) bool {
+	return video == nil || video.Width <= 0 || video.Height <= 0 || video.Width > maxUnscaledDimension || video.Height > maxUnscaledDimension
+}
+
+func useHardwareDecode(cfg *config.FFMPEGConfig, video *ffmpeg.Video) bool {
+	settings, err := cfg.ResolveVideoSettings()
+	if err != nil || settings.Codec != config.AV1NVENC || requiresVideoScale(video) || video.NeedsColorMatrixNormalization() || cfg.ExtraArgs != "" {
+		return false
+	}
+	codec, pix := strings.ToLower(video.Codec), strings.ToLower(video.PixelFormat)
+	return (codec == "h264" || codec == "hevc") && (pix == "yuv420p" || pix == "yuv420p10le")
+}
+
+func hardwareDecoderFailure(message string) bool {
+	message = strings.ToLower(message)
+	for _, token := range []string{"device creation failed", "failed setup for format cuda", "cannot load libnvcuvid", "failed to create cuda", "cuda_error", "no device available for decoder", "unsupported codec for hwaccel", "does not support the required nvdec", "impossible to convert between the formats"} {
+		if strings.Contains(message, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *FFMPEGGenerator) setAudioFilters(container *ffmpeg.NormalizedFFProbe) {
@@ -211,19 +255,33 @@ func (f *FFMPEGGenerator) setVideoFilters(container *ffmpeg.NormalizedFFProbe) e
 	if err != nil {
 		return err
 	}
-	videoFilter := "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease"
+	videoFilter := ""
+	if requiresVideoScale(container.Video) {
+		videoFilter = "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease"
+	}
 	if container.Video.NeedsColorMatrixNormalization() {
-		videoFilter += ",setparams=colorspace=unknown"
+		if videoFilter != "" {
+			videoFilter += ","
+		}
+		videoFilter += "setparams=colorspace=unknown"
 	}
 	f.VideoFilter = []string{
 		"-map", fmt.Sprintf("0:%d", container.Video.Id),
 		"-avoid_negative_ts", "make_zero", "-copyts", "-map_chapters", "-1",
 		"-flags", "+global_header",
-		"-filter:v", videoFilter,
-		"-pix_fmt", settings.PixelFormat, "-c:v", settings.Codec,
 	}
+	if videoFilter != "" {
+		f.VideoFilter = append(f.VideoFilter, "-filter:v", videoFilter)
+	}
+	if !f.hardwareDecode {
+		f.VideoFilter = append(f.VideoFilter, "-pix_fmt", settings.PixelFormat)
+	}
+	f.VideoFilter = append(f.VideoFilter, "-c:v", settings.Codec)
 	switch settings.Codec {
 	case config.AV1NVENC:
+		if f.hardwareDecode && strings.EqualFold(container.Video.PixelFormat, "yuv420p") {
+			f.VideoFilter = append(f.VideoFilter, "-highbitdepth", "1")
+		}
 		f.VideoFilter = append(f.VideoFilter,
 			"-preset", settings.Preset, "-tune", "uhq", "-rc", "vbr",
 			"-cq", strconv.Itoa(settings.CQ), "-b:v", "0", "-multipass", "fullres",
@@ -308,7 +366,10 @@ func (f *FFMPEGGenerator) buildArguments(threads uint8, extraArgs string, output
 	args = append(args, "-progress", "pipe:1", "-hide_banner", "-nostdin",
 		"-threads", strconv.Itoa(int(threads)), "-analyzeduration", "2147483647",
 		"-probesize", "2147483647")
-	for _, input := range f.inputPaths {
+	for index, input := range f.inputPaths {
+		if index == 0 && f.hardwareDecode {
+			args = append(args, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+		}
 		args = append(args, "-i", input)
 	}
 	args = append(args, "-max_muxing_queue_size", "9999")

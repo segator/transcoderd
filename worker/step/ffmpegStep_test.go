@@ -186,6 +186,7 @@ func TestFFMPEGGeneratorMapsMovTextDirectlyWithMixedSubtitleInputs(t *testing.T)
 			{Id: 2, Format: "none", Language: "fre", Title: "French WebVTT"},
 			{Id: 3, Format: "mov_text", Language: "spa", Title: "Spanish", Forced: true},
 			{Id: 4, Format: "hdmv_pgs_subtitle", Language: "eng", Title: "English PGS"},
+			{Id: 5, Format: "eia_608", Language: "eng", Title: "English captions", Comment: true},
 		},
 	}
 	generator := FFMPEGGenerator{Config: &config.FFMPEGConfig{AudioCodec: "aac"}}
@@ -205,6 +206,8 @@ func TestFFMPEGGeneratorMapsMovTextDirectlyWithMixedSubtitleInputs(t *testing.T)
 		{"-map", "0:3", "-c:s:1", "srt", "-disposition:s:1", "forced+default"},
 		{"-metadata:s:s:1", "language=spa", "-metadata:s:s:1", "title=Spanish"},
 		{"-map", "2:0", "-c:s:2", "srt"},
+		{"-map", "0:5", "-c:s:3", "srt", "-disposition:s:3", "comment"},
+		{"-metadata:s:s:3", "language=eng", "-metadata:s:s:3", "title=English captions"},
 	} {
 		if !containsSequence(args, want) {
 			t.Errorf("arguments %v missing sequence %v", args, want)
@@ -212,6 +215,37 @@ func TestFFMPEGGeneratorMapsMovTextDirectlyWithMixedSubtitleInputs(t *testing.T)
 	}
 	if slices.Contains(args, filepath.Join(workingDir, "3.srt")) {
 		t.Errorf("mov_text should not use an extracted SRT input: %v", args)
+	}
+}
+
+func TestFFMPEGGeneratorNormalizesOnlyInvalidYUVMatrix(t *testing.T) {
+	tests := []struct {
+		name, pixelFormat, colorSpace string
+		wantNormalization             bool
+	}{
+		{"invalid matrix", "yuv420p", "gbr", true},
+		{"SDR", "yuv420p", "bt709", false},
+		{"HDR", "yuv420p10le", "bt2020nc", false},
+		{"RGB", "gbrp", "gbr", false},
+		{"legacy", "", "", false},
+	}
+	for _, codec := range []string{config.AV1NVENC, config.AV1SVT, config.HEVCX265} {
+		for _, tt := range tests {
+			t.Run(codec+"/"+tt.name, func(t *testing.T) {
+				g := FFMPEGGenerator{Config: &config.FFMPEGConfig{VideoCodec: codec}}
+				v := &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{PixelFormat: tt.pixelFormat, ColorSpace: tt.colorSpace}}
+				if err := g.setVideoFilters(v); err != nil {
+					t.Fatal(err)
+				}
+				want := "scale='min(1920,iw)':-1:force_original_aspect_ratio=decrease"
+				if tt.wantNormalization {
+					want += ",setparams=colorspace=unknown"
+				}
+				if !containsSequence(g.VideoFilter, []string{"-filter:v", want}) {
+					t.Errorf("setVideoFilters() = %v, want filter %q", g.VideoFilter, want)
+				}
+			})
+		}
 	}
 }
 

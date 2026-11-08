@@ -21,10 +21,29 @@ import (
 )
 
 type Video struct {
-	Id        uint8
-	Duration  time.Duration
-	FrameRate int
+	Id          uint8
+	Duration    time.Duration
+	FrameRate   int
+	PixelFormat string `json:",omitempty"`
+	ColorSpace  string `json:",omitempty"`
 }
+
+// NeedsColorMatrixNormalization identifies an impossible RGB identity matrix on
+// a YUV source. Actual RGB and contexts saved before color metadata was retained
+// keep FFmpeg's normal color handling.
+func (v *Video) NeedsColorMatrixNormalization() bool {
+	if !strings.EqualFold(v.ColorSpace, "gbr") {
+		return false
+	}
+	pixelFormat := strings.ToLower(v.PixelFormat)
+	for _, prefix := range []string{"yuv", "nv12", "nv21", "p010", "p012", "p016", "p210", "p212", "p216", "p410", "p412", "p416"} {
+		if strings.HasPrefix(pixelFormat, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 type Audio struct {
 	Id             uint8
 	Language       string
@@ -121,7 +140,7 @@ func (s *Subtitle) NeedsMKVExtraction() bool {
 // NeedsDirectSRTConversion reports whether the subtitle must be converted to SRT
 // by FFmpeg while reading the original media, instead of being copied or extracted.
 func (s *Subtitle) NeedsDirectSRTConversion() bool {
-	return strings.EqualFold(s.Format, "mov_text")
+	return strings.EqualFold(s.Format, "mov_text") || strings.EqualFold(s.Format, "eia_608")
 }
 
 func ExtractFFProbeData(ctx context.Context, inputFile string) (data *ffprobe.ProbeData, err error) {
@@ -282,9 +301,11 @@ func NormalizeFFProbeData(data *ffprobe.ProbeData) (container *NormalizedFFProbe
 	}
 
 	container.Video = &Video{
-		Id:        uint8(videoStream.Index),
-		Duration:  data.Format.Duration(),
-		FrameRate: frameRate,
+		Id:          uint8(videoStream.Index),
+		Duration:    data.Format.Duration(),
+		FrameRate:   frameRate,
+		PixelFormat: videoStream.PixFmt,
+		ColorSpace:  videoStream.ColorSpace,
 	}
 
 	betterAudioStreamPerLanguage := make(map[string]*Audio)

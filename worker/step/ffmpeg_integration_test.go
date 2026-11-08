@@ -200,3 +200,116 @@ func TestGeneratedAV1CommandConvertsMP4MovTextToSRT(t *testing.T) {
 		t.Errorf("output did not fully decode: %v\n%s", err, decoded)
 	}
 }
+
+func TestGeneratedAV1CommandConvertsEIA608ToSRT(t *testing.T) {
+	ffmpegBinary := os.Getenv("AV1_TEST_FFMPEG")
+	if ffmpegBinary == "" {
+		t.Skip("set AV1_TEST_FFMPEG to an SVT-AV1 build")
+	}
+	dir := t.TempDir()
+	scc := filepath.Join(dir, "captions.scc")
+	if err := os.WriteFile(scc, []byte("Scenarist_SCC V1.0\n\n00:00:01:00\t9420 9420 94ae 94ae c8e9 942f 942f\n\n00:00:02:00\t942c 942c\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "captions.mov")
+	args := []string{"-v", "error", "-f", "lavfi", "-i", "color=c=black:s=128x72:r=25:d=3", "-i", scc,
+		"-map", "0:v", "-map", "1:0", "-c:v", "mpeg4", "-c:s", "copy", "-metadata:s:s:0", "language=eng", "-y", source}
+	if out, err := exec.CommandContext(t.Context(), ffmpegBinary, args...).CombinedOutput(); err != nil {
+		t.Fatalf("create caption fixture: %v: %s", err, out)
+	}
+	probe, err := ffmpeg.ExtractFFProbeData(t.Context(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := ffmpeg.NormalizeFFProbeData(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(normalized.Subtitle) != 1 || normalized.Subtitle[0].Format != "eia_608" || normalized.HaveExtractableSubtitle() {
+		t.Fatalf("caption fixture = %+v, want direct EIA-608", normalized.Subtitle)
+	}
+	normalized.Subtitle[0].Forced, normalized.Subtitle[0].Comment = true, true
+	normalized.Subtitle[0].Title = "Closed captions"
+	g := FFMPEGGenerator{Config: &config.FFMPEGConfig{VideoCodec: config.AV1SVT, VideoPreset: "12", VideoCRF: 35}}
+	g.setInputFilters(&job.Context{WorkingDir: dir, Source: &job.VideoData{FilePath: source, FFProbeData: normalized}})
+	if err := g.setVideoFilters(normalized); err != nil {
+		t.Fatal(err)
+	}
+	g.setSubtFilters(normalized)
+	output := filepath.Join(dir, "output.mkv")
+	if out, err := exec.CommandContext(t.Context(), ffmpegBinary, g.buildArguments(1, "", output)...).CombinedOutput(); err != nil {
+		t.Fatalf("encode captions: %v: %s", err, out)
+	}
+	result, err := ffmpeg.ExtractFFProbeData(t.Context(), output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streams := result.StreamType("subtitle")
+	if len(streams) != 1 {
+		t.Fatalf("output subtitle count = %d, want 1", len(streams))
+	}
+	s := streams[0]
+	language, _ := s.TagList.GetString("language")
+	title, _ := s.TagList.GetString("title")
+	if s.CodecName != "subrip" || language != "eng" || title != "Closed captions" || s.Disposition.Forced != 1 || s.Disposition.Comment != 1 {
+		t.Fatalf("output caption metadata = %+v", s)
+	}
+	text, err := exec.CommandContext(t.Context(), ffmpegBinary, "-v", "error", "-i", output, "-map", "0:s", "-f", "srt", "-").CombinedOutput()
+	if err != nil || !strings.Contains(string(text), "Hi") {
+		t.Fatalf("decoded captions = %s, error %v", text, err)
+	}
+	if out, err := exec.CommandContext(t.Context(), ffmpegBinary, "-v", "error", "-i", output, "-f", "null", "-").CombinedOutput(); err != nil {
+		t.Fatalf("decode output: %v: %s", err, out)
+	}
+}
+
+func TestGeneratedAV1CommandPreservesValidColorsAndClearsInvalidMatrix(t *testing.T) {
+	ffmpegBinary := os.Getenv("AV1_TEST_FFMPEG")
+	if ffmpegBinary == "" {
+		t.Skip("set AV1_TEST_FFMPEG to an SVT-AV1 build")
+	}
+	tests := []struct{ name, matrix, primaries, transfer, wantMatrix string }{
+		{"invalid YUV identity", "0", "bt709", "bt709", "unknown"},
+		{"SDR", "bt709", "bt709", "bt709", "bt709"},
+		{"HDR", "bt2020nc", "bt2020", "smpte2084", "bt2020nc"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			source := filepath.Join(dir, "source.mkv")
+			args := []string{"-v", "error", "-f", "lavfi", "-i", "color=c=black:s=128x72:r=24:d=1", "-c:v", "ffv1", "-pix_fmt", "yuv420p10le",
+				"-vf", "setparams=colorspace=" + tt.matrix + ":color_primaries=" + tt.primaries + ":color_trc=" + tt.transfer, "-y", source}
+			if out, err := exec.CommandContext(t.Context(), ffmpegBinary, args...).CombinedOutput(); err != nil {
+				t.Fatalf("create color fixture: %v: %s", err, out)
+			}
+			probe, err := ffmpeg.ExtractFFProbeData(t.Context(), source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			normalized, err := ffmpeg.NormalizeFFProbeData(probe)
+			if err != nil {
+				t.Fatal(err)
+			}
+			g := FFMPEGGenerator{Config: &config.FFMPEGConfig{VideoCodec: config.AV1SVT, VideoPreset: "12", VideoCRF: 35}}
+			g.setInputFilters(&job.Context{WorkingDir: dir, Source: &job.VideoData{FilePath: source, FFProbeData: normalized}})
+			if err := g.setVideoFilters(normalized); err != nil {
+				t.Fatal(err)
+			}
+			output := filepath.Join(dir, "output.mkv")
+			if out, err := exec.CommandContext(t.Context(), ffmpegBinary, g.buildArguments(1, "", output)...).CombinedOutput(); err != nil {
+				t.Fatalf("encode colors: %v: %s", err, out)
+			}
+			result, err := ffmpeg.ExtractFFProbeData(t.Context(), output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := result.StreamType("video")[0]
+			if (v.ColorSpace != tt.wantMatrix && !(tt.wantMatrix == "unknown" && v.ColorSpace == "")) || v.ColorPrimaries != tt.primaries || v.ColorTransfer != tt.transfer {
+				t.Fatalf("output colors = %s/%s/%s, want %s/%s/%s", v.ColorSpace, v.ColorPrimaries, v.ColorTransfer, tt.wantMatrix, tt.primaries, tt.transfer)
+			}
+			if out, err := exec.CommandContext(t.Context(), ffmpegBinary, "-v", "error", "-i", output, "-f", "null", "-").CombinedOutput(); err != nil {
+				t.Fatalf("decode output: %v: %s", err, out)
+			}
+		})
+	}
+}

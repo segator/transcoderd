@@ -16,8 +16,6 @@ import (
 	"transcoder/worker/config"
 	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
-
-	"github.com/asticode/go-astisub"
 )
 
 type PGSToSrtStepExecutor struct {
@@ -126,9 +124,13 @@ func (p *PGSToSrtStepExecutor) convertPGSToSrt(ctx context.Context, tracker Trac
 		return fmt.Errorf("no items converted: %s", pgslog)
 	}
 
-	subtitles, err := astisub.OpenFile(outputFilePath)
+	data, err := os.ReadFile(outputFilePath)
 	if err != nil {
-		return fmt.Errorf("could not parse subtitles: %v: %s", err, pgslog)
+		return fmt.Errorf("read OCR subtitle track %d: %w", subtitle.Id, err)
+	}
+	subtitles, err := parseConvertedSRT(data)
+	if err != nil {
+		return fmt.Errorf("could not parse subtitles for track %d: %w: %s", subtitle.Id, err, pgslog)
 	}
 
 	for _, item := range subtitles.Items {
@@ -139,16 +141,11 @@ func (p *PGSToSrtStepExecutor) convertPGSToSrt(ctx context.Context, tracker Trac
 	}
 	subtitles.Optimize()
 	subtitles.Unfragment()
-	outFile, err := os.OpenFile(outputFilePath, os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("could not open file for writing: %v", err)
-	}
-	defer outFile.Close()
-	if err = subtitles.WriteToSRT(outFile); err != nil {
-		return fmt.Errorf("could not write to file: %v", err)
+	if err := writeConvertedSRT(outputFilePath, subtitles); err != nil {
+		return fmt.Errorf("write OCR subtitle track %d: %w", subtitle.Id, err)
 	}
 
-	return err
+	return nil
 }
 
 func pgsCommand(cfg *config.PGSConfig, arguments []string) *command.Command {

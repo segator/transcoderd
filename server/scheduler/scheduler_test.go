@@ -353,14 +353,14 @@ func TestVerifyFailureMessage(t *testing.T) {
 		want    bool
 	}{
 		{
-			name:    "mov_text subtitle now retries",
+			name:    "mov_text listing does not retry",
 			message: "error: Subtitle: mov_text is not supported",
-			want:    true,
+			want:    false,
 		},
 		{
-			name:    "WebVTT codec now retries",
+			name:    "WebVTT warning does not retry",
 			message: "unsupported AVCodecID S_TEXT/WEBVTT in stream 3",
-			want:    true,
+			want:    false,
 		},
 		{
 			name:    "disk quota exceeded retries",
@@ -393,9 +393,9 @@ func TestVerifyFailureMessage(t *testing.T) {
 			want:    false,
 		},
 		{
-			name:    "mkvextract error retries",
+			name:    "unclassified mkvextract error does not retry",
 			message: "MKVExtract unexpected error during extraction",
-			want:    true,
+			want:    false,
 		},
 		{
 			name:    "download 500 retries",
@@ -413,9 +413,9 @@ func TestVerifyFailureMessage(t *testing.T) {
 			want:    true,
 		},
 		{
-			name:    "GLIBC not found retries",
+			name:    "missing runtime library does not retry",
 			message: "GLIBC_2.34 not found",
-			want:    true,
+			want:    false,
 		},
 		{
 			name:    "received signal 15 retries",
@@ -443,19 +443,19 @@ func TestVerifyFailureMessage(t *testing.T) {
 			want:    false,
 		},
 		{
-			name:    "exit status 1 empty stderr retries",
+			name:    "empty diagnostic does not retry",
 			message: "exit status 1: stder: stdout:",
-			want:    true,
+			want:    false,
 		},
 		{
-			name:    "nil pointer retries",
+			name:    "programming error does not retry",
 			message: "runtime error: invalid memory address or nil pointer dereference",
-			want:    true,
+			want:    false,
 		},
 		{
-			name:    "maybe incorrect parameters retries",
+			name:    "generic encoder hint does not retry",
 			message: "maybe incorrect parameters such as bit_rate, rate, width or height",
-			want:    true,
+			want:    false,
 		},
 		{
 			name:    "no such host retries",
@@ -483,6 +483,78 @@ func TestVerifyFailureMessage(t *testing.T) {
 			got := verifyFailureMessage(tt.message)
 			if got != tt.want {
 				t.Errorf("verifyFailureMessage(%q) = %v, want %v", tt.message, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestVerifyFailureMessageUsesCauseInsteadOfProbeWarnings(t *testing.T) {
+	probeWarning := "Could not find codec parameters for stream 5 (Subtitle: hdmv_pgs_subtitle): unspecified size\n"
+	encoderHint := "Error while opening encoder - maybe incorrect parameters such as bit_rate, rate, width or height.\n"
+	tests := []struct {
+		name, message string
+		want          bool
+	}{
+		{"probe warning alone", probeWarning, false},
+		{"generic encoder hint", encoderHint, false},
+		{"unsupported EIA608 with source listing", "Subtitle: mov_text\nSubtitle codec eia_608 is not supported.\n" + probeWarning, false},
+		{"invalid matrix", encoderHint + "Identity matrix (matrix_coefficient = 0) may be used only with 4:4:4 color format.", false},
+		{"invalid NVENC colors", encoderHint + "InitializeEncoder failed: invalid param (8): invalid color configuration.", false},
+		{"invalid extracted SRT", probeWarning + "Unknown/unsupported AVCodecID S_TEXT/WEBVTT.\nError opening input files: Invalid data found when processing input", false},
+		{"invalid validated SRT", "invalid converted subtitle: expected 85 cues, got empty output", false},
+		{"SVT RAM failure", probeWarning + "SvtMalloc[fatal]: allocate memory failed", true},
+		{"SVT output allocation", "Failed to allocate output packet.", true},
+		{"NVENC VRAM failure", encoderHint + "Failed locking bitstream buffer: out of memory (10)", true},
+		{"RAM failure with invalid input", "Cannot allocate memory\ninvalid color configuration", false},
+		{"network reset", "read: connection reset by peer", true},
+		{"size guard", probeWarning + "source File size 10 bytes is less than encoded 20 bytes", false},
+		{"new duration guard", "source video duration 5000 differs from encoded video duration 2000", false},
+		{"native access violation", "exit status 0xc0000005: stder:" + probeWarning, false},
+		{"GPU runtime missing", encoderHint + "Cannot load libnvidia-encode.so.1", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := verifyFailureMessage(tt.message); got != tt.want {
+				t.Errorf("verifyFailureMessage() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFailedMaintenanceRetriesResourcesWithinExistingLimit(t *testing.T) {
+	tests := []struct {
+		name, message string
+		failures      int
+		want          model.NotificationStatus
+	}{
+		{"RAM retry", "Cannot allocate memory", 1, model.QueuedNotificationStatus},
+		{"VRAM at limit", "Failed locking bitstream buffer: out of memory (10)", 10, model.QueuedNotificationStatus},
+		{"VRAM above limit", "Failed locking bitstream buffer: out of memory (10)", 11, model.CanceledNotificationStatus},
+		{"permanent codec error", "Could not find codec parameters for stream\nSubtitle codec eia_608 is not supported", 1, model.FailedNotificationStatus},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := repository.NewInMemoryRepository()
+			j := &model.Job{Id: uuid.New(), SourcePath: "movie.mkv", TargetPath: "encoded.mkv"}
+			if err := repo.AddJob(t.Context(), j); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < tt.failures; i++ {
+				if err := repo.AddNewTaskEvent(t.Context(), j.AddEventComplete(model.JobNotification, model.FailedNotificationStatus, tt.message)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r := &RuntimeScheduler{repo: repo}
+			if err := r.failedJobMaintenance(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			got, err := repo.GetJob(t.Context(), j.Id.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			latest := got.Events.GetLatestPerNotificationType(model.JobNotification)
+			if latest.Status != tt.want {
+				t.Errorf("failedJobMaintenance() status = %v, want %v", latest.Status, tt.want)
 			}
 		})
 	}

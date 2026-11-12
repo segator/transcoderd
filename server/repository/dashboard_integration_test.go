@@ -48,6 +48,57 @@ func TestDashboardPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	t.Run("OIDC dashboard sessions", func(t *testing.T) {
+		session, expired := [32]byte{1}, [32]byte{2}
+		credential := [32]byte{1}
+		if created, err := repo.CreateOIDCDashboardSession(ctx, credential, expired, time.Now().Add(-time.Hour), 1); err != nil || !created {
+			t.Fatalf("insert expired session = %t, %v", created, err)
+		}
+		if valid, err := repo.HasOIDCDashboardSession(ctx, expired); err != nil || valid {
+			t.Fatalf("validate expired session = %t, %v", valid, err)
+		}
+		if created, err := repo.CreateOIDCDashboardSession(ctx, credential, session, time.Now().Add(time.Hour), 1); err != nil || !created {
+			t.Fatalf("replace expired session = %t, %v", created, err)
+		}
+		independentDB, err := sql.Open("postgres", dsn+" search_path="+schema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer independentDB.Close()
+		restarted := &SQLRepository{db: &SQLDatabase{db: independentDB}}
+		if valid, err := restarted.HasOIDCDashboardSession(ctx, session); err != nil || !valid {
+			t.Fatalf("validate durable session = %t, %v", valid, err)
+		}
+		if err := restarted.DeleteOIDCDashboardSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+		if valid, err := repo.HasOIDCDashboardSession(ctx, session); err != nil || valid {
+			t.Fatalf("validate revoked session = %t, %v", valid, err)
+		}
+
+		type loginResult struct {
+			created bool
+			err     error
+		}
+		ready := make(chan struct{})
+		results := make(chan loginResult, 2)
+		for i, client := range []*SQLRepository{repo, restarted} {
+			go func() {
+				<-ready
+				created, err := client.CreateOIDCDashboardSession(ctx, credential, [32]byte{byte(3 + i)}, time.Now().Add(time.Hour), 1)
+				results <- loginResult{created: created, err: err}
+			}()
+		}
+		close(ready)
+		first, second := <-results, <-results
+		if first.err != nil || second.err != nil || first.created == second.created {
+			t.Fatalf("concurrent logins = %+v and %+v, want exactly one session at cap", first, second)
+		}
+		if created, err := repo.CreateOIDCDashboardSession(ctx, [32]byte{2}, [32]byte{5}, time.Now().Add(time.Hour), 1); err != nil || !created {
+			t.Fatalf("issue session after credential rotation = %t, %v", created, err)
+		}
+	})
+
 	// Library cache persists across repository instances and honors fingerprints.
 	probe := &model.MediaProbe{DurationSeconds: 123, Streams: []model.MediaStream{{CodecType: "video", CodecName: "hevc", Width: 1920}}}
 	rootKey := strings.Repeat("a", 64)

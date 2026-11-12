@@ -12,7 +12,7 @@ import (
 
 // Only public, immutable build assets belong here: no authenticated HTML or APIs.
 var dashboardPublicAssets = []string{
-	"app.js", "resources.js", "login.js", "media.js", "pwa.js", "styles.css", "media.css", "icon.svg",
+	"app.js", "resources.js", "login.js", "media.js", "pwa.js", "theme.js", "styles.css", "media.css", "icon.svg",
 	"manifest.webmanifest", "offline.html", "icon-192.png", "icon-512.png",
 	"icon-maskable-512.png", "apple-touch-icon.png",
 }

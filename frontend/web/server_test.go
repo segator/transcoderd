@@ -88,7 +88,7 @@ func TestFrontendProxyBoundaryAndOrigin(t *testing.T) {
 	var requests atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
-		if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" || r.Header.Get("Forwarded") != "" || r.Header.Get("X-Forwarded-Host") != "" || r.Header.Get("X-Forwarded-Proto") != "" {
+		if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" || r.Header.Get("Forwarded") != "" || r.Header.Get("X-Forwarded-Host") != "" || r.Header.Get("X-Forwarded-Proto") != "" || r.Header.Get(oidcSessionHeader) != "" {
 			t.Error("proxy forwarded browser/forwarding headers to API")
 		}
 		if len(r.Cookies()) != 1 || r.Cookies()[0].Name != sessionCookie || r.Header.Get("Authorization") != "Bearer operator" {
@@ -114,6 +114,7 @@ func TestFrontendProxyBoundaryAndOrigin(t *testing.T) {
 		{"null origin", "POST", "/dashboard/api/login", "null", "1", "", 403},
 		{"cross-site metadata", "POST", "/dashboard/api/login", "https://ui.example.test", "1", "cross-site", 403},
 		{"preflight", "OPTIONS", "/dashboard/api/login", "https://evil.test", "1", "", 404},
+		{"same origin token login", "POST", "/dashboard/api/login", "https://ui.example.test", "1", "same-origin", 204},
 		{"same origin", "PUT", "/dashboard/api/workers/cpu/settings", "https://ui.example.test", "1", "same-origin", 204},
 		{"explicit default port", "PUT", "/dashboard/api/workers/cpu/settings", "https://ui.example.test:443", "1", "same-origin", 204},
 	}
@@ -126,6 +127,7 @@ func TestFrontendProxyBoundaryAndOrigin(t *testing.T) {
 			r.Header.Set("Forwarded", "host=evil.test;proto=https")
 			r.Header.Set("X-Forwarded-Host", "evil.test")
 			r.Header.Set("X-Forwarded-Proto", "https")
+			r.Header.Set(oidcSessionHeader, "1")
 			r.Header.Set("Authorization", "Bearer operator")
 			r.AddCookie(&http.Cookie{Name: "unrelated", Value: "private"})
 			r.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session"})
@@ -136,8 +138,8 @@ func TestFrontendProxyBoundaryAndOrigin(t *testing.T) {
 			}
 		})
 	}
-	if requests.Load() != 2 {
-		t.Errorf("upstream requests = %d, want 2", requests.Load())
+	if requests.Load() != 3 {
+		t.Errorf("upstream requests = %d, want 3", requests.Load())
 	}
 }
 

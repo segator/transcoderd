@@ -144,11 +144,12 @@ The frontend SHALL run separately with network access to the API and, in OIDC mo
 - **THEN** the frontend rejects the request without forwarding it; an upstream redirect does not escape the configured API origin
 
 ### Requirement: Worker hardware summary and drill-down
-Overview worker rows SHALL show concise measured CPU, GPU and encoder usage and link to that worker in the Workers view. Details SHALL retain worker controls and show available CPU/RAM history, per-device GPU/encoder history, VRAM, temperature, power, identities and sample freshness. Host/device scope and shared usage SHALL be explicit; encoder slots SHALL remain distinct from hardware utilization.
+Overview worker rows SHALL show measured CPU, GPU and encoder usage and link to that worker in the Workers view. Details SHALL show available CPU/RAM history, per-device GPU/encoder history, VRAM, temperature, power, identities, sample freshness and worker controls. Host/device scope and shared usage SHALL be explicit. Encoder slots SHALL remain distinct from hardware utilization.
 
 #### Scenario: Open worker from overview
 - **WHEN** an operator clicks or keyboard-activates a worker summary
-- **THEN** the Workers view selects that exact worker, shows its resource details and offers a route back to all workers
+- **THEN** the Workers view selects that worker, shows its resource details and offers a route back to all workers
+- **AND** the details for a combined Windows worker provide access to both profiles' resources
 
 #### Scenario: Missing or stale sample
 - **WHEN** measurements are missing, invalid or more than twenty seconds old, or the worker is offline
@@ -174,19 +175,27 @@ OIDC login SHALL use discovery, authorization code and PKCE S256 with a browser-
 - **THEN** login returns forbidden without opening an API session
 
 ### Requirement: Replica-compatible OIDC session boundary
-OIDC browser sessions SHALL encrypt the API session in a frontend-only HttpOnly cookie using a configured shared key, with Secure cookies for HTTPS. Provider tokens and API login credentials SHALL remain server-side. API session expiry, logout and API restart SHALL revoke access across frontend replicas; browser bearer headers and legacy API cookies SHALL NOT bypass OIDC. Sessions and login callbacks SHALL NOT enter PWA caches.
+OIDC browser sessions SHALL encrypt the API session in a frontend-only HttpOnly cookie using a configured shared key, with Secure cookies for HTTPS. Provider tokens and API login credentials SHALL remain server-side. Verified OIDC dashboard sessions SHALL expire 15 days after login and survive restarts of both services with the same configuration and API database. Browser bearer headers and legacy API cookies SHALL NOT bypass OIDC. Sessions and login callbacks SHALL NOT enter PWA caches.
 
 #### Scenario: Another frontend pod serves the next request
 - **WHEN** frontend replicas share authentication configuration and a session encryption key
 - **THEN** login state and valid sessions work across replicas without sticky sessions or frontend persistent storage
 
+#### Scenario: Browser reopens after login
+- **WHEN** an operator closes and reopens the browser before the dashboard session expires, including after the provider ID token expires or either TranscoderD service restarts
+- **THEN** the valid OIDC dashboard session continues to grant access
+
 #### Scenario: Logout or backend session revocation
-- **WHEN** an operator logs out successfully, the API session expires or the API restarts
+- **WHEN** an operator logs out successfully or the API session expires
 - **THEN** replaying the old frontend cookie does not authorize dashboard data
 
 #### Scenario: Attempted token bypass
 - **WHEN** OIDC mode receives an API token bearer header, legacy dashboard cookie or token-login request without a valid OIDC session
 - **THEN** it rejects access and never exposes the private API login credential
+
+#### Scenario: Frontend upgraded before API
+- **WHEN** a verified OIDC login creates a session through an older API
+- **THEN** the browser session follows the expiry returned by that API
 
 ### Requirement: Filtered paginated jobs
 The dashboard SHALL query all jobs by state and case-insensitive filename, worker or ID search before pagination. Pages SHALL contain at most 100 jobs with a matching total and navigation; the default page size SHALL be 25. Overview counters SHALL remain global.
@@ -207,15 +216,24 @@ Fleet counts and worker listings SHALL include only workers seen within the prev
 - **THEN** it appears after online workers as Offline without editable limits
 
 ### Requirement: Fixed worker profile controls
-Fixed Windows CPU and GPU worker profiles SHALL identify their profile and shared host scope. Each SHALL expose only its supported encoder limit and relevant CPU or GPU utilization; independent workers SHALL retain both limits. Limits SHALL still be saved atomically with the unsupported class set to zero.
+The fleet dashboard SHALL present matched CPU and GPU profiles of the same Windows service as one worker in Overview and Workers, with shared host scope. Each profile SHALL expose its supported concurrency, commands and relevant resource readings. Independent workers SHALL retain both CPU and GPU controls. A profile's capacity update SHALL save its own pair atomically with zero for its unsupported class.
+
+#### Scenario: Matched Windows profiles
+- **WHEN** a managed CPU profile and GPU profile report matching service names and host identity
+- **THEN** they count as one fleet worker and share one card with distinct CPU and GPU sections and attributed work
+- **AND** saving one profile's concurrency keeps the other profile's value and control state
+
+#### Scenario: Unmatched worker identities
+- **WHEN** independent workers use similar names or two profiles cannot be associated with the same host
+- **THEN** the dashboard continues to display them separately
 
 #### Scenario: Windows CPU profile
 - **WHEN** an operator opens a managed CPU profile
-- **THEN** CPU controls and CPU/RAM metrics are shown without GPU controls or GPU utilization
+- **THEN** its section shows CPU controls and CPU/RAM metrics
 
 #### Scenario: Windows GPU profile
 - **WHEN** an operator opens a managed GPU profile
-- **THEN** GPU controls and GPU/RAM metrics are shown without CPU controls or CPU utilization
+- **THEN** its section shows GPU controls and GPU/RAM metrics
 
 ### Requirement: Signed-in operator identity
 OIDC sessions SHALL retain verified name, preferred username, email and subject display claims inside the encrypted frontend cookie. An authenticated, non-cacheable identity response SHALL expose display identity without credentials or provider tokens. The dashboard SHALL display a name or username and email when available; token login SHALL identify a token session without inventing a user.
@@ -303,6 +321,10 @@ Navigation, login and section headings SHALL use functional names without promot
 - **WHEN** an operator opens Overview or worker resource details at a typical mobile width
 - **THEN** compact metrics and compatible small charts share rows, larger task/control sections retain usable widths, and the page has no horizontal overflow
 
+#### Scenario: Change concurrency on a phone
+- **WHEN** an operator opens an online worker card at a typical mobile width
+- **THEN** the worker's concurrency control is labeled Concurrent encodes and its compact numeric input and Save button share a row
+
 ### Requirement: Reported worker software version
 Workers SHALL include the running binary version in runtime telemetry. Authenticated fleet cards, overview summaries and selected resource details SHALL display that reported version. Offline workers SHALL retain it as last-reported information. Missing versions SHALL show Version unavailable, without inference from protocol capabilities, server version or release tags. Heartbeats from older workers SHALL remain accepted.
 
@@ -317,3 +339,10 @@ Workers SHALL include the running binary version in runtime telemetry. Authentic
 #### Scenario: Older worker without version
 - **WHEN** runtime telemetry omits the version or is absent
 - **THEN** the dashboard shows Version unavailable and continues showing the supported worker information
+
+### Requirement: Fleet dashboard appearance
+The fleet dashboard SHALL provide Day and Night themes and remember the selected theme in the browser. Night SHALL remain the first-visit default. The saved theme SHALL also apply to fleet login and offline pages.
+
+#### Scenario: Return with Day selected
+- **WHEN** an operator selects Day, reloads the page or returns to the login screen
+- **THEN** the fleet interface continues to use Day and the operator can switch back to Night

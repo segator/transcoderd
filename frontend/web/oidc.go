@@ -25,7 +25,8 @@ import (
 
 const frontendSessionCookie = "transcoderd_frontend"
 const oidcLoginCookie = "transcoderd_oidc_login"
-const oidcSessionLifetime = 12 * time.Hour
+const oidcSessionLifetime = 15 * 24 * time.Hour
+const oidcSessionHeader = "X-TranscoderD-OIDC-Session"
 const oidcLoginLifetime = 10 * time.Minute
 
 var ErrInvalidSession = errors.New("invalid or expired frontend session")
@@ -321,6 +322,7 @@ func (s *Server) createAPISession(ctx context.Context) (*http.Cookie, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Dashboard-Request", "1")
+	req.Header.Set(oidcSessionHeader, "1")
 	response, err := s.client.Do(req)
 	if err != nil {
 		return nil, errors.New("API login unavailable")

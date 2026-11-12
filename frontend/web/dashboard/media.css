@@ -22,7 +22,7 @@
   .media-filter-panel label {
     display: block;
     font-size: 10px;
-    color: #b9c6d8;
+    color: var(--text-strong, #b9c6d8);
     margin: 12px 0 6px;
   }
   .media-filter-panel input:not([type="checkbox"]),
@@ -30,8 +30,8 @@
     width: 100%;
     min-width: 0;
     padding: 9px 10px;
-    background: #0c121c;
-    border: 1px solid #334055;
+    background: var(--surface-input, #0c121c);
+    border: 1px solid var(--border-input, #334055);
     border-radius: 7px;
     color: var(--text);
     font-size: 11px;
@@ -76,7 +76,7 @@
   }
   .media-advanced summary {
     font-size: 10px;
-    color: #b7c5d8;
+    color: var(--text-strong, #b7c5d8);
     cursor: pointer;
   }
   .media-scan-button {
@@ -90,13 +90,13 @@
     gap: 8px;
     flex-wrap: wrap;
     padding: 0 0 18px;
-    color: #637690;
+    color: var(--text-quiet, #637690);
     font-size: 10px;
   }
   .media-breadcrumb button {
     border: 0;
     background: transparent;
-    color: #9eb8cf;
+    color: var(--text-soft, #9eb8cf);
     font-size: 10px;
     cursor: pointer;
     padding: 3px 0;
@@ -118,12 +118,12 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 500;
-    color: #cbd6e4;
+    color: var(--text-strong, #cbd6e4);
   }
   .media-name-cell > small {
     display: block;
     font-size: 8px;
-    color: #6d819e;
+    color: var(--text-quiet, #6d819e);
     margin-top: 5px;
     max-width: 280px;
     overflow: hidden;
@@ -134,7 +134,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    color: #c9d6e9;
+    color: var(--text-strong, #c9d6e9);
     background: transparent;
     border: 0;
     font-size: 11px;
@@ -159,9 +159,9 @@
     gap: 8px;
   }
   .media-notice {
-    background: #292519;
-    color: #d6bf82;
-    border: 1px solid #564a29;
+    background: var(--status-yellow-bg, #292519);
+    color: var(--status-yellow-text, #d6bf82);
+    border: 1px solid var(--status-yellow-border, #564a29);
     border-radius: 7px;
     font-size: 10px;
     line-height: 1.7;
@@ -191,9 +191,9 @@
   }
   .media-queue-bar input {
     width: 85px;
-    border: 1px solid #35445c;
+    border: 1px solid var(--border-input, #35445c);
     border-radius: 6px;
-    background: #0c121c;
+    background: var(--surface-input, #0c121c);
     color: var(--text);
     padding: 8px;
   }
@@ -202,7 +202,7 @@
   }
   .media-result-details summary {
     cursor: pointer;
-    color: #a9bbd2;
+    color: var(--text-soft, #a9bbd2);
     font-size: 10px;
   }
   .media-result-list {
@@ -220,7 +220,7 @@
   }
   .media-result-list strong {
     font-weight: 500;
-    color: #b5c3d8;
+    color: var(--text-strong, #b5c3d8);
     overflow-wrap: anywhere;
   }
   .media-result-list p {
@@ -240,7 +240,7 @@
     width: min(1060px, 94vw);
     max-height: 94vh;
     overflow: auto;
-    border: 1px solid #37435a;
+    border: 1px solid var(--border-input, #37435a);
     background: var(--surface);
     color: var(--text);
     border-radius: 16px;
@@ -288,7 +288,7 @@
     gap: 12px;
     margin: 16px 0;
     font-size: 10px;
-    color: #a2b6d1;
+    color: var(--text-soft, #a2b6d1);
     font-variant-numeric: tabular-nums;
   }
   .media-timeline input {
@@ -314,9 +314,9 @@
   }
   .media-player-controls select {
     padding: 8px 10px;
-    border: 1px solid #33435b;
+    border: 1px solid var(--border-input, #33435b);
     border-radius: 7px;
-    background: #111927;
+    background: var(--surface-input, #111927);
     color: var(--text);
     font-size: 11px;
     max-width: 100%;

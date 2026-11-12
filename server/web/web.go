@@ -415,7 +415,7 @@ func (a *ActiveTracker) ActiveRequests() bool {
 	return atomic.LoadInt64(&a.activeRequests) > 0
 }
 
-func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update.Updater) *Server {
+func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update.Updater, sessions dashboardSessionStore) *Server {
 	rtr := mux.NewRouter()
 	at := &ActiveTracker{}
 	rtr.Use(at.ActiveRequestsMiddleware())
@@ -426,6 +426,7 @@ func NewWebServer(config *Config, scheduler scheduler.Scheduler, updater *update
 		activeTracker: at,
 		updater:       updater,
 		scheduler:     scheduler,
+		dashboard:     &dashboardAuth{sessions: make(map[[32]byte]time.Time), persistent: sessions},
 		srv: http.Server{
 			Addr:    ":" + strconv.Itoa(config.Port),
 			Handler: rtr,

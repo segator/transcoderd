@@ -28,7 +28,8 @@
     const values = (gpus || []).map(g => percent(g[key])).filter(v => v !== null);
     return values.length ? Math.max(...values) : null;
   }
-  function profile(worker) {
+  function profile(worker, kind) {
+    if (kind) return {cpu:kind === "cpu",gpu:kind === "gpu"};
     if (!worker.runtime?.managedProfile) return {cpu:true,gpu:true};
     const gpu = worker.runtime.encoder === "av1_nvenc" || worker.runtime.kind === "gpu";
     return {cpu:!gpu,gpu};
@@ -38,8 +39,8 @@
     const label = value ? `Version ${value}${worker.online ? "" : " · last reported"}` : "Version unavailable";
     return `<span class="worker-version">${esc(label)}</span>`;
   }
-  function summary(worker, now) {
-    const s = state(worker, now), r = s.resource, p = profile(worker);
+  function summary(worker, now, kind) {
+    const s = state(worker, now), r = s.resource, p = profile(worker, kind);
     const cpu = r?.cpu?.scope === "processor-group" ? "CPU group" : "CPU";
     const gpu = (r?.gpus?.length || 0) > 1 ? "GPU max" : "GPU";
     return `<div class="resource-summary ${s.live ? "" : "resource-stale"}" title="${esc(s.label + '. ' + s.detail)}">${p.cpu ? `<span>${cpu} <b>${s.live ? pct(r?.cpu?.percent) : "—"}</b></span>` : ""}${p.gpu ? `<span title="Highest reported device utilization">${gpu} <b>${s.live ? pct(busiest(r?.gpus,"percent")) : "—"}</b></span><span title="Highest reported NVIDIA video encoder utilization">NVENC <b>${s.live ? pct(busiest(r?.gpus,"encoderPercent")) : "—"}</b></span>` : ""}<span>RAM <b>${s.live ? pct(memoryPercent(r?.memory)) : "—"}</b></span>${!s.live ? `<small>${esc(s.label)}</small>` : ""}</div>`;
@@ -83,8 +84,8 @@
     }).join("");
     return `<div class="resource-legend">${series.map((s,i)=>`<span><i class="resource-line-${i}"></i>${esc(s.name)}</span>`).join("")}</div><svg class="resource-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(title)}">${[0,50,100].map(v=>`<line class="chart-gridline" x1="${left}" x2="${width-right}" y1="${y(v)}" y2="${y(v)}"/><text class="chart-label" x="${left-5}" y="${y(v)+4}" text-anchor="end">${v}</text>`).join("")}${paths}<text class="chart-label" x="${left}" y="${height-6}">${esc(new Date(start).toLocaleTimeString("en-US"))}</text><text class="chart-label" x="${width-right}" y="${height-6}" text-anchor="end">${esc(new Date(points.at(-1).at).toLocaleTimeString("en-US"))}</text></svg>`;
   }
-  function compact(worker, history, now) {
-    const s=state(worker,now),p=profile(worker),points=history.get(worker.name);
+  function compact(worker, history, now, kind) {
+    const s=state(worker,now),p=profile(worker,kind),points=history.get(worker.name);
     if (!s.live) return `<div class="resource-card-history resource-stale"><span class="media-help">${esc(s.label)} · live graph unavailable</span></div>`;
     const series=[...(p.cpu ? [{name:"CPU",value:x=>x.cpu}] : []),{name:"RAM",value:x=>x.memory},...(p.gpu ? [{name:"GPU",value:x=>busiest(x.gpus,"gpu")},{name:"NVENC",value:x=>busiest(x.gpus,"encoder")}] : [])];
     return `<section class="resource-card-history" aria-label="Recent resource history for ${esc(worker.name)}">${chart(points,series,"Recent worker CPU, RAM and GPU usage")}</section>`;

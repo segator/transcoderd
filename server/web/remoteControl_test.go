@@ -20,7 +20,7 @@ func TestRemoteControlAuthenticationAndCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewWebServer(&Config{Token: "worker-secret", DashboardToken: "encoding123"}, sch, nil)
+	s := NewWebServer(&Config{Token: "worker-secret", DashboardToken: "encoding123"}, sch, nil, repo)
 	publish := func(runtime *model.WorkerRuntime) {
 		t.Helper()
 		if err := repo.PingServerUpdate(context.Background(), "127.0.0.1", model.PingEventType{Event: model.Event{WorkerName: "remote"}, Runtime: runtime}); err != nil {
@@ -103,7 +103,7 @@ func TestIndividualRemoteControlValidationAndDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewWebServer(&Config{Token: "worker-secret", DashboardToken: "dashboard"}, sch, nil)
+	server := NewWebServer(&Config{Token: "worker-secret", DashboardToken: "dashboard"}, sch, nil, repo)
 	id := uuid.NewString()
 	runtime := &model.WorkerRuntime{ControlVersion: 2, CPUJobs: 2, Jobs: []model.WorkerJobRuntime{{ID: id, Phase: "FFMPEG", State: "running", CanPause: true}}}
 	publish := func() {

@@ -18,7 +18,7 @@ func newWorkerSettingsTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewWebServer(&Config{Token: "test-token"}, sch, nil)
+	server := NewWebServer(&Config{Token: "test-token"}, sch, nil, repo)
 	server.ctx = context.Background()
 	return server
 }

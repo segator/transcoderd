@@ -83,7 +83,6 @@ func main() {
 
 func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Updater) {
 	// Repository persist
-	var repo repository.Repository
 	repo, err := repository.NewSQLRepository(opts.Server.Database)
 	if err != nil {
 		log.Panic(err)
@@ -101,7 +100,7 @@ func applicationRun(wg *sync.WaitGroup, ctx context.Context, updater *update.Upd
 	sch.Run(wg, ctx)
 
 	// WebConfig Server
-	webServer := web.NewWebServer(opts.Web, sch, updater)
+	webServer := web.NewWebServer(opts.Web, sch, updater, repo)
 	webServer.Run(wg, ctx)
 }
 

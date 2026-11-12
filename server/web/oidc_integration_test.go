@@ -24,7 +24,11 @@ func TestOIDCFrontendUsesRevocableAPISessions(t *testing.T) {
 	const apiCredential = "private-dashboard-api-credential-for-oidc-tests"
 	api, _ := mediaTestServer(t)
 	api.config.DashboardToken = apiCredential
-	backend := httptest.NewServer(api.srv.Handler)
+	var activeAPI atomic.Pointer[Server]
+	activeAPI.Store(api)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		activeAPI.Load().ServeHTTP(w, r)
+	}))
 	defer backend.Close()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -121,6 +125,13 @@ func TestOIDCFrontendUsesRevocableAPISessions(t *testing.T) {
 	if cookie == nil {
 		t.Fatal("missing frontend session")
 	}
+	const wantSeconds = 15 * 24 * 60 * 60
+	if cookie.MaxAge < wantSeconds-10 || cookie.MaxAge > wantSeconds || time.Until(cookie.Expires) < 15*24*time.Hour-10*time.Second {
+		t.Fatalf("OIDC session expires in %v with Max-Age %d, want 15 days", time.Until(cookie.Expires), cookie.MaxAge)
+	}
+	restartedAPI := NewWebServer(api.config, api.scheduler, api.updater, api.dashboard.persistent)
+	defer restartedAPI.library.Close()
+	activeAPI.Store(restartedAPI)
 	for _, path := range []string{"/dashboard/", "/dashboard/api/stats", "/dashboard/api/media/roots"} {
 		w := call(first, "GET", path, "", cookie)
 		if w.Code != 200 || strings.Contains(w.Body.String(), apiCredential) {
@@ -136,6 +147,10 @@ func TestOIDCFrontendUsesRevocableAPISessions(t *testing.T) {
 	}
 	if w := call(second, "GET", "/dashboard/api/stats", "", cookie); w.Code != 401 {
 		t.Fatalf("revoked session on second replica = %d", w.Code)
+	}
+	activeAPI.Store(api)
+	if w := call(first, "GET", "/dashboard/api/stats", "", cookie); w.Code != 401 {
+		t.Fatalf("revoked session on first API instance = %d", w.Code)
 	}
 	if w := dashboardRequest(api, "GET", "/api/v1/worker/settings", "", apiCredential, nil); w.Code != 401 {
 		t.Fatal("dashboard service credential authorized worker API")

@@ -37,7 +37,7 @@ func TestHardwareTelemetryHeartbeatToDashboard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fleet := httptest.NewServer(web.NewWebServer(&web.Config{Token: "worker-api", DashboardToken: "encoding123"}, sch, nil))
+	fleet := httptest.NewServer(web.NewWebServer(&web.Config{Token: "worker-api", DashboardToken: "encoding123"}, sch, nil, repo))
 	defer fleet.Close()
 	zero, encode := 0.0, 82.5
 	executor := testAdmissionWorker(1)
@@ -99,7 +99,7 @@ func TestWorkerUIAndFleetDashboardSynchronizeBothDirections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fleet := httptest.NewServer(web.NewWebServer(&web.Config{Token: "worker-api", DashboardToken: "encoding123"}, scheduler, nil))
+	fleet := httptest.NewServer(web.NewWebServer(&web.Config{Token: "worker-api", DashboardToken: "encoding123"}, scheduler, nil, repo))
 	defer fleet.Close()
 	executor := testAdmissionWorker(2)
 	executor.client = serverclient.NewServerClient(&web.Config{Domain: fleet.URL, Token: "worker-api"}, "synced-node")

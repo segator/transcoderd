@@ -22,6 +22,7 @@ type InMemoryRepository struct {
 	workerResumeLimits  map[string]model.WorkerSettings
 	workerMaxJobs       map[string]int
 	workerEncoderLimits map[string]model.WorkerSettings
+	oidcSessions        map[[32]byte]oidcDashboardSession
 	mediaProbes         map[string]cachedMediaProbe
 	jobsByPath          map[string]*model.Job
 }
@@ -36,6 +37,7 @@ func NewInMemoryRepository() *InMemoryRepository {
 		workerResumeLimits:  make(map[string]model.WorkerSettings),
 		workerMaxJobs:       make(map[string]int),
 		workerEncoderLimits: make(map[string]model.WorkerSettings),
+		oidcSessions:        make(map[[32]byte]oidcDashboardSession),
 		mediaProbes:         make(map[string]cachedMediaProbe),
 		jobsByPath:          make(map[string]*model.Job),
 	}

@@ -17,7 +17,7 @@ frontend:
     mode: token
 ```
 
-**OIDC:** the browser signs in at Authentik. The frontend verifies the identity, then uses its private `frontend.apiToken` to create an ordinary API-owned session. The API credential must match `web.dashboardToken`, contain at least 32 characters, and remain private to the two runtimes. Do not use the worker API token. Token login and browser bearer/legacy-cookie fallback are disabled on the OIDC frontend.
+**OIDC:** the browser signs in at Authentik. The frontend verifies the identity, then uses its private `frontend.apiToken` to create a persistent API-owned session. The API credential must match `web.dashboardToken`, contain at least 32 characters, and remain private to the two runtimes. Do not use the worker API token. Token login and browser bearer/legacy-cookie fallback are disabled on the OIDC frontend.
 
 ```yaml
 frontend:
@@ -98,11 +98,11 @@ The pods run as UID/GID 65532 with a read-only root filesystem, dropped capabili
 
 ## Session behavior and operations
 
-OIDC uses an encrypted HttpOnly SameSite=Lax frontend cookie (Secure with HTTPS), a separate ten-minute browser-bound login cookie and a fixed callback path. The API session inside it stays encrypted. State/nonce, PKCE, signature, issuer, audience, authorized party and expiry are checked; provider access/ID/refresh tokens are not stored in browser cookies or persistent storage. The app session lasts up to twelve hours, bounded by its API session, independently of subsequent provider-token expiry. Existing operator pages remain English and installable as a PWA; OIDC routes bypass service-worker interception and private data is never cached.
+OIDC uses an encrypted HttpOnly SameSite=Lax frontend cookie (Secure with HTTPS), a separate ten-minute browser-bound login cookie and a fixed callback path. The API session inside it stays encrypted. The frontend checks state, nonce, PKCE, signature, issuer, audience, authorized party and expiry at login. The TranscoderD session expires 15 days after login and works independently of subsequent provider-token expiry. Operator pages remain English and installable as a PWA. OIDC routes bypass service-worker interception. Provider access, ID and refresh tokens stay out of browser cookies, persistent storage and PWA caches. Private operational data is never cached.
 
-Successful **Sign out** revokes the API session and removes the frontend cookie across all frontend replicas. API restart or session expiry also revokes access. It signs out of TranscoderD only; the Authentik/Google session remains, so the next SSO login may be immediate. Provider-wide/back-channel logout and continuous rechecking of group changes are not implemented. To revoke existing sessions immediately, revoke/restart API sessions or rotate the frontend session key; changing the issuer/client/public origin also invalidates encrypted cookies.
+Successful **Sign out** revokes the API session and removes the frontend cookie. The Authentik/Google session can still provide immediate sign-in on the next visit. Provider logout leaves active TranscoderD sessions valid until they expire or are revoked. Provider groups are checked on each new SSO login. To invalidate all current OIDC sessions, rotate the frontend session key or replace the private API credential in both the frontend and API. Changing the issuer, client ID or public origin also invalidates encrypted cookies.
 
-Multiple frontend replicas need the same configuration/key and the same API instance; no sticky sessions or frontend storage are required. The current API session store is in-memory and does not support arbitrary load balancing across multiple independent API replicas. Expose the frontend to browsers and keep the separate API origin private to workers/frontend; its dashboard token remains a privileged service credential in OIDC mode.
+OIDC sessions survive browser, frontend and API restarts while the same authentication configuration, frontend session key and API database are in use. PostgreSQL stores a keyed session digest, credential fingerprint and expiry. Frontend replicas share their configuration and connect to the API without sticky sessions or local storage. Upgrade both the frontend and API and sign in once to start a 15-day session. A newer frontend connected to an older API honors the shorter expiry issued by that API. Expose the frontend to browsers and keep the API origin private to workers and the frontend. The dashboard token is a privileged service credential in OIDC mode.
 
 ## Signed-in identity
 

@@ -262,5 +262,5 @@ $('encoder-limits-form').addEventListener('submit',async event=>{
  const cpuJobs=Number($('local-cpu-jobs').value),gpuJobs=Number($('local-gpu-jobs').value);
  if(!Number.isInteger(cpuJobs)||!Number.isInteger(gpuJobs)||cpuJobs<0||gpuJobs<0||cpuJobs+gpuJobs>1024){toast('Use non-negative integers, total no more than 1024.');return}
  limitSaving=true;$('encoder-limits-save').disabled=true;
- try{const status=await request('set-encoder-jobs',{cpuJobs,gpuJobs});limitDirty=false;render(status);toast('CPU/GPU limits saved on the server.')}catch(error){toast(error.message)}finally{limitSaving=false;$('encoder-limits-save').disabled=configurationLocked}
+ try{const status=await request('set-encoder-jobs',{cpuJobs,gpuJobs});limitDirty=false;render(status);toast('Concurrent encodes saved on the server.')}catch(error){toast(error.message)}finally{limitSaving=false;$('encoder-limits-save').disabled=configurationLocked}
 });

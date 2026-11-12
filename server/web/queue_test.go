@@ -31,7 +31,7 @@ func TestQueuedJobsAreAuthenticatedBoundedAndOrdered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewWebServer(&Config{Token: "secret"}, sch, nil)
+	server := NewWebServer(&Config{Token: "secret"}, sch, nil, repo)
 	server.ctx = ctx
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/queued", nil)
 	out := httptest.NewRecorder()

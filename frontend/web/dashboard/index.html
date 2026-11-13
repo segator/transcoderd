@@ -277,10 +277,30 @@
               class="worker-resource-detail"
               hidden
             ></div>
-            <p id="worker-scope-note" class="table-note">
-              Workers seen in the selected period.
-            </p>
-            <div id="worker-cards" class="worker-grid"></div>
+            <div id="worker-list-toolbar">
+              <div class="worker-list-filters">
+                <label for="worker-search">
+                  Search workers
+                  <input id="worker-search" type="search" />
+                </label>
+                <label for="worker-state-filter">
+                  Status
+                  <select id="worker-state-filter">
+                    <option value="all">All</option>
+                    <option value="active">Active</option>
+                    <option value="paused">Paused</option>
+                    <option value="offline">Offline</option>
+                  </select>
+                </label>
+              </div>
+              <div class="worker-list-meta">
+                <p class="table-note">
+                  Workers seen in the selected period (up to 30 days). Resources are live.
+                </p>
+                <p id="worker-results-status" class="table-note" role="status"></p>
+              </div>
+            </div>
+            <div id="worker-cards" class="worker-list"></div>
             <nav
               id="worker-pagination"
               class="list-pagination"

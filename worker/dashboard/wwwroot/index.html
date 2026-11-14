@@ -1,20 +1,24 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f4f6fa" data-light="#f4f6fa" data-dark="#121827">
   <title>TranscoderD</title>
+  <script src="theme.js"></script>
   <link rel="stylesheet" href="app.css">
   <link rel="stylesheet" href="dashboard.css">
   <link rel="stylesheet" href="updates.css">
+  <link rel="stylesheet" href="theme.css">
   <script src="activity.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
 <div class="shell">
   <aside class="sidebar">
-    <div class="brand"><span class="brand-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 8h18v5H7zM13 13h6v12h-6z"/></svg></span><div><strong>transcoder<span>d</span></strong><small>WORKER DASHBOARD</small></div></div>
+    <div class="brand"><span class="brand-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 8h18v5H7zM13 13h6v12h-6z"/></svg></span><div><strong>transcoder<span>d</span></strong><small>WORKER DASHBOARD</small></div><button class="icon-button theme-toggle" type="button" data-theme-toggle aria-label="Dark theme" aria-pressed="false" hidden><span aria-hidden="true">☾</span></button></div>
     <div class="nav-label">YOUR SPACE</div>
     <nav aria-label="Navigation">
       <button class="nav active" data-page="overview"><span class="nav-icon">◫</span> Dashboard <span class="nav-arrow">›</span></button>
@@ -39,8 +43,8 @@
         <article class="stat"><div class="stat-top"><span>SERVER QUEUE</span><span class="stat-icon amber">≡</span></div><div class="stat-number" id="stat-queue">—</div><div class="stat-foot"><span class="dot amber-dot"></span><span id="stat-queue-caption">Awaiting assignment</span></div></article>
       </div>
       <section id="encoder-limits" class="panel" hidden>
-       <div class="panel-heading"><div><span class="panel-kicker">SYNCED WITH SERVER</span><h2>CPU / GPU limits</h2><p>Saved for this worker. Queue and RAM pauses remain independent.</p></div></div>
-       <form id="encoder-limits-form" class="encoder-limit-form"><label>CPU encodes<input id="local-cpu-jobs" type="number" min="0" max="1024" step="1" required></label><label>GPU encodes<input id="local-gpu-jobs" type="number" min="0" max="1024" step="1" required></label><button id="encoder-limits-save" type="submit">Save limits</button></form>
+       <div class="panel-heading"><div><span class="panel-kicker">SYNCED WITH SERVER</span><h2 id="encoder-limits-title">Concurrent encodes</h2><p>Saved for this worker. Queue and RAM pauses remain independent.</p></div></div>
+       <form id="encoder-limits-form" class="encoder-limit-form" aria-labelledby="encoder-limits-title"><label>CPU<input id="local-cpu-jobs" type="number" min="0" max="1024" step="1" required></label><label>GPU<input id="local-gpu-jobs" type="number" min="0" max="1024" step="1" required></label><button id="encoder-limits-save" type="submit">Save</button></form>
        <p id="encoder-limits-status" class="field-note" role="status"></p>
       </section>
       <div class="content-grid">

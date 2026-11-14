@@ -23,7 +23,8 @@ func mediaTestServer(t *testing.T) (*Server, string) {
 	if err := os.WriteFile(filepath.Join(root, "clip.mkv"), []byte("0123456789abcdef"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	sch, err := scheduler.NewScheduler(&scheduler.Config{SourcePath: root}, repository.NewInMemoryRepository())
+	repo := repository.NewInMemoryRepository()
+	sch, err := scheduler.NewScheduler(&scheduler.Config{SourcePath: root}, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +32,7 @@ func mediaTestServer(t *testing.T) (*Server, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewWebServer(&Config{Token: "worker-secret", DashboardToken: "encoding123", MediaRoots: map[string]string{"encoded": t.TempDir()}}, sch, updater)
+	s := NewWebServer(&Config{Token: "worker-secret", DashboardToken: "encoding123", MediaRoots: map[string]string{"encoded": t.TempDir()}}, sch, updater, repo)
 	t.Cleanup(s.library.Close)
 	return s, root
 }

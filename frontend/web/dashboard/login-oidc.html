@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0b0e14" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0b0e14" data-light="#f4f6fa" data-dark="#0b0e14" />
+    <script src="/dashboard/theme.js"></script>
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta
@@ -33,7 +34,19 @@
       </section>
       <section class="login-panel">
         <div class="login-box">
-          <span class="lock-icon" aria-hidden="true">⌁</span>
+          <div class="login-tools">
+            <span class="lock-icon" aria-hidden="true">⌁</span>
+            <button
+              class="icon-button theme-toggle"
+              type="button"
+              data-theme-toggle
+              aria-label="Dark theme"
+              aria-pressed="true"
+              hidden
+            >
+              <span aria-hidden="true">☀</span>
+            </button>
+          </div>
           <h2>Sign in</h2>
           <p></p>
           <a

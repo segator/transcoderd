@@ -17,7 +17,6 @@ import (
 )
 
 func (s *Server) registerDashboardAPI(r *mux.Router) {
-	s.dashboard = &dashboardAuth{sessions: make(map[[32]byte]time.Time)}
 	d := r.PathPrefix("/dashboard/").Subrouter()
 	d.Use(dashboardHeaders)
 	d.HandleFunc("/api/login", s.dashboardLogin).Methods(http.MethodPost)

@@ -42,7 +42,9 @@
   };
   const resources = window.TranscoderResources;
   const resourceHistory = new resources.History();
+  const workerPageSize = 12;
   let selectedWorker = null,
+    pendingWorkerExpansion = null,
     workerPage = 0,
     jobsOffset = 0,
     jobsGeneration = 0,
@@ -57,7 +59,10 @@
     timer = null,
     toastTimer;
   const drafts = new Map(),
-    saving = new Set();
+    saving = new Set(),
+    expandedWorkers = new Set();
+  let fleet = [],
+    managedProfiles = new Map();
 
   function bytes(value) {
     if (!Number.isFinite(value)) return "—";
@@ -190,18 +195,18 @@
     }
   }
   function render() {
-    const s = data.summary,
-      workers = data.workers;
-    resourceHistory.observe(workers, Date.parse(data.generatedAt));
-    const online = workers.filter((w) => w.online).length;
+    const s = data.summary;
+    resourceHistory.observe(data.workers, Date.parse(data.generatedAt));
+    fleet = groupWorkers(data.workers);
+    const online = fleet.filter((w) => w.online).length;
     $("nav-worker-count").textContent = visibleWorkers().length;
     $("nav-job-count").textContent = integer.format(s.active + s.queued);
     $("fleet-note").textContent =
-      `${online} of ${workers.length} recent workers online`;
-    $("fleet-detail").textContent = workers.length
+      `${online} of ${fleet.length} recent workers online`;
+    $("fleet-detail").textContent = fleet.length
       ? `${integer.format(s.active)} active · ${integer.format(s.queued)} queued`
       : "Waiting for the first worker";
-    $("fleet-lights").innerHTML = workers
+    $("fleet-lights").innerHTML = fleet
       .slice(0, 24)
       .map((w) => `<i class="${w.online ? "" : "offline"}"></i>`)
       .join("");
@@ -221,10 +226,11 @@
     renderJobs();
     // Polling must not replace a form while an operator is typing.
     const editingWorker =
-      document.activeElement?.closest?.("form[data-worker]")?.dataset.worker;
+      document.activeElement?.closest?.(".worker-capacity input")?.form?.dataset.worker;
     if (
       !editingWorker ||
-      !data.workers.some((w) => w.name === editingWorker && w.online)
+      !data.workers.some((w) => w.name === editingWorker && w.online &&
+        w.runtime?.capacityVersion >= 2 && w.control?.state !== "pending")
     )
       renderWorkers();
     renderWorkerDetails();
@@ -412,7 +418,7 @@
       ]),
     ];
     $("throughput-chart").innerHTML =
-      `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${s.completedInRange} completed jobs and ${s.failedInRange} failed in the selected period"><defs><linearGradient id="throughput-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#b7ef79" stop-opacity=".16"/><stop offset="100%" stop-color="#b7ef79" stop-opacity="0"/></linearGradient></defs>${grid}<path class="chart-area" d="${points("completed")} L${x(buckets.length - 1)},${y(0)} L${x(0)},${y(0)} Z"/><path class="chart-line" d="${points("completed")}"/><path class="chart-failed" d="${points("failed")}"/>${buckets.map((b, i) => `<circle class="chart-point" cx="${x(i)}" cy="${y(b.completed)}" r="${b.completed > 0 ? 3 : 0}"/><rect class="chart-hover" x="${Math.max(left, x(i) - 8)}" y="${top}" width="16" height="${height - bottom - top}"><title>${esc(chartDate(b.time))}: ${b.completed} completed · ${b.failed} failed</title></rect>`).join("")}${labelIndices.map((i, n) => `<text class="chart-label" x="${x(i)}" y="${height - 7}" text-anchor="${n === 0 ? "start" : n === labelIndices.length - 1 ? "end" : "middle"}">${esc(chartDate(buckets[i].time))}</text>`).join("")}</svg>`;
+      `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${s.completedInRange} completed jobs and ${s.failedInRange} failed in the selected period"><defs><linearGradient id="throughput-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--green)" stop-opacity=".16"/><stop offset="100%" stop-color="var(--green)" stop-opacity="0"/></linearGradient></defs>${grid}<path class="chart-area" d="${points("completed")} L${x(buckets.length - 1)},${y(0)} L${x(0)},${y(0)} Z"/><path class="chart-line" d="${points("completed")}"/><path class="chart-failed" d="${points("failed")}"/>${buckets.map((b, i) => `<circle class="chart-point" cx="${x(i)}" cy="${y(b.completed)}" r="${b.completed > 0 ? 3 : 0}"/><rect class="chart-hover" x="${Math.max(left, x(i) - 8)}" y="${top}" width="16" height="${height - bottom - top}"><title>${esc(chartDate(b.time))}: ${b.completed} completed · ${b.failed} failed</title></rect>`).join("")}${labelIndices.map((i, n) => `<text class="chart-label" x="${x(i)}" y="${height - 7}" text-anchor="${n === 0 ? "start" : n === labelIndices.length - 1 ? "end" : "middle"}">${esc(chartDate(buckets[i].time))}</text>`).join("")}</svg>`;
   }
   function renderImpact() {
     const s = periodSummary();
@@ -430,11 +436,11 @@
       return;
     }
     const segments = [
-      ["queued", s.queued, "#7eb8ff", "blue"],
-      ["active", s.active, "#ae9bff", "purple"],
-      ["completed", s.completed, "#b7ef79", "green"],
-      ["failed", s.failed, "#ff8992", "red"],
-      ["canceled", s.canceled, "#4d5c72", "gray"],
+      ["queued", s.queued, "var(--blue)", "blue"],
+      ["active", s.active, "var(--purple)", "purple"],
+      ["completed", s.completed, "var(--green)", "green"],
+      ["failed", s.failed, "var(--red)", "red"],
+      ["canceled", s.canceled, "var(--chart-neutral, #4d5c72)", "gray"],
     ];
     let offset = 0;
     const circle = 2 * Math.PI * 49;
@@ -482,7 +488,7 @@
         })
         .join(
           "",
-        )}${buckets.map((b, i) => `<rect x="${x(i) + 3}" y="${Math.min(y(values[i]), y(0))}" width="${barSize}" height="${Math.max(0, Math.abs(y(values[i]) - y(0)))}" rx="2" fill="${values[i] < 0 ? "#ff8992" : "#ae9bff"}"><title>${esc(chartDate(b.time))}: ${esc(bytes(values[i]))}</title></rect>`).join("")}<text class="chart-label" x="${left}" y="${height - 5}">${esc(chartDate(buckets[0].time))}</text><text class="chart-label" x="${width - 8}" y="${height - 5}" text-anchor="end">${esc(chartDate(buckets.at(-1).time))}</text></svg><div class="graph-footer"><span>Saved in this period</span><strong>${bytes(total)}</strong></div>`;
+        )}${buckets.map((b, i) => `<rect x="${x(i) + 3}" y="${Math.min(y(values[i]), y(0))}" width="${barSize}" height="${Math.max(0, Math.abs(y(values[i]) - y(0)))}" rx="2" fill="${values[i] < 0 ? "var(--red)" : "var(--purple)"}"><title>${esc(chartDate(b.time))}: ${esc(bytes(values[i]))}</title></rect>`).join("")}<text class="chart-label" x="${left}" y="${height - 5}">${esc(chartDate(buckets[0].time))}</text><text class="chart-label" x="${width - 8}" y="${height - 5}" text-anchor="end">${esc(chartDate(buckets.at(-1).time))}</text></svg><div class="graph-footer"><span>Saved in this period</span><strong>${bytes(total)}</strong></div>`;
   }
   function renderCodecs() {
     if (!data.codecs.length) {
@@ -498,7 +504,7 @@
       .join("")}</div>`;
   }
   function renderWorkerChart() {
-    const workers = [...data.workers]
+    const workers = [...fleet]
       .sort(
         (a, b) =>
           Number(b.online) - Number(a.online) ||
@@ -512,8 +518,23 @@
       return;
     }
     const max = Math.max(1, ...workers.map((w) => w.completed + w.failed));
+    const now = Date.parse(data.generatedAt);
     $("worker-chart").innerHTML =
-      `<div class="horizontal-chart">${workers.map((w) => `<a class="worker-summary-link" href="${esc(resources.link(w.name))}"><div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} failures</span></div>${resources.softwareVersion(w)}${w.online ? resources.summary(w, Date.parse(data.generatedAt)) : badge("offline", "Offline")}<div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div><span class="worker-details-link">Resource details ↗</span></a>`).join("")}</div>`;
+      `<div class="horizontal-chart">${workers.map((w) => {
+        const target = w.members.find((member) => member.online) || w.members[0];
+        const profiles = w.members.map((member) => {
+          const kind = managedProfiles.get(member.name)?.kind;
+          return `${w.members.length > 1 ? `<span class="small muted">${kind.toUpperCase()}</span>` : ""}
+            ${resources.softwareVersion(member)}
+            ${member.online ? resources.summary(member, now, kind) : badge("offline", "Offline")}`;
+        }).join("");
+        return `<a class="worker-summary-link" href="${esc(resources.link(target.name))}">
+          <div class="bar-label"><strong><span class="status-dot ${w.online ? "" : "offline"}"></span> ${esc(w.name)}</strong><span>${integer.format(w.completed)} ✓ · ${integer.format(w.failed)} failures</span></div>
+          ${profiles}
+          <div class="bar-track"><span data-width="${(w.completed / max) * 100}"></span><span class="failed" data-width="${(w.failed / max) * 100}"></span></div>
+          <span class="worker-details-link">Resource details ↗</span>
+        </a>`;
+      }).join("")}</div>`;
   }
   function renderActivity() {
     if (!data.activity.length) {
@@ -642,115 +663,302 @@
       return { cpu: "0", gpu: String(w.runtime.maxActiveJobs) };
     return { cpu: "", gpu: "" };
   }
+  function managedProfileIdentity(worker, previous, now) {
+    // An initial presence-only heartbeat can briefly replace the last runtime sample.
+    const recent = worker.ip && previous?.ip === worker.ip && now - previous.observedAt <= 30000
+      ? previous
+      : null;
+    const rt = worker.runtime;
+    if (!rt) return recent;
+    if (!rt.managedProfile || (rt.resources?.os && rt.resources.os !== "windows"))
+      return null;
+    const kind = resources.profile(worker).gpu ? "gpu" : "cpu";
+    const suffix = `-${kind}`;
+    if (worker.name.length <= suffix.length || !worker.name.endsWith(suffix))
+      return null;
+    const hostname = rt.resources?.hostname?.trim();
+    if (hostname) {
+      const name = worker.name.slice(0, -suffix.length);
+      return { name, kind, hostname, ip: worker.ip, observedAt: now };
+    }
+    return recent?.kind === kind ? recent : null;
+  }
+  function groupWorkers(workers) {
+    const previous = managedProfiles;
+    managedProfiles = new Map();
+    const candidates = new Map();
+    const groups = [];
+    const now = Date.parse(data.generatedAt);
+    for (const worker of workers) {
+      const identity = managedProfileIdentity(worker, previous.get(worker.name), now);
+      if (!identity) {
+        groups.push({ ...worker, members: [worker] });
+        continue;
+      }
+      managedProfiles.set(worker.name, identity);
+      const key = JSON.stringify([identity.name, identity.hostname.toLowerCase()]);
+      if (!candidates.has(key)) candidates.set(key, []);
+      candidates.get(key).push(worker);
+    }
+    for (const members of candidates.values()) {
+      if (members.length === 1) {
+        groups.push({ ...members[0], members });
+        continue;
+      }
+      members.sort((a, b) => a.name.localeCompare(b.name));
+      const { name, hostname } = managedProfiles.get(members[0].name);
+      const [cpu, gpu] = members;
+      const latest = Date.parse(cpu.lastSeen) >= Date.parse(gpu.lastSeen) ? cpu : gpu;
+      const sum = (key) => members.reduce((total, worker) => total + worker[key], 0);
+      groups.push({
+        name, hostname, members, lastSeen: latest.lastSeen,
+        online: members.some((w) => w.online),
+        activeJobs: sum("activeJobs"), completed: sum("completed"), failed: sum("failed"),
+        sourceBytes: sum("sourceBytes"), targetBytes: sum("targetBytes"),
+      });
+    }
+    return groups.sort((a, b) => Number(b.online) - Number(a.online) || b.activeJobs - a.activeJobs || a.name.localeCompare(b.name));
+  }
   function visibleWorkers() {
     if (!data) return [];
     const since = customRange
       ? Date.parse(customRange.start)
       : Date.parse(data.generatedAt) - hours * 3600000;
     const until = customRange ? Date.parse(customRange.end) : Infinity;
-    return data.workers.filter(
+    return fleet.filter(
       (w) =>
         w.lastSeen &&
         Date.parse(w.lastSeen) >= since &&
         Date.parse(w.lastSeen) < until,
     );
   }
+  function activeWorker(worker) {
+    return worker.online && (worker.runtime?.activeJobs ?? worker.activeJobs) > 0;
+  }
+  function queuePaused(runtime) {
+    return runtime?.paused || (runtime?.capacityVersion >= 2 &&
+      runtime.cpuJobs === 0 && runtime.gpuJobs === 0);
+  }
+  function matchesWorkerFilter(worker, search, state) {
+    if (![worker.name, ...worker.members.map((w) => w.name)].some(
+      (name) => name.toLowerCase().includes(search),
+    )) return false;
+    if (state === "active") return worker.members.some(activeWorker);
+    if (state === "paused") return worker.members.some(
+      (w) => w.online && (w.runtime?.ramPaused || queuePaused(w.runtime)),
+    );
+    return state !== "offline" || !worker.online;
+  }
   function renderWorkers() {
-    if (!data) return;
+    if (!data || view !== "workers") return;
     const periodWorkers = visibleWorkers();
-    $("worker-scope-note").textContent =
-      `${periodWorkers.length} workers · last seen in selected period (up to 30 days) · live resources`;
-    if (!periodWorkers.length) {
+    const search = $("worker-search").value.trim().toLowerCase();
+    const state = $("worker-state-filter").value;
+    const all = periodWorkers.filter((worker) => selectedWorker
+      ? worker.members.some((member) => member.name === selectedWorker)
+      : matchesWorkerFilter(worker, search, state));
+    const results = `${all.length} of ${periodWorkers.length} workers`;
+    if ($("worker-results-status").textContent !== results)
+      $("worker-results-status").textContent = results;
+    if (!all.length) {
       $("worker-pagination").innerHTML = "";
-      $("worker-cards").innerHTML = empty("No workers in this period", "");
+      $("worker-cards").innerHTML = selectedWorker ? ""
+        : empty(periodWorkers.length ? "No workers match your filters" : "No workers in this period");
       return;
     }
-    const all = periodWorkers.filter(
-      (worker) => !selectedWorker || worker.name === selectedWorker,
-    );
+    if (selectedWorker && pendingWorkerExpansion === selectedWorker) {
+      for (const member of all[0].members) expandedWorkers.add(member.name);
+      pendingWorkerExpansion = null;
+    }
     workerPage = Math.max(
       0,
-      Math.min(workerPage, Math.ceil(all.length / 12) - 1),
+      Math.min(workerPage, Math.ceil(all.length / workerPageSize) - 1),
     );
+    const offset = workerPage * workerPageSize;
     const visible = selectedWorker
       ? all
-      : all.slice(workerPage * 12, workerPage * 12 + 12);
+      : all.slice(offset, offset + workerPageSize);
     $("worker-pagination").innerHTML = selectedWorker
       ? ""
-      : pagination(all.length, workerPage * 12, 12, "worker");
-    $("worker-cards").innerHTML = visible
-      .map((w, i) => {
-        if (!w.online)
-          return `<article class="panel worker-card worker-offline"><div class="worker-heading"><div><h2>${esc(w.name)}</h2><p>Last seen ${age(w.lastSeen)}</p>${resources.softwareVersion(w)}</div>${badge("offline", "Offline")}</div><p class="media-help">${esc(w.ip || "Address unavailable")} · Offline</p></article>`;
-        const rt = w.runtime,
-          modern = rt?.capacityVersion >= 2;
-        const profile = resources.profile(w);
-        const desired = workerLimits(w),
-          draft = drafts.get(w.name) ?? desired;
-        const pending =
-          (w.desiredCPUJobs != null || w.desiredMax != null) &&
-          (!modern ||
-            Number(desired.cpu) !== rt.cpuJobs ||
-            Number(desired.gpu) !== rt.gpuJobs);
-        const paused =
-          modern && (rt.paused || (rt.cpuJobs === 0 && rt.gpuJobs === 0));
-        const status = !modern
-          ? ["queued", "Update worker"]
-          : rt.draining
-            ? ["queued", "Maintenance"]
-            : rt.finishing
-              ? ["queued", "Finishing jobs"]
-              : rt.ramPaused
-                ? ["queued", "RAM pause"]
-                : paused
-                  ? ["queued", "Queue paused"]
-                  : !rt.withinSchedule
-                    ? ["queued", "Outside schedule"]
-                    : ["completed", "Online"];
-        const command = w.control;
-        const pendingControl = command?.state === "pending";
-        const busy = saving.has(w.name),
-          disabled = busy || !modern || pendingControl;
-        const controlDisabled =
-          disabled || !(rt?.controlVersion >= 1) || rt?.draining;
-        const controlNote = pendingControl
-          ? `Waiting for worker confirmation: ${command.action}. `
-          : command?.state === "failed"
-            ? command.error || "The worker could not apply the control."
-            : !(rt?.controlVersion >= 1)
-              ? "Update this worker to enable remote RAM and queue controls."
-              : "";
-        const controls = `<div class="worker-controls"><button class="button subtle" type="button" data-worker-control="${rt?.ramPaused ? "resume-encodes" : "pause-encodes"}" data-worker-name="${esc(w.name)}" ${controlDisabled || rt?.finishing ? "disabled" : ""}>${rt?.ramPaused ? "Resume encodes" : "Pause in RAM"}</button><button class="button subtle" type="button" data-worker-control="${rt?.maxActiveJobs === 0 ? "resume-queue" : "stop-after-current"}" data-worker-name="${esc(w.name)}" ${controlDisabled ? "disabled" : ""}>${rt?.maxActiveJobs === 0 ? "Resume queue" : "Stop after current"}</button></div><p class="pending-note ${pendingControl ? "pending" : command?.state === "failed" ? "control-error" : ""}">${esc(controlNote)}</p>`;
-        const lane = (kind) => {
-          const active =
-              rt?.[kind === "cpu" ? "activeCPUEncodes" : "activeGPUEncodes"],
-            limit = rt?.[`${kind}Jobs`];
-          return `<div class="encoder-lane ${kind}"><div class="load-labels"><span><b>${kind.toUpperCase()}</b> · ${esc(rt?.[`${kind}Encoder`] || rt?.encoder || "No telemetry")}</span><strong>${modern ? `${active} / ${limit}` : "—"}</strong></div><div class="progress-track"><span data-width="${modern && limit > 0 ? (active / limit) * 100 : 0}"></span></div><p class="lane-note">${!modern ? "Update the worker to enable capacity controls." : limit === 0 ? "New encodes stopped" : `${limit} encoding slots · ${active} occupied`}</p></div>`;
-        };
-        const input = (kind, enabled) =>
-          enabled
-            ? `<div><label for="${kind}-${i}">${kind.toUpperCase()} limit <span>ENCODES</span></label><input id="${kind}-${i}" name="${kind}Jobs" type="number" min="0" step="1" required inputmode="numeric" value="${esc(draft[kind])}" ${rt?.managedProfile ? 'max="64"' : ""} ${disabled ? "disabled" : ""} aria-label="${kind.toUpperCase()} limit for ${esc(w.name)}"></div>`
-            : `<input type="hidden" name="${kind}Jobs" value="0">`;
-        const profileLabel = rt?.managedProfile
-          ? `Windows ${profile.cpu ? "CPU" : "GPU"} profile · shared host${rt.resources?.hostname ? " " + rt.resources.hostname : ""}`
-          : "CPU + GPU worker";
-        const note = pending
-          ? `Limits pending${rt.managedProfile ? " for this profile" : ""}.`
-          : !modern
-            ? "Update this worker to enable controls."
-            : rt.draining
-              ? "Maintenance: finishing accepted work."
-              : rt.finishing
-                ? "Finishing accepted work; admission remains held."
-                : rt.ramPaused
-                  ? `RAM pause · ${rt.suspendedEncodes || 0} encodes suspended; limits retained.`
-                  : paused
-                    ? "Queue stopped. Active encodes finish; queued encodes wait."
-                    : "";
-        return `<article class="panel worker-card" data-worker="${esc(w.name)}"><div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(w.name)}</h2><p>${esc(profileLabel)}</p>${resources.softwareVersion(w)}</div>${badge(...status)}</div><p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.managedProfile ? " · shared host resources" : ""}</p>${resources.summary(w, Date.parse(data.generatedAt))}${resources.compact(w, resourceHistory, Date.parse(data.generatedAt))}<a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">View resource details ↗</a><div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div><form class="worker-capacity" data-worker="${esc(w.name)}"><div class="encoder-inputs">${input("cpu", profile.cpu)}${input("gpu", profile.gpu)}</div><div class="capacity-controls"><button class="button primary" type="submit" ${disabled ? "disabled" : ""}>${busy ? "Saving…" : "Save limits"}</button></div><p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p></form>${controls}${workerTasks(w)}<div class="worker-footer"><span>${esc(w.ip)} · ${age(w.lastSeen)}</span><span>Period: ${integer.format(w.completed)} completed · ${integer.format(w.failed)} failed · ${bytes(w.sourceBytes - w.targetBytes)} saved</span></div></article>`;
-      })
-      .join("");
-    applyWidths($("worker-cards"));
+      : pagination(all.length, offset, workerPageSize, "worker");
+    const root = $("worker-cards");
+    const focused = document.activeElement;
+    const focusedRow = focused?.closest("#worker-cards > .worker-card");
+    const focusedKey = focusedRow?.querySelector(".worker-row")?.dataset.workerToggle;
+    root.innerHTML = visible.map(renderWorkerRow).join("");
+    applyWidths(root);
+    if (focusedKey) {
+      const toggle = Array.from(root.querySelectorAll(".worker-row")).find(
+        (button) => button.dataset.workerToggle === focusedKey,
+      );
+      if (toggle) {
+        const panel = toggle.nextElementSibling;
+        const next = panel.hidden || focused.matches(".worker-row") ? null :
+          Array.from(panel.querySelectorAll("a, button, input:not([type=hidden])")).find(
+            (node) => !node.disabled &&
+              node.tagName === focused.tagName && node.name === focused.name &&
+              node.form?.dataset.worker === focused.form?.dataset.worker &&
+              node.getAttribute("href") === focused.getAttribute("href") &&
+              node.dataset.workerName === focused.dataset.workerName &&
+              node.dataset.workerControl === focused.dataset.workerControl &&
+              node.dataset.jobId === focused.dataset.jobId,
+          );
+        (next || toggle).focus({ preventScroll: true });
+      } else if (!selectedWorker) {
+        $("worker-search").focus({ preventScroll: true });
+      }
+    }
+  }
+  function workerPeriod(worker) {
+    return `<span>Period: ${integer.format(worker.completed)} completed · ${integer.format(worker.failed)} failed · ${bytes(worker.sourceBytes - worker.targetBytes)} saved</span>`;
+  }
+  function workerLabel(name) {
+    return fleet.find((w) => w.members.some((member) => member.name === name))?.name || name;
+  }
+  function workerStatus(worker) {
+    const rt = worker.runtime;
+    if (!worker.online) return ["offline", "Offline"];
+    if (!(rt?.capacityVersion >= 2)) return ["queued", "Update worker"];
+    if (rt.draining) return ["queued", "Maintenance"];
+    if (rt.finishing) return ["queued", "Finishing jobs"];
+    if (rt.ramPaused) return ["queued", "RAM pause"];
+    if (queuePaused(rt)) return ["queued", "Queue paused"];
+    if (!rt.withinSchedule) return ["queued", "Outside schedule"];
+    return activeWorker(worker) ? ["active", "Active"] : ["completed", "Idle"];
+  }
+  function workerRowStatus(worker) {
+    if (!worker.online) return ["offline", "Offline"];
+    const online = worker.members.filter((member) => member.online);
+    if (online.length < worker.members.length)
+      return ["queued", `${online.length} of ${worker.members.length} profiles online`];
+    const states = online.map(workerStatus);
+    const notices = [...new Set(states.filter(([state]) => state === "queued").map(([, label]) => label))];
+    if (notices.length) return ["queued", notices.join(" · ")];
+    return online.some(activeWorker) ? ["active", "Active"] : ["completed", "Idle"];
+  }
+  function workerRowCapacity(worker) {
+    if (!worker.online) return `<span>Last seen ${age(worker.lastSeen)}</span>`;
+    const observed = worker.members.flatMap((member) => {
+      const kind = managedProfiles.get(member.name)?.kind;
+      const profile = resources.profile(member, kind);
+      const rt = member.runtime;
+      return ["cpu", "gpu"].filter((key) => profile[key]).map((key) => {
+        const active = rt?.[key === "cpu" ? "activeCPUEncodes" : "activeGPUEncodes"];
+        const configured = rt?.[`${key}Jobs`];
+        const capacity = member.online && rt?.capacityVersion >= 2 &&
+          Number.isInteger(active) && Number.isInteger(configured)
+          ? `${active} / ${configured}`
+          : "—";
+        return `<span>${key.toUpperCase()} ${capacity}</span>`;
+      });
+    });
+    return observed.join("");
+  }
+  function renderWorkerRow(worker, index) {
+    const grouped = worker.members.length > 1;
+    const expanded = worker.members.some((member) => expandedWorkers.has(member.name));
+    const detailId = `worker-row-details-${index}`;
+    const versions = worker.members.map((member) => resources.softwareVersion(member));
+    const version = versions.every((value) => value === versions[0])
+      ? versions[0]
+      : versions.map((value, i) =>
+        `<span>${managedProfiles.get(worker.members[i].name).kind.toUpperCase()} ${value}</span>`,
+      ).join("");
+    return `<article class="panel worker-card${worker.online ? "" : " worker-offline"}" ${grouped ? "data-machine" : "data-worker"}="${esc(worker.name)}">
+      <button class="worker-row" type="button" data-worker-toggle="${esc(worker.members[0].name)}" aria-expanded="${expanded}" aria-controls="${detailId}">
+        <span class="worker-row-name"><strong class="worker-row-title">${esc(worker.name)}</strong><span class="worker-row-versions">${version}</span></span>
+        <span class="worker-row-status">${badge(...workerRowStatus(worker))}</span>
+        <span class="worker-row-capacity" title="${worker.online ? "Active / configured concurrent encodes" : ""}">${workerRowCapacity(worker)}</span>
+        <span class="worker-row-chevron" aria-hidden="true"></span>
+      </button>
+      <div class="worker-row-details" id="${detailId}"${expanded ? "" : " hidden"}>${expanded ? renderWorkerGroup(worker) : ""}</div>
+    </article>`;
+  }
+  function renderWorkerGroup(group) {
+    if (group.members.length === 1) return renderWorkerProfile(group.members[0]);
+    const accepted = group.members.reduce((total, w) => total + (w.online ? w.runtime?.activeJobs ?? w.activeJobs : 0), 0);
+    return `<p class="media-help">Windows worker · shared host ${esc(group.hostname)}${group.online ? ` · ${accepted} accepted jobs` : ""}</p>
+      ${group.members.map((w) => renderWorkerProfile(w, managedProfiles.get(w.name).kind)).join("")}
+      <div class="worker-footer"><span>Last seen ${age(group.lastSeen)}</span>${group.online ? workerPeriod(group) : ""}</div>`;
+  }
+  function workerCapacity(worker, profile, draft, busy, disabled, pending, note) {
+    const both = profile.cpu && profile.gpu;
+    const input = (kind) => profile[kind]
+      ? `<label>${both ? kind.toUpperCase() : "Concurrent encodes"}<input name="${kind}Jobs" type="number" min="0" step="1" required inputmode="numeric" value="${esc(draft[kind])}" ${both ? "" : 'max="64"'} ${disabled ? "disabled" : ""} aria-label="${kind.toUpperCase()} concurrent encodes for ${esc(worker.name)}"></label>`
+      : `<input type="hidden" name="${kind}Jobs" value="0">`;
+    return `<form class="worker-capacity" data-worker="${esc(worker.name)}">
+      ${both ? '<p class="capacity-title">Concurrent encodes</p>' : ""}
+      <div class="capacity-controls">${input("cpu")}${input("gpu")}<button class="button primary" type="submit" ${disabled ? "disabled" : ""}>${busy ? "Saving…" : "Save"}</button></div>
+      <p class="pending-note ${pending ? "pending" : ""}">${esc(note)}</p>
+    </form>`;
+  }
+  function renderWorkerProfile(w, kind) {
+    const heading = kind
+      ? `<div class="worker-heading"><h3>${kind.toUpperCase()} profile</h3>${badge(...workerStatus(w))}</div>`
+      : "";
+    const profileAttributes = kind ? ` class="worker-profile" data-worker="${esc(w.name)}"` : "";
+    if (!w.online) {
+      return kind
+        ? `<section class="worker-profile worker-offline" data-worker="${esc(w.name)}">${heading}<p class="media-help">Last seen ${age(w.lastSeen)}</p></section>`
+        : `<p class="media-help">${esc(w.ip || "Address unavailable")}</p>`;
+    }
+    const rt = w.runtime,
+      modern = rt?.capacityVersion >= 2;
+    const profile = resources.profile(w, kind);
+    const desired = workerLimits(w),
+      draft = drafts.get(w.name) ?? desired;
+    const pending =
+      (w.desiredCPUJobs != null || w.desiredMax != null) &&
+      (!modern ||
+        Number(desired.cpu) !== rt.cpuJobs ||
+        Number(desired.gpu) !== rt.gpuJobs);
+    const command = w.control;
+    const pendingControl = command?.state === "pending";
+    const busy = saving.has(w.name),
+      disabled = busy || !modern || pendingControl;
+    const controlDisabled =
+      disabled || !(rt?.controlVersion >= 1) || rt?.draining;
+    const controlNote = pendingControl
+      ? `Waiting for worker confirmation: ${command.action}. `
+      : command?.state === "failed"
+        ? command.error || "The worker could not apply the control."
+        : !(rt?.controlVersion >= 1)
+          ? "Update this worker to enable remote RAM and queue controls."
+          : "";
+    const controls = `<div class="worker-controls"><button class="button subtle" type="button" data-worker-control="${rt?.ramPaused ? "resume-encodes" : "pause-encodes"}" data-worker-name="${esc(w.name)}" ${controlDisabled || rt?.finishing ? "disabled" : ""}>${rt?.ramPaused ? "Resume encodes" : "Pause in RAM"}</button><button class="button subtle" type="button" data-worker-control="${rt?.maxActiveJobs === 0 ? "resume-queue" : "stop-after-current"}" data-worker-name="${esc(w.name)}" ${controlDisabled ? "disabled" : ""}>${rt?.maxActiveJobs === 0 ? "Resume queue" : "Stop after current"}</button></div><p class="pending-note ${pendingControl ? "pending" : command?.state === "failed" ? "control-error" : ""}">${esc(controlNote)}</p>`;
+    const lane = (kind) => {
+      const active =
+          rt?.[kind === "cpu" ? "activeCPUEncodes" : "activeGPUEncodes"],
+        limit = rt?.[`${kind}Jobs`];
+      return `<div class="encoder-lane ${kind}"><div class="load-labels"><span><b>${kind.toUpperCase()}</b> · ${esc(rt?.[`${kind}Encoder`] || rt?.encoder || "No telemetry")}</span><strong>${modern ? `${active} / ${limit}` : "—"}</strong></div><div class="progress-track"><span data-width="${modern && limit > 0 ? (active / limit) * 100 : 0}"></span></div><p class="lane-note">${!modern ? "Update the worker to enable capacity controls." : limit === 0 ? "New encodes stopped" : `${limit} encoding slots · ${active} occupied`}</p></div>`;
+    };
+    const note = pending
+      ? "Waiting for the worker to apply the new concurrency."
+      : !modern
+        ? "Update this worker to enable controls."
+        : rt.draining
+          ? "Maintenance: finishing accepted work."
+          : rt.finishing
+            ? "Finishing accepted work; admission remains held."
+            : rt.ramPaused
+              ? `RAM pause · ${rt.suspendedEncodes || 0} encodes suspended.`
+              : queuePaused(rt)
+                ? "Queue stopped. Active encodes finish; queued encodes wait."
+                : "";
+    const profileLabel = rt?.managedProfile
+      ? `Windows ${profile.cpu ? "CPU" : "GPU"} profile · shared host${rt.resources?.hostname ? " " + rt.resources.hostname : ""}`
+      : "CPU + GPU worker";
+    const now = Date.parse(data.generatedAt);
+    return `<section${profileAttributes}>
+      ${heading}
+      ${kind ? "" : `<p class="media-help">${esc(profileLabel)}</p>`}
+      ${kind ? "" : `<p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.managedProfile ? " · shared host resources" : ""}</p>`}
+      ${resources.summary(w, now, kind)}${resources.compact(w, resourceHistory, now, kind)}
+      <a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">${kind ? `View ${kind.toUpperCase()} resource details ↗` : "View resource details ↗"}</a>
+      <div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div>
+      ${workerCapacity(w, profile, draft, busy, disabled, pending, note)}${controls}${workerTasks(w)}
+      ${kind ? "" : `<div class="worker-footer"><span>${esc(w.ip)} · ${age(w.lastSeen)}</span>${workerPeriod(w)}</div>`}
+    </section>`;
   }
   function workerTasks(worker) {
     const rt = worker.runtime || {};
@@ -803,7 +1011,7 @@
     $("worker-detail-navigation").hidden = !show;
     $("worker-resource-detail").hidden = !show;
     if (!show || !data) return;
-    const worker = visibleWorkers().find((w) => w.name === selectedWorker);
+    const worker = visibleWorkers().flatMap((w) => w.members).find((w) => w.name === selectedWorker);
     $("worker-resource-detail").innerHTML = worker
       ? worker.online
         ? resources.details(
@@ -843,7 +1051,7 @@
       gpu < 0 ||
       !Number.isSafeInteger(cpu + gpu)
     ) {
-      showToast("Enter two whole numbers greater than or equal to 0.", true);
+      showToast("Enter whole numbers greater than or equal to 0.", true);
       return;
     }
     saving.add(name);
@@ -864,7 +1072,7 @@
       drafts.delete(name);
       showToast(
         w.runtime?.managedProfile
-          ? `${name}: ${resources.profile(w).cpu ? "CPU " + cpu : "GPU " + gpu} saved. Applies at the next synchronization.`
+          ? `${workerLabel(name)}: ${resources.profile(w).cpu ? "CPU " + cpu : "GPU " + gpu} saved. Applies at the next synchronization.`
           : `${name}: CPU ${cpu} · GPU ${gpu} saved. Applies at the next synchronization.`,
       );
       await refresh();
@@ -880,7 +1088,9 @@
     const [route, query = ""] = window.location.hash.slice(1).split("?", 2);
     view = route;
     selectedWorker =
-      view === "workers" ? new URLSearchParams(query).get("worker") : null;
+      view === "workers" ? new URLSearchParams(query).get("worker") || null : null;
+    pendingWorkerExpansion = selectedWorker;
+    $("worker-list-toolbar").hidden = selectedWorker !== null;
     if (!titles[view]) view = "overview";
     const label = titles[view];
     $("breadcrumb-view").textContent = label;
@@ -960,9 +1170,15 @@
   $("worker-pagination").addEventListener("click", (event) => {
     const button = event.target.closest("[data-worker-page]");
     if (!button || button.disabled) return;
-    workerPage = Number(button.dataset.workerPage) / 12;
+    workerPage = Number(button.dataset.workerPage) / workerPageSize;
     renderWorkers();
   });
+  function filterWorkers() {
+    workerPage = 0;
+    renderWorkers();
+  }
+  $("worker-search").addEventListener("input", filterWorkers);
+  $("worker-state-filter").addEventListener("change", filterWorkers);
   document.querySelectorAll("[data-filter]").forEach((button) =>
     button.addEventListener("click", () => {
       filter = button.dataset.filter;
@@ -1008,7 +1224,10 @@
         body: JSON.stringify({ action, ...(jobId ? { jobId } : {}) }),
       });
       worker.control = command;
-      showToast(`${name}: command queued; waiting for worker confirmation.`);
+      const label = workerLabel(name);
+      const kind = managedProfiles.get(name)?.kind;
+      const target = label === name ? name : `${label} · ${kind.toUpperCase()}`;
+      showToast(`${target}: command queued; waiting for worker confirmation.`);
       await refresh();
     } catch (error) {
       showToast(error.message, true);
@@ -1018,6 +1237,18 @@
     }
   }
   $("worker-cards").addEventListener("click", (event) => {
+    const toggle = event.target.closest("[data-worker-toggle]");
+    if (toggle) {
+      const worker = fleet.find((row) => row.members[0].name === toggle.dataset.workerToggle);
+      if (!worker) return;
+      const expanded = toggle.getAttribute("aria-expanded") === "true";
+      for (const member of worker.members) {
+        if (expanded) expandedWorkers.delete(member.name);
+        else expandedWorkers.add(member.name);
+      }
+      renderWorkers();
+      return;
+    }
     const button = event.target.closest("[data-worker-control]");
     if (button && !button.disabled)
       controlWorker(

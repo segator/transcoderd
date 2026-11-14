@@ -120,12 +120,14 @@ type testSessionAPI struct {
 	sessions  map[string]bool
 	logins    atomic.Int32
 	available atomic.Bool
+	lifetime  atomic.Int64
 }
 
 func newSessionAPI(t *testing.T) *testSessionAPI {
 	t.Helper()
 	a := &testSessionAPI{sessions: map[string]bool{}}
 	a.available.Store(true)
+	a.lifetime.Store(int64(oidcSessionLifetime))
 	a.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !a.available.Load() {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
@@ -137,7 +139,7 @@ func newSessionAPI(t *testing.T) *testSessionAPI {
 		if r.URL.Path == "/dashboard/api/login" {
 			var input struct{ Token string }
 			_ = json.NewDecoder(r.Body).Decode(&input)
-			if input.Token != testAPICredential || r.Header.Get("X-Dashboard-Request") != "1" {
+			if input.Token != testAPICredential || r.Header.Get("X-Dashboard-Request") != "1" || r.Header.Get(oidcSessionHeader) != "1" {
 				http.Error(w, "invalid login", http.StatusUnauthorized)
 				return
 			}
@@ -146,7 +148,7 @@ func newSessionAPI(t *testing.T) *testSessionAPI {
 			a.mu.Lock()
 			a.sessions[session] = true
 			a.mu.Unlock()
-			http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: session, Expires: time.Now().Add(oidcSessionLifetime), HttpOnly: true, Path: "/dashboard/"})
+			http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: session, Expires: time.Now().Add(time.Duration(a.lifetime.Load())), HttpOnly: true, Path: "/dashboard/"})
 			w.WriteHeader(204)
 			return
 		}
@@ -492,6 +494,16 @@ func TestOIDCSessionExpiryAndKeyRotation(t *testing.T) {
 		if w.Code != 200 || strings.Contains(string(raw), testAPICredential) || strings.Contains(string(raw), testOIDCSecret) {
 			t.Errorf("OIDC public/PWA resource %s failed privacy", path)
 		}
+	}
+}
+
+func TestOIDCSessionHonorsOlderAPIExpiry(t *testing.T) {
+	p, a := newOIDCProvider(t), newSessionAPI(t)
+	a.lifetime.Store(int64(12 * time.Hour))
+	s := oidcTestFrontend(t, oidcTestConfig(p, a))
+	cookie := oidcLoginSession(t, s, p)
+	if cookie.MaxAge > 43200 || cookie.MaxAge < 43190 {
+		t.Fatalf("cookie Max-Age = %d, want about 12 hours", cookie.MaxAge)
 	}
 }
 

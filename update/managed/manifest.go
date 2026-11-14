@@ -31,6 +31,9 @@ var releaseKey string
 // Production builds never read endpoint/key overrides from environment or IPC.
 var FixtureKey, FixtureEndpoint, FixtureMode string
 
+// FixtureFastHealthFailure is set by the focused Windows CI installer build.
+var FixtureFastHealthFailure string
+
 type File struct {
 	Name   string `json:"name"`
 	Size   int64  `json:"size"`

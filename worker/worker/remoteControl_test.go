@@ -23,7 +23,7 @@ func TestRemoteControlsUseOwnedProcessesAndPreserveHolds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := web.NewWebServer(&web.Config{Token: "worker", DashboardToken: "dashboard"}, sch, nil)
+	handler := web.NewWebServer(&web.Config{Token: "worker", DashboardToken: "dashboard"}, sch, nil, repo)
 	var failAck atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/worker/control/ack" && failAck.Swap(false) {

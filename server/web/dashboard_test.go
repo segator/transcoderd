@@ -100,6 +100,34 @@ func TestDashboardCustomTokenAndSecureCookie(t *testing.T) {
 	}
 }
 
+func TestDashboardOIDCSessionCredentialRotation(t *testing.T) {
+	s := newWorkerSettingsTestServer(t)
+	login := func(token string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/dashboard/api/login", strings.NewReader(`{"token":"`+token+`"}`))
+		r.Header.Set("X-Dashboard-Request", "1")
+		r.Header.Set(oidcSessionHeader, "1")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	if got := login("encoding123"); got.Code != 401 {
+		t.Fatalf("OIDC session login with default token = %d, want 401", got.Code)
+	}
+	s.config.DashboardToken = "private-oidc-dashboard-token-with-32-characters"
+	w := login(s.config.DashboardToken)
+	if w.Code != 204 || len(w.Result().Cookies()) != 1 {
+		t.Fatalf("OIDC session login = %d %s, want 204 and cookie", w.Code, w.Body.String())
+	}
+	cookie := w.Result().Cookies()[0]
+	rotated := *s.config
+	rotated.DashboardToken = "rotated-oidc-dashboard-token-with-32-characters"
+	other := NewWebServer(&rotated, s.scheduler, s.updater, s.dashboard.persistent)
+	t.Cleanup(other.library.Close)
+	if got := dashboardRequest(other, "GET", "/dashboard/api/session", "", "", cookie); got.Code != 401 {
+		t.Fatalf("OIDC session after rotating API credential = %d, want 401", got.Code)
+	}
+}
+
 func TestDashboardRejectsCrossOriginMutations(t *testing.T) {
 	s := newWorkerSettingsTestServer(t)
 	cookie := loginDashboard(t, s)

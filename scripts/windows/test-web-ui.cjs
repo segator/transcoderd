@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const assetRoot = 'worker/dashboard/wwwroot';
-assert.match(fs.readFileSync(`${assetRoot}/index.html`, 'utf8'), /<html lang="en">/, 'the dashboard language must be English');
+assert.match(fs.readFileSync(`${assetRoot}/index.html`, 'utf8'), /<html\b[^>]*\slang="en"(?=\s|>)/, 'the dashboard language must be English');
 const elements = new Map();
 function element(id) {
   if (!elements.has(id)) elements.set(id, {id, textContent:'', innerHTML:'', value:'', disabled:false, dataset:{},style:{},handlers:{},classList:{add(){}, remove(){}, toggle(){}}, addEventListener(name,callback){this.handlers[name]=callback;}});

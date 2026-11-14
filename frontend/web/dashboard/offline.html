@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0b0e14" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0b0e14" data-light="#f4f6fa" data-dark="#0b0e14" />
+    <script src="/dashboard/theme.js"></script>
     <meta name="description" content="Reconnect to your TranscoderD server" />
     <title>Offline · TranscoderD</title>
     <link rel="icon" href="/dashboard/icon.svg" type="image/svg+xml" />
@@ -22,7 +23,19 @@
         ></a
       >
       <section class="panel offline-card" aria-labelledby="offline-title">
-        <span class="eyebrow">SERVER CONNECTION</span>
+        <div class="login-tools">
+          <span class="eyebrow">SERVER CONNECTION</span>
+          <button
+            class="icon-button theme-toggle"
+            type="button"
+            data-theme-toggle
+            aria-label="Dark theme"
+            aria-pressed="true"
+            hidden
+          >
+            <span aria-hidden="true">☀</span>
+          </button>
+        </div>
         <h1 id="offline-title">Ready when<br />you reconnect.</h1>
         <p>
           Cannot connect to TranscoderD. Check your network and make sure the server is running.

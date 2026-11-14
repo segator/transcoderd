@@ -53,11 +53,18 @@ No media volumes, PostgreSQL access, FFmpeg or worker token are configured on th
 Media discovery, filters, probes, reviewed intake, original byte ranges and compatible H.264/AAC conversion all run on the API host. Video bytes flow through the frontend without complete-file buffering or local storage. Closing playback cancels the backend request and preview. The frontend image runs as a nonroot user and contains no media toolchain. Its `/healthz` endpoint reports frontend liveness, independently of backend availability.
 
 For migration, assign separate API and frontend hostnames, upgrade the API and start the frontend. Keep workers pointed at the API origin. If an older deployment used one hostname for both UI and worker requests, update worker `web.domain` to the API hostname before moving the old dashboard hostname to the frontend. Existing server-side UI URLs now return 404; sign in again on the frontend origin. Local worker/Windows tray dashboards remain worker-local and are independent of this fleet frontend.
+
+## Find workers
+
+Open **Workers** to see one expandable row per machine. The CPU and GPU figures show active encodes over configured concurrency from the latest worker report. Search by machine or profile name and use **Active**, **Paused**, or **Offline** to narrow the selected reporting period. **Active** includes online workers with accepted work. **Paused** includes an online queue or RAM hold, so the same machine can match both filters. **Offline** shows machines with no online profiles.
+
+Expand a row to see current tasks, resource history and controls for its online profiles.
+
 ## Concurrent encodes by CPU and GPU
 
 1. Upgrade the server first; it applies migrations 007 (telemetry) and 008 (independent limits) automatically.
 2. Upgrade workers to enable both encoder classes, runtime polling, and version-2 capacity telemetry.
-3. Open **Workers**. An independent worker shows CPU and GPU inputs under **Concurrent encodes**. A Windows worker shows the controls for its CPU and GPU profiles together in one card when their reported host matches.
+3. Open **Workers** and expand the machine you want to configure. An independent worker shows CPU and GPU inputs under **Concurrent encodes**. A Windows worker shows the controls for its CPU and GPU profiles together in one card when their reported host matches.
 4. Enter non-negative counts and choose **Save** next to the inputs. For example CPU `2` plus GPU `3` enables two simultaneous software encodes and three NVENC encodes. An independent worker saves its CPU/GPU pair in one atomic write under its stable name. For a Windows worker, each profile has its own **Save** button and acknowledgement.
 5. Set either field to zero to disable that class for new unassigned encodes. **Stop after current** holds admission and queued starts while accepted encodes finish. **Resume queue** restores positive limits. **Pause in RAM** / **Resume encodes** independently suspend/resume owned encodes, retaining their memory and existing queue/individual holds. Commands show pending until acknowledged; older workers must update to enable remote controls.
 
@@ -118,7 +125,7 @@ The standalone worker web UI has separate CPU/GPU controls. CLI equivalent: `tra
 
 Queue stop, RAM pause, individual job pause, finishing and maintenance are distinct observations. RAM pause keeps configured limits and memory allocations. The fleet labels suspended jobs and preserves their progress without presenting their ETA as live. Polling does not reopen maintenance/finish holds. Managed workers restore the persisted server limit on startup and keep local service defaults only when no setting exists, preventing restart from overwriting a newer fleet edit.
 
-One Windows service supervises two named profiles such as `pc-cpu` and `pc-gpu`. The fleet presents matching managed profiles on the same reported host as one worker. Its card shows each profile's encoder, status, concurrent encodes, controls, tasks and resource link. Each profile supports up to 64 concurrent encodes of its own class. The dashboard submits zero for the other class and sends controls to the named profile. The native UI's displayed profile capacities follow observed worker status, including fleet changes, while its saved resume values remain available when both profiles are stopped.
+One Windows service supervises two named profiles such as `pc-cpu` and `pc-gpu`. The fleet presents matching managed profiles on the same reported host as one worker. Its expanded row shows each profile's encoder, status, concurrent encodes, controls, tasks and resource link. Each profile supports up to 64 concurrent encodes of its own class. The dashboard submits zero for the other class and sends controls to the named profile. The native UI's displayed profile capacities follow observed worker status, including fleet changes, while its saved resume values remain available when both profiles are stopped.
 
 ## Install as a PWA
 

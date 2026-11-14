@@ -87,12 +87,61 @@ def check_themes(page, browser):
     local.close()
 
 
+def expand_worker(card):
+    toggle = card.locator(".worker-row")
+    if toggle.get_attribute("aria-expanded") == "false":
+        toggle.click()
+    expect(toggle).to_have_attribute("aria-expanded", "true")
+    expect(card.locator(".worker-row-details")).to_be_visible()
+
+
+def check_worker_list_filters(page, cards):
+    search = page.get_by_role("searchbox", name="Search workers")
+    status = page.locator("#worker-state-filter")
+    pagination = page.locator("#worker-pagination")
+    results = page.locator("#worker-results-status")
+    expect(pagination).to_contain_text("1–12 of 26")
+    expect(cards.locator(".worker-row[aria-expanded=false]")).to_have_count(12)
+    expect(cards.locator(".worker-row-details:visible")).to_have_count(0)
+    expect(cards.locator(".worker-task, form, .resource-card-history")).to_have_count(0)
+    expect(cards.filter(has=page.get_by_text("windows-cpu", exact=True)).locator(".worker-row-status")).to_have_text("Active")
+
+    search.fill("  OFFLINE-23  ")
+    expect(cards).to_have_count(1)
+    expect(cards.locator(".worker-row-name")).to_contain_text("offline-23")
+    expect(pagination).to_contain_text("1–1 of 1")
+    expect(results).to_have_text("1 of 26 workers")
+    expect(cards.locator(".worker-row")).not_to_contain_text(" / ")
+    status.select_option("active")
+    expect(cards).to_have_count(0)
+    expect(page.locator("#worker-cards")).to_contain_text("No workers match your filters")
+    expect(results).to_have_text("0 of 26 workers")
+    search.fill("")
+    expect(cards).to_have_count(1)
+    expect(cards.locator(".worker-row-name")).to_contain_text("windows-cpu")
+    status.select_option("paused")
+    expect(cards).to_have_count(0)
+    status.select_option("offline")
+    expect(cards).to_have_count(12)
+    expect(pagination).to_contain_text("1–12 of 24")
+    pagination.get_by_role("button", name="Next").click()
+    expect(pagination).to_contain_text("13–24 of 24")
+    search.fill("OFFLINE-00")
+    expect(cards.locator(".worker-row-name")).to_contain_text("offline-00")
+    expect(pagination).to_contain_text("1–1 of 1")
+    search.fill("")
+    status.select_option("all")
+    expect(pagination).to_contain_text("1–12 of 26")
+
+
 def check_grouped_workers(page, workers, writes, requests):
     cpu = worker("office-cpu")
     gpu = worker("office-gpu", "gpu")
     cpu["completed"], gpu["completed"] = 2, 3
     cpu["runtime"]["activeJobs"], gpu["runtime"]["activeJobs"] = 1, 2
     cpu["activeJobs"], gpu["activeJobs"] = 1, 2
+    cpu["runtime"]["activeCPUEncodes"], gpu["runtime"]["activeGPUEncodes"] = 1, 2
+    cpu["runtime"]["activeEncodes"], gpu["runtime"]["activeEncodes"] = 1, 2
     standalone_cpu = worker("independent-cpu")
     standalone_gpu = worker("independent-gpu", "gpu")
     for standalone in (standalone_cpu, standalone_gpu):
@@ -110,9 +159,24 @@ def check_grouped_workers(page, workers, writes, requests):
     page.evaluate("location.hash='workers'")
     cards = page.locator("#worker-cards > article")
     expect(cards).to_have_count(3)
-    office = cards.filter(has=page.get_by_role("heading", name="office", exact=True))
+    office = page.locator('#worker-cards > article[data-machine="office"]')
     cpu_profile = office.locator('[data-worker="office-cpu"].worker-profile')
     gpu_profile = office.locator('[data-worker="office-gpu"].worker-profile')
+    expect(office.locator(".worker-row")).to_have_attribute("aria-expanded", "false")
+    expect(office.locator(".worker-row-status")).to_have_text("Active")
+    expect(office.locator(".worker-row-capacity")).to_contain_text("CPU 1 / 2")
+    expect(office.locator(".worker-row-capacity")).to_contain_text("GPU 2 / 2")
+    search = page.get_by_role("searchbox", name="Search workers")
+    status = page.locator("#worker-state-filter")
+    search.fill("OFFICE-gPu")
+    expect(cards).to_have_count(1)
+    expect(office).to_be_visible()
+    search.fill("")
+    status.select_option("active")
+    expect(cards).to_have_count(1)
+    expect(office).to_be_visible()
+    status.select_option("all")
+    expand_worker(office)
     expect(office).to_contain_text("3 accepted jobs")
     expect(cpu_profile.get_by_role("heading", name="CPU profile")).to_be_visible()
     expect(gpu_profile.get_by_role("heading", name="GPU profile")).to_be_visible()
@@ -125,7 +189,9 @@ def check_grouped_workers(page, workers, writes, requests):
     assert field_box["width"] <= 80
     assert abs((field_box["y"] + field_box["height"]) - (save_box["y"] + save_box["height"])) <= 1
     assert save_box["x"] >= field_box["x"] + field_box["width"]
-    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    for width in (360, 320):
+        page.set_viewport_size(dict(width=width, height=800))
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), width
     gpu_input.fill("3")
     save.click()
     expect(page.locator("#toast")).to_contain_text("office: GPU 3 saved")
@@ -139,14 +205,37 @@ def check_grouped_workers(page, workers, writes, requests):
     gpu_profile.get_by_role("link", name="View GPU resource details").click()
     expect(page.locator("#worker-resource-detail")).to_contain_text("NVIDIA Test GPU")
     expect(cpu_profile).to_be_visible()
+    expect(office.locator(".worker-row")).to_have_attribute("aria-expanded", "true")
     page.evaluate("location.hash='workers'")
     gpu["online"] = False
     page.locator("#refresh").click()
-    expect(office).to_contain_text("1 of 2 profiles online")
+    expect(office.locator(".worker-row-status")).to_have_text("1 of 2 profiles online")
     expect(gpu_profile.locator("input, button, .resource-summary")).to_have_count(0)
+    expect(office.locator(".worker-row-capacity")).not_to_contain_text("GPU 2 / 2")
+    status.select_option("offline")
+    expect(office).to_have_count(0)
+    status.select_option("all")
+    cpu["runtime"]["ramPaused"] = True
+    page.locator("#refresh").click()
+    status.select_option("paused")
+    expect(cards).to_have_count(1)
+    expect(office).to_be_visible()
+    status.select_option("active")
+    expect(cards).to_have_count(1)
+    expect(office).to_be_visible()
+    cpu["online"] = False
+    page.locator("#refresh").click()
+    status.select_option("offline")
+    expect(cards).to_have_count(1)
+    expect(office.locator(".worker-row-status")).to_have_text("Offline")
+    expect(office.locator(".worker-row")).not_to_contain_text(" / ")
+    status.select_option("all")
+    cpu["online"] = True
+    cpu["runtime"]["ramPaused"] = False
     gpu["online"] = True
     gpu["runtime"] = None
     page.locator("#refresh").click()
+    expand_worker(office)
     expect(gpu_profile).to_contain_text("Update worker")
     expect(gpu_profile.get_by_role("button", name="Save", exact=True)).to_be_disabled()
     expect(cards).to_have_count(3)
@@ -156,6 +245,8 @@ def main():
     jobs = [job("active", 0), job("failed", 0)] + [job("queued", i) for i in range(130)] + [job("completed", i) for i in range(28)]
     workers = [worker("windows-cpu"), worker("windows-gpu", "gpu")] + [worker(f"offline-{i:02d}", online=False) for i in range(24)]
     workers[1]["runtime"]["resources"]["hostname"] = "other-windows-host"
+    workers[0]["activeJobs"] = 2
+    workers[0]["runtime"].update(activeJobs=2, activeCPUEncodes=2, activeEncodes=2)
     workers[0]["runtime"]["jobs"] = [dict(id="active-0", name="active-movie-0.mkv",phase="FFMPEG",state="running",canPause=True,progress=[dict(id="video",phase="FFMPEG",percent=42,etaSeconds=120,stale=False)]),dict(id="beyond-overview-cap", name="Second movie.mkv",phase="FFMPEG",state="running",canPause=True,progress=[dict(id="video",phase="FFMPEG",percent=18,etaSeconds=300,stale=False)])]
     writes, requests, errors, controls, periods, job_controls = [], [], [], [], [], []
     media = dict(id="demo", name="Original test.mp4", path="Original test.mp4", root="source",
@@ -273,9 +364,24 @@ def main():
             assert page.locator("#media-video").get_attribute("src") is None
 
             page.evaluate("location.hash='workers'")
-            expect(page.locator("#worker-cards > article")).to_have_count(12)
+            cards = page.locator("#worker-cards > article")
+            expect(cards).to_have_count(12)
             cpu = page.locator('#worker-cards > article[data-worker="windows-cpu"]')
             gpu = page.locator('#worker-cards > article[data-worker="windows-gpu"]')
+            check_worker_list_filters(page, cards)
+            expect(cpu.locator(".worker-row-capacity")).to_contain_text("CPU 2 / 2")
+            expect(gpu.locator(".worker-row-capacity")).to_contain_text("GPU 0 / 2")
+            for width in (360, 320):
+                page.set_viewport_size(dict(width=width, height=800))
+                assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), width
+            page.set_viewport_size(dict(width=1440, height=1000))
+            cpu.locator(".worker-row").press("Enter")
+            expect(cpu.locator(".worker-row")).to_have_attribute("aria-expanded", "true")
+            expect(cpu.locator(".worker-row-details")).to_be_visible()
+            assert cpu.locator(".worker-row").get_attribute("aria-controls") == cpu.locator(".worker-row-details").get_attribute("id")
+            expect(cpu.locator(".worker-row")).to_be_focused()
+            expect(gpu.locator(".worker-row")).to_have_attribute("aria-expanded", "false")
+            expand_worker(gpu)
             expect(cpu.locator('input[type="number"]')).to_have_count(1)
             expect(cpu.locator('input[name="cpuJobs"]')).to_be_visible()
             expect(cpu.locator('input[name="gpuJobs"]')).to_have_attribute("type", "hidden")
@@ -284,18 +390,32 @@ def main():
             expect(gpu.locator('input[name="gpuJobs"]')).to_be_visible()
             expect(gpu.locator(".resource-summary")).not_to_contain_text("CPU")
             expect(cpu).to_contain_text("shared host windows-host")
-            expect(cpu.locator(".worker-version")).to_have_text("Version v2.13.2")
-            expect(page.locator(".worker-offline .worker-version").first).to_have_text("Version v2.13.2 · last reported")
-            workers[0]["runtime"]["version"] = "v2.13.3"
-            workers[1]["runtime"].pop("version")
-            page.locator("#refresh").click()
-            expect(cpu.locator(".worker-version")).to_have_text("Version v2.13.3")
-            expect(gpu.locator(".worker-version")).to_have_text("Version unavailable")
+            expect(cpu.locator(".worker-row .worker-version")).to_have_text("Version v2.13.2")
+            expect(page.locator(".worker-offline .worker-row .worker-version").first).to_have_text("Version v2.13.2 · last reported")
+            draft = cpu.locator('input[name="cpuJobs"]')
+            draft.fill("4")
+            gpu.locator(".worker-row").click()
+            expect(gpu.locator(".worker-row")).to_have_attribute("aria-expanded", "false")
+            with page.expect_response(lambda response: "/dashboard/api/stats?" in response.url, timeout=7000):
+                workers[0]["runtime"]["version"] = "v2.13.3"
+                workers[1]["runtime"].pop("version")
+            expect(cpu.locator(".worker-row .worker-version")).to_have_text("Version v2.13.3")
+            expect(cpu.locator(".worker-row")).to_have_attribute("aria-expanded", "true")
+            expect(draft).to_have_value("4")
+            with page.expect_response(lambda response: "/dashboard/api/stats?" in response.url, timeout=7000):
+                draft.focus()
+            expect(cpu.locator(".worker-row")).to_have_attribute("aria-expanded", "true")
+            expect(draft).to_have_value("4")
+            expect(draft).to_be_focused()
+            expect(gpu.locator(".worker-row .worker-version")).to_have_text("Version unavailable")
+            expect(gpu.locator(".worker-row")).to_have_attribute("aria-expanded", "false")
+            expand_worker(gpu)
             expect(cpu.locator(".resource-card-history svg")).to_have_count(1)
             expect(gpu.locator(".resource-card-history svg")).to_have_count(1)
             expect(cpu.locator(".resource-card-history")).to_contain_text("RAM")
             expect(gpu.locator(".resource-card-history")).to_contain_text("NVENC")
             expect(cpu.locator(".resource-card-history")).not_to_contain_text("NVENC")
+            gpu.locator(".worker-row").click()
             def acknowledge():
                 workers[0]["control"]["state"] = "applied"
                 page.locator("#refresh").click()
@@ -334,21 +454,28 @@ def main():
             workers[0]["online"] = True
             page.evaluate("location.hash='workers'")
             page.locator("#refresh").click()
+            expand_worker(cpu)
             expect(cpu.locator('input[name="cpuJobs"]')).to_be_visible()
             offline = page.locator("#worker-cards .worker-offline")
             assert offline.count() == 10
-            assert offline.locator("input, button, .resource-summary").count() == 0
+            assert offline.locator(".worker-row-details input, .worker-row-details button, .resource-summary").count() == 0
             page.locator("#worker-pagination").get_by_text("Next", exact=True).click()
             expect(page.locator("#worker-cards > article")).to_have_count(12)
             page.locator("#worker-pagination").get_by_text("Next", exact=True).click()
             expect(page.locator("#worker-cards > article")).to_have_count(2)
+            status = page.locator("#worker-state-filter")
+            status.select_option("offline")
             page.evaluate("location.hash='workers?worker=windows-gpu'")
             expect(page.locator("#worker-resource-detail")).to_contain_text("NVIDIA Test GPU")
+            expect(gpu.locator(".worker-row")).to_have_attribute("aria-expanded", "true")
+            expect(gpu.locator('input[name="gpuJobs"]')).to_be_visible()
             expect(page.locator("#worker-resource-detail .worker-version")).to_have_text("Version unavailable")
             expect(page.locator("#worker-resource-detail")).not_to_contain_text("Host CPU")
 
             # Worker snapshots show tasks outside the overview cap, and target only one encode.
             page.evaluate("location.hash='workers'")
+            status.select_option("all")
+            expand_worker(cpu)
             expect(cpu.locator(".worker-task")).to_have_count(2)
             expect(cpu).to_contain_text("Second movie.mkv")
             first = cpu.locator('[data-task-id="active-0"]')
@@ -374,11 +501,11 @@ def main():
             workers[-1]["lastSeen"] = (datetime.now(timezone.utc)-timedelta(days=2)).isoformat()
             workers[-2]["lastSeen"] = (datetime.now(timezone.utc)-timedelta(days=10)).isoformat()
             page.locator("#period").select_option("24")
-            expect(page.locator("#worker-scope-note")).to_contain_text("24 workers · last seen in selected period")
+            expect(page.locator("#worker-results-status")).to_have_text("24 of 24 workers")
             page.locator("#period").select_option("168")
-            expect(page.locator("#worker-scope-note")).to_contain_text("25 workers · last seen in selected period")
+            expect(page.locator("#worker-results-status")).to_have_text("25 of 25 workers")
             page.locator("#period").select_option("720")
-            expect(page.locator("#worker-scope-note")).to_contain_text("26 workers · last seen in selected period")
+            expect(page.locator("#worker-results-status")).to_have_text("26 of 26 workers")
             # Custom dates include the chosen last day, respecting a DST change.
             page.evaluate("location.hash='overview'")
             expect(page.locator("#page-title")).to_have_text("Overview")
@@ -409,7 +536,7 @@ def main():
             page.evaluate("location.hash='jobs'")
             expect(page.locator("#reporting-control")).not_to_be_visible()
             page.evaluate("location.hash='workers'")
-            expect(page.locator("#worker-scope-note")).to_contain_text("0 workers")
+            expect(page.locator("#worker-results-status")).to_have_text("0 of 0 workers")
             page.locator("#period").select_option("720")
             expect(cpu).to_be_visible()
             # Multiple columns for mobile analytics and resource panels, without overflow.
@@ -433,7 +560,7 @@ def main():
             workers[0]["runtime"] = None
             page.locator("#refresh").click()
             expect(cpu).to_contain_text("Update worker")
-            expect(cpu.locator(".worker-version")).to_have_text("Version unavailable")
+            expect(cpu.locator(".worker-row .worker-version")).to_have_text("Version unavailable")
             expect(cpu.locator(".worker-task")).to_have_count(1)
             assert cpu.locator(".worker-task button").count() == 0
             workers[0]["runtime"] = saved_runtime
@@ -450,7 +577,7 @@ def main():
             check_themes(page, browser)
             assert errors == [], errors
             browser.close()
-    print("Dashboard Chromium checks passed: identity, all-job filters/search/pages, playback/native seek, grouped Windows profiles, atomic profile saves, offline cards, worker pages, scanner provenance, mobile layout and persisted themes.")
+    print("Dashboard Chromium checks passed: identity, all-job filters/search/pages, playback/native seek, compact worker filters and expansion, grouped Windows profiles, profile saves, offline states, scanner provenance, mobile layout and persisted themes.")
 
 
 if __name__ == "__main__":

@@ -468,10 +468,10 @@
     gap: 20px;
     margin-bottom: 20px;
   }
-  .worker-grid {
+  .worker-list {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 20px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
   }
   .page-footer {
     display: flex;
@@ -744,37 +744,10 @@
     color: var(--status-green-text, #c5d7b7);
     font-weight: 500;
   }
-  .worker-card {
-    padding: 24px;
-  }
   .worker-heading {
     display: flex;
     align-items: center;
     gap: 12px;
-  }
-  .worker-icon {
-    background: var(--status-purple-bg, #202137);
-    border: 1px solid var(--status-purple-border, #34314b);
-    border-radius: 10px;
-    color: var(--purple);
-    width: 40px;
-    height: 40px;
-    display: grid;
-    place-items: center;
-    font-size: 21px;
-  }
-  .worker-icon.cpu {
-    color: var(--blue);
-    background: var(--status-blue-bg, #142337);
-    border-color: var(--status-blue-border, #233d59);
-  }
-  .worker-heading h2 {
-    word-break: break-word;
-  }
-  .worker-heading p {
-    color: var(--muted);
-    font-size: 10px;
-    margin-top: 3px;
   }
   .worker-heading .badge {
     margin-left: auto;
@@ -1758,9 +1731,6 @@
     .detail-grid {
       grid-template-columns: 1fr;
     }
-    .worker-grid {
-      grid-template-columns: 1fr;
-    }
     .topbar-right {
       gap: 10px;
     }
@@ -1954,14 +1924,8 @@
     .panel-header .text-link {
       font-size: 9px;
     }
-    .worker-card {
-      padding: 20px;
-    }
     .worker-heading .badge {
       font-size: 8px;
-    }
-    .worker-heading h2 {
-      font-size: 16px;
     }
     .search-field {
       width: 100%;
@@ -2234,7 +2198,7 @@
 }
 
 .list-pagination { display:flex; align-items:center; justify-content:flex-end; gap:12px; padding:16px 0; flex-wrap:wrap; }
-.worker-offline { align-self:start; opacity:.75; }
+.worker-profile.worker-offline { opacity:.75; }
 #session-name, #session-account { display:block; max-width:175px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 .session-mobile { display:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; font-size:11px; }
@@ -2318,6 +2282,138 @@
     margin: 8px 0;
     line-height: 1.6;
   }
+  .worker-list-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(7rem, max-content);
+    gap: 10px;
+    max-width: 32rem;
+  }
+  .worker-list-filters label {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .worker-list-filters input,
+  .worker-list-filters select {
+    min-width: 0;
+    width: 100%;
+    min-height: 40px;
+    padding: 6px 10px;
+    color: var(--text);
+    background: var(--surface-input, #101722);
+    border: 1px solid var(--border-input, #354057);
+    border-radius: 7px;
+    font-size: 16px;
+  }
+  .worker-list-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin: 8px 0 12px;
+  }
+  .worker-list-meta .table-note {
+    margin: 0;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .worker-list > .worker-card {
+    padding: 0;
+  }
+  .worker-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) fit-content(42%) 14px;
+    grid-template-areas: "name status chevron" "capacity capacity chevron";
+    align-items: center;
+    gap: 4px 8px;
+    width: 100%;
+    min-height: 48px;
+    padding: 10px 12px;
+    text-align: left;
+    border: 0;
+    border-radius: calc(var(--radius) - 1px);
+    background: transparent;
+  }
+  .worker-row:hover,
+  .worker-row[aria-expanded="true"] {
+    background: var(--surface-2);
+  }
+  .worker-row[aria-expanded="true"] {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+  .worker-row:focus-visible {
+    outline-offset: -3px;
+  }
+  .worker-row-name {
+    grid-area: name;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 8px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .worker-row-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .worker-row-versions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 8px;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .worker-row[aria-expanded="false"] :is(.worker-row-title, .worker-row-versions > span) {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .worker-row-status {
+    grid-area: status;
+  }
+  .worker-row-status .badge {
+    font-size: 11px;
+    white-space: normal;
+  }
+  .worker-row-capacity {
+    grid-area: capacity;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 12px;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .worker-row-capacity:empty {
+    display: none;
+  }
+  .worker-row-chevron {
+    grid-area: chevron;
+    justify-self: center;
+    width: 6px;
+    height: 6px;
+    border: solid currentColor;
+    border-width: 0 1.5px 1.5px 0;
+    color: var(--muted);
+    transform: translateY(-2px) rotate(45deg);
+  }
+  .worker-row[aria-expanded="true"] .worker-row-chevron {
+    transform: translateY(2px) rotate(225deg);
+  }
+  .worker-row-details {
+    min-width: 0;
+    padding: clamp(12px, 2vw, 24px);
+    border-top: 1px solid var(--border);
+    overflow-wrap: anywhere;
+  }
   .worker-tasks {
     border-top: 1px solid var(--border);
     margin-top: 16px;
@@ -2383,12 +2479,12 @@
 }
 
 @layer responsive {
-  @media (min-width: 600px) and (max-width: 1000px) {
-    .worker-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    .worker-card {
-      padding: 16px;
+  @media (min-width: 600px) {
+    .worker-row {
+      grid-template-columns: minmax(0, 1fr) fit-content(30%) minmax(128px, auto) 14px;
+      grid-template-areas: "name status capacity chevron";
+      column-gap: 14px;
+      padding-inline: 16px;
     }
   }
   @media (max-width: 720px) {
@@ -2486,15 +2582,8 @@
     .queue-layout {
       gap: 20px;
     }
-    .worker-card {
-      padding: 14px;
-    }
     .worker-heading {
       gap: 8px;
-    }
-    .worker-heading h2 {
-      font-size: 15px;
-      overflow-wrap: anywhere;
     }
     .encoder-lanes {
       margin-top: 12px;
@@ -2632,3 +2721,4 @@
 }
 
 .worker-version { display:block; font-size:11px; line-height:1.5; color:var(--muted,var(--text-soft, #98a5b8)); overflow-wrap:anywhere; }
+.worker-row-versions > span > .worker-version { display:inline; }

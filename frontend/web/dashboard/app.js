@@ -42,7 +42,9 @@
   };
   const resources = window.TranscoderResources;
   const resourceHistory = new resources.History();
+  const workerPageSize = 12;
   let selectedWorker = null,
+    pendingWorkerExpansion = null,
     workerPage = 0,
     jobsOffset = 0,
     jobsGeneration = 0,
@@ -57,7 +59,8 @@
     timer = null,
     toastTimer;
   const drafts = new Map(),
-    saving = new Set();
+    saving = new Set(),
+    expandedWorkers = new Set();
   let fleet = [],
     managedProfiles = new Map();
 
@@ -223,10 +226,11 @@
     renderJobs();
     // Polling must not replace a form while an operator is typing.
     const editingWorker =
-      document.activeElement?.closest?.("form[data-worker]")?.dataset.worker;
+      document.activeElement?.closest?.(".worker-capacity input")?.form?.dataset.worker;
     if (
       !editingWorker ||
-      !data.workers.some((w) => w.name === editingWorker && w.online)
+      !data.workers.some((w) => w.name === editingWorker && w.online &&
+        w.runtime?.capacityVersion >= 2 && w.control?.state !== "pending")
     )
       renderWorkers();
     renderWorkerDetails();
@@ -728,31 +732,82 @@
         Date.parse(w.lastSeen) < until,
     );
   }
+  function activeWorker(worker) {
+    return worker.online && (worker.runtime?.activeJobs ?? worker.activeJobs) > 0;
+  }
+  function queuePaused(runtime) {
+    return runtime?.paused || (runtime?.capacityVersion >= 2 &&
+      runtime.cpuJobs === 0 && runtime.gpuJobs === 0);
+  }
+  function matchesWorkerFilter(worker, search, state) {
+    if (![worker.name, ...worker.members.map((w) => w.name)].some(
+      (name) => name.toLowerCase().includes(search),
+    )) return false;
+    if (state === "active") return worker.members.some(activeWorker);
+    if (state === "paused") return worker.members.some(
+      (w) => w.online && (w.runtime?.ramPaused || queuePaused(w.runtime)),
+    );
+    return state !== "offline" || !worker.online;
+  }
   function renderWorkers() {
-    if (!data) return;
+    if (!data || view !== "workers") return;
     const periodWorkers = visibleWorkers();
-    $("worker-scope-note").textContent =
-      `${periodWorkers.length} workers · last seen in selected period (up to 30 days) · live resources`;
-    if (!periodWorkers.length) {
+    const search = $("worker-search").value.trim().toLowerCase();
+    const state = $("worker-state-filter").value;
+    const all = periodWorkers.filter((worker) => selectedWorker
+      ? worker.members.some((member) => member.name === selectedWorker)
+      : matchesWorkerFilter(worker, search, state));
+    const results = `${all.length} of ${periodWorkers.length} workers`;
+    if ($("worker-results-status").textContent !== results)
+      $("worker-results-status").textContent = results;
+    if (!all.length) {
       $("worker-pagination").innerHTML = "";
-      $("worker-cards").innerHTML = empty("No workers in this period", "");
+      $("worker-cards").innerHTML = selectedWorker ? ""
+        : empty(periodWorkers.length ? "No workers match your filters" : "No workers in this period");
       return;
     }
-    const all = periodWorkers.filter(
-      (worker) => !selectedWorker || worker.members.some((member) => member.name === selectedWorker),
-    );
+    if (selectedWorker && pendingWorkerExpansion === selectedWorker) {
+      for (const member of all[0].members) expandedWorkers.add(member.name);
+      pendingWorkerExpansion = null;
+    }
     workerPage = Math.max(
       0,
-      Math.min(workerPage, Math.ceil(all.length / 12) - 1),
+      Math.min(workerPage, Math.ceil(all.length / workerPageSize) - 1),
     );
+    const offset = workerPage * workerPageSize;
     const visible = selectedWorker
       ? all
-      : all.slice(workerPage * 12, workerPage * 12 + 12);
+      : all.slice(offset, offset + workerPageSize);
     $("worker-pagination").innerHTML = selectedWorker
       ? ""
-      : pagination(all.length, workerPage * 12, 12, "worker");
-    $("worker-cards").innerHTML = visible.map(renderWorkerGroup).join("");
-    applyWidths($("worker-cards"));
+      : pagination(all.length, offset, workerPageSize, "worker");
+    const root = $("worker-cards");
+    const focused = document.activeElement;
+    const focusedRow = focused?.closest("#worker-cards > .worker-card");
+    const focusedKey = focusedRow?.querySelector(".worker-row")?.dataset.workerToggle;
+    root.innerHTML = visible.map(renderWorkerRow).join("");
+    applyWidths(root);
+    if (focusedKey) {
+      const toggle = Array.from(root.querySelectorAll(".worker-row")).find(
+        (button) => button.dataset.workerToggle === focusedKey,
+      );
+      if (toggle) {
+        const panel = toggle.nextElementSibling;
+        const next = panel.hidden || focused.matches(".worker-row") ? null :
+          Array.from(panel.querySelectorAll("a, button, input:not([type=hidden])")).find(
+            (node) => !node.disabled &&
+              node.tagName === focused.tagName && node.name === focused.name &&
+              node.form?.dataset.worker === focused.form?.dataset.worker &&
+              node.getAttribute("href") === focused.getAttribute("href") &&
+              node.dataset.workerName === focused.dataset.workerName &&
+              node.dataset.workerControl === focused.dataset.workerControl &&
+              node.dataset.jobId === focused.dataset.jobId,
+          );
+        (next || toggle).focus({ preventScroll: true });
+      } else if (!selectedWorker) {
+        $("worker-search").focus({ preventScroll: true });
+      }
+    }
   }
   function workerPeriod(worker) {
     return `<span>Period: ${integer.format(worker.completed)} completed · ${integer.format(worker.failed)} failed · ${bytes(worker.sourceBytes - worker.targetBytes)} saved</span>`;
@@ -760,21 +815,71 @@
   function workerLabel(name) {
     return fleet.find((w) => w.members.some((member) => member.name === name))?.name || name;
   }
+  function workerStatus(worker) {
+    const rt = worker.runtime;
+    if (!worker.online) return ["offline", "Offline"];
+    if (!(rt?.capacityVersion >= 2)) return ["queued", "Update worker"];
+    if (rt.draining) return ["queued", "Maintenance"];
+    if (rt.finishing) return ["queued", "Finishing jobs"];
+    if (rt.ramPaused) return ["queued", "RAM pause"];
+    if (queuePaused(rt)) return ["queued", "Queue paused"];
+    if (!rt.withinSchedule) return ["queued", "Outside schedule"];
+    return activeWorker(worker) ? ["active", "Active"] : ["completed", "Idle"];
+  }
+  function workerRowStatus(worker) {
+    if (!worker.online) return ["offline", "Offline"];
+    const online = worker.members.filter((member) => member.online);
+    if (online.length < worker.members.length)
+      return ["queued", `${online.length} of ${worker.members.length} profiles online`];
+    const states = online.map(workerStatus);
+    const notices = [...new Set(states.filter(([state]) => state === "queued").map(([, label]) => label))];
+    if (notices.length) return ["queued", notices.join(" · ")];
+    return online.some(activeWorker) ? ["active", "Active"] : ["completed", "Idle"];
+  }
+  function workerRowCapacity(worker) {
+    if (!worker.online) return `<span>Last seen ${age(worker.lastSeen)}</span>`;
+    const observed = worker.members.flatMap((member) => {
+      const kind = managedProfiles.get(member.name)?.kind;
+      const profile = resources.profile(member, kind);
+      const rt = member.runtime;
+      return ["cpu", "gpu"].filter((key) => profile[key]).map((key) => {
+        const active = rt?.[key === "cpu" ? "activeCPUEncodes" : "activeGPUEncodes"];
+        const configured = rt?.[`${key}Jobs`];
+        const capacity = member.online && rt?.capacityVersion >= 2 &&
+          Number.isInteger(active) && Number.isInteger(configured)
+          ? `${active} / ${configured}`
+          : "—";
+        return `<span>${key.toUpperCase()} ${capacity}</span>`;
+      });
+    });
+    return observed.join("");
+  }
+  function renderWorkerRow(worker, index) {
+    const grouped = worker.members.length > 1;
+    const expanded = worker.members.some((member) => expandedWorkers.has(member.name));
+    const detailId = `worker-row-details-${index}`;
+    const versions = worker.members.map((member) => resources.softwareVersion(member));
+    const version = versions.every((value) => value === versions[0])
+      ? versions[0]
+      : versions.map((value, i) =>
+        `<span>${managedProfiles.get(worker.members[i].name).kind.toUpperCase()} ${value}</span>`,
+      ).join("");
+    return `<article class="panel worker-card${worker.online ? "" : " worker-offline"}" ${grouped ? "data-machine" : "data-worker"}="${esc(worker.name)}">
+      <button class="worker-row" type="button" data-worker-toggle="${esc(worker.members[0].name)}" aria-expanded="${expanded}" aria-controls="${detailId}">
+        <span class="worker-row-name"><strong class="worker-row-title">${esc(worker.name)}</strong><span class="worker-row-versions">${version}</span></span>
+        <span class="worker-row-status">${badge(...workerRowStatus(worker))}</span>
+        <span class="worker-row-capacity" title="${worker.online ? "Active / configured concurrent encodes" : ""}">${workerRowCapacity(worker)}</span>
+        <span class="worker-row-chevron" aria-hidden="true"></span>
+      </button>
+      <div class="worker-row-details" id="${detailId}"${expanded ? "" : " hidden"}>${expanded ? renderWorkerGroup(worker) : ""}</div>
+    </article>`;
+  }
   function renderWorkerGroup(group) {
     if (group.members.length === 1) return renderWorkerProfile(group.members[0]);
-    const online = group.members.filter((w) => w.online).length;
     const accepted = group.members.reduce((total, w) => total + (w.online ? w.runtime?.activeJobs ?? w.activeJobs : 0), 0);
-    const status = online === group.members.length
-      ? badge("completed", "Online")
-      : online
-        ? badge("queued", `${online} of ${group.members.length} profiles online`)
-        : badge("offline", "Offline");
-    return `<article class="panel worker-card${online ? "" : " worker-offline"}">
-      <div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(group.name)}</h2><p>Windows worker · shared host ${esc(group.hostname)}</p></div>${status}</div>
-      ${online ? `<p class="media-help">${accepted} accepted jobs</p>` : ""}
+    return `<p class="media-help">Windows worker · shared host ${esc(group.hostname)}${group.online ? ` · ${accepted} accepted jobs` : ""}</p>
       ${group.members.map((w) => renderWorkerProfile(w, managedProfiles.get(w.name).kind)).join("")}
-      <div class="worker-footer"><span>Last seen ${age(group.lastSeen)}</span>${online ? workerPeriod(group) : ""}</div>
-    </article>`;
+      <div class="worker-footer"><span>Last seen ${age(group.lastSeen)}</span>${group.online ? workerPeriod(group) : ""}</div>`;
   }
   function workerCapacity(worker, profile, draft, busy, disabled, pending, note) {
     const both = profile.cpu && profile.gpu;
@@ -788,17 +893,14 @@
     </form>`;
   }
   function renderWorkerProfile(w, kind) {
-    const label = kind ? `${kind.toUpperCase()} profile` : w.name;
-    const wrapper = kind ? "section" : "article";
-    const classes = kind ? "worker-profile" : "panel worker-card";
-    const heading = (status, description = "") => kind
-      ? `<div class="worker-heading"><div><h3>${esc(label)}</h3>${description}${resources.softwareVersion(w)}</div>${status}</div>`
-      : `<div class="worker-heading"><span class="worker-icon" aria-hidden="true">▦</span><div><h2>${esc(label)}</h2>${description}${resources.softwareVersion(w)}</div>${status}</div>`;
+    const heading = kind
+      ? `<div class="worker-heading"><h3>${kind.toUpperCase()} profile</h3>${badge(...workerStatus(w))}</div>`
+      : "";
+    const profileAttributes = kind ? ` class="worker-profile" data-worker="${esc(w.name)}"` : "";
     if (!w.online) {
-      return `<${wrapper} class="${classes} worker-offline" data-worker="${esc(w.name)}">
-        ${heading(badge("offline", "Offline"), `<p>Last seen ${age(w.lastSeen)}</p>`)}
-        ${kind ? "" : `<p class="media-help">${esc(w.ip || "Address unavailable")} · Offline</p>`}
-      </${wrapper}>`;
+      return kind
+        ? `<section class="worker-profile worker-offline" data-worker="${esc(w.name)}">${heading}<p class="media-help">Last seen ${age(w.lastSeen)}</p></section>`
+        : `<p class="media-help">${esc(w.ip || "Address unavailable")}</p>`;
     }
     const rt = w.runtime,
       modern = rt?.capacityVersion >= 2;
@@ -810,21 +912,6 @@
       (!modern ||
         Number(desired.cpu) !== rt.cpuJobs ||
         Number(desired.gpu) !== rt.gpuJobs);
-    const paused =
-      modern && (rt.paused || (rt.cpuJobs === 0 && rt.gpuJobs === 0));
-    const status = !modern
-      ? ["queued", "Update worker"]
-      : rt.draining
-        ? ["queued", "Maintenance"]
-        : rt.finishing
-          ? ["queued", "Finishing jobs"]
-          : rt.ramPaused
-            ? ["queued", "RAM pause"]
-            : paused
-              ? ["queued", "Queue paused"]
-              : !rt.withinSchedule
-                ? ["queued", "Outside schedule"]
-                : ["completed", "Online"];
     const command = w.control;
     const pendingControl = command?.state === "pending";
     const busy = saving.has(w.name),
@@ -855,22 +942,23 @@
             ? "Finishing accepted work; admission remains held."
             : rt.ramPaused
               ? `RAM pause · ${rt.suspendedEncodes || 0} encodes suspended.`
-              : paused
+              : queuePaused(rt)
                 ? "Queue stopped. Active encodes finish; queued encodes wait."
                 : "";
     const profileLabel = rt?.managedProfile
       ? `Windows ${profile.cpu ? "CPU" : "GPU"} profile · shared host${rt.resources?.hostname ? " " + rt.resources.hostname : ""}`
       : "CPU + GPU worker";
     const now = Date.parse(data.generatedAt);
-    return `<${wrapper} class="${classes}" data-worker="${esc(w.name)}">
-      ${heading(badge(...status), kind ? "" : `<p>${esc(profileLabel)}</p>`)}
+    return `<section${profileAttributes}>
+      ${heading}
+      ${kind ? "" : `<p class="media-help">${esc(profileLabel)}</p>`}
       ${kind ? "" : `<p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.managedProfile ? " · shared host resources" : ""}</p>`}
       ${resources.summary(w, now, kind)}${resources.compact(w, resourceHistory, now, kind)}
       <a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">${kind ? `View ${kind.toUpperCase()} resource details ↗` : "View resource details ↗"}</a>
       <div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div>
       ${workerCapacity(w, profile, draft, busy, disabled, pending, note)}${controls}${workerTasks(w)}
       ${kind ? "" : `<div class="worker-footer"><span>${esc(w.ip)} · ${age(w.lastSeen)}</span>${workerPeriod(w)}</div>`}
-    </${wrapper}>`;
+    </section>`;
   }
   function workerTasks(worker) {
     const rt = worker.runtime || {};
@@ -1000,7 +1088,9 @@
     const [route, query = ""] = window.location.hash.slice(1).split("?", 2);
     view = route;
     selectedWorker =
-      view === "workers" ? new URLSearchParams(query).get("worker") : null;
+      view === "workers" ? new URLSearchParams(query).get("worker") || null : null;
+    pendingWorkerExpansion = selectedWorker;
+    $("worker-list-toolbar").hidden = selectedWorker !== null;
     if (!titles[view]) view = "overview";
     const label = titles[view];
     $("breadcrumb-view").textContent = label;
@@ -1080,9 +1170,15 @@
   $("worker-pagination").addEventListener("click", (event) => {
     const button = event.target.closest("[data-worker-page]");
     if (!button || button.disabled) return;
-    workerPage = Number(button.dataset.workerPage) / 12;
+    workerPage = Number(button.dataset.workerPage) / workerPageSize;
     renderWorkers();
   });
+  function filterWorkers() {
+    workerPage = 0;
+    renderWorkers();
+  }
+  $("worker-search").addEventListener("input", filterWorkers);
+  $("worker-state-filter").addEventListener("change", filterWorkers);
   document.querySelectorAll("[data-filter]").forEach((button) =>
     button.addEventListener("click", () => {
       filter = button.dataset.filter;
@@ -1141,6 +1237,18 @@
     }
   }
   $("worker-cards").addEventListener("click", (event) => {
+    const toggle = event.target.closest("[data-worker-toggle]");
+    if (toggle) {
+      const worker = fleet.find((row) => row.members[0].name === toggle.dataset.workerToggle);
+      if (!worker) return;
+      const expanded = toggle.getAttribute("aria-expanded") === "true";
+      for (const member of worker.members) {
+        if (expanded) expandedWorkers.delete(member.name);
+        else expandedWorkers.add(member.name);
+      }
+      renderWorkers();
+      return;
+    }
     const button = event.target.closest("[data-worker-control]");
     if (button && !button.disabled)
       controlWorker(

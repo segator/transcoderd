@@ -11,10 +11,7 @@ var frontendPlatforms = []dagger.Platform{"linux/amd64", "linux/arm64"}
 
 func frontendImage(client *dagger.Client, src *dagger.Directory, platform dagger.Platform) *dagger.Container {
 	arch := strings.TrimPrefix(string(platform), "linux/")
-	binary := goContainer(client, src).
-		WithEnvVariable("GOOS", "linux").WithEnvVariable("GOARCH", arch).
-		WithExec([]string{"go", "build", "-ldflags", ldflags("transcoderd-frontend"), "-o", "/output/transcoderd-frontend", "./frontend/main.go"}).
-		File("/output/transcoderd-frontend")
+	binary := applicationBinary(client, src, "frontend", "linux", arch)
 	// CA data is architecture independent. Provision it once on the native
 	// builder; constructing either runtime needs no foreign package execution.
 	certificates := client.Container().From("debian:trixie-slim").

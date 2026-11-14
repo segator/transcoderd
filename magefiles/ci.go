@@ -27,6 +27,23 @@ func (Test) Web(ctx context.Context) error {
 	return err
 }
 
+// Tooling runs the Magefile unit suites on the shared Dagger Engine.
+func (Test) Tooling(ctx context.Context) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	source := client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
+		Include: []string{"magefiles/*.go", "magefiles/go.mod", "magefiles/go.sum", "scripts/windows/fetch.sh"},
+	})
+	_, err = goContainer(client, source).
+		WithWorkdir("/src/magefiles").
+		WithExec([]string{"go", "test", "./..."}).
+		Sync(ctx)
+	return err
+}
+
 // Source validates release guards and appends immutable source outputs for CI.
 // The current CI-tool executable survives a later checkout of an older tag.
 func (Release) Source(ctx context.Context) error {

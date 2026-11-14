@@ -12,6 +12,11 @@ $install=Join-Path $env:ProgramFiles 'TranscoderD'
 $data=Join-Path $env:ProgramData 'TranscoderD'
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $feed=$null; $encode=$null; $tray=$null
+$phaseTimer=[Diagnostics.Stopwatch]::StartNew()
+function Write-PhaseDuration([string]$Phase) {
+ Write-Output ("Windows update phase {0} took {1:N1}s" -f $Phase,$phaseTimer.Elapsed.TotalSeconds)
+ $phaseTimer.Restart()
+}
 function Invoke-DesktopRaw([object]$request) {
  $pipe=[IO.Pipes.NamedPipeClientStream]::new('.',('transcoderd-desktop-'+$sid),[IO.Pipes.PipeDirection]::InOut)
  try {
@@ -69,6 +74,7 @@ try {
  Set-Feed $true $true
  $null=Invoke-Desktop @{command='check-update'}
  $status=Wait-Status {param($s) $s.update.phase -eq 'retrying' -and -not $s.update.pending}
+ Write-PhaseDuration 'bootstrap and invalid signature'
  Write-Output 'Invalid signature rejected without establishing a pending update.'
  Set-Feed $false
  $null=Invoke-Desktop @{command='check-update'}
@@ -100,12 +106,14 @@ try {
  if ($encode.ExitCode -ne 0) { throw 'Accepted SVT-AV1 pipeline did not complete its upload.' }
  $queuedJob=Invoke-RestMethod -Uri "$ServerURL/api/v1/job/$queuedId" -Headers $headers
  if ($queuedJob.status -ne 'queued') { throw 'Worker accepted a new assignment while the update installer was downloading.' }
+ Write-PhaseDuration 'admission and accepted encode'
  New-Item -ItemType File -Path (Join-Path $data 'updates\fixture-fail-install') -Force | Out-Null
  Remove-Item -LiteralPath (Join-Path $FixtureDirectory 'hold-download') -Force
  $status=Wait-Status {param($s) $s.version -eq 'v99.0.0' -and $s.update.pending -and $s.update.attempts -gt 0 -and $s.update.phase -eq 'retrying'} 300
  Set-Feed $true $true
  if (-not $tray.WaitForExit(10000)) { throw 'Updater did not close the original installed tray.' }
  Assert-Owner;Assert-Locked
+ Write-PhaseDuration 'installer failure and rollback'
  Write-Output 'Partial installer failure rolled back all installation files and retained the mandatory lock.'
  $journalPath=Join-Path $data 'updates\transaction.json'
  Stop-Service TranscoderDWorker;(Get-Service TranscoderDWorker).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))
@@ -133,6 +141,7 @@ try {
  Write-Output 'Unsafe recovery kept the service stopped and retried the verified rollback snapshot.'
  $status=Wait-Status {param($s) $s.version -eq 'v99.0.0' -and $s.update.pending -and $s.update.phase -eq 'retrying'} 180
  Assert-Owner;Assert-Locked
+ Write-PhaseDuration 'corrupt backup and automatic recovery'
  Remove-Item -LiteralPath (Join-Path $data 'updates\fixture-fail-install') -Force
  New-Item -ItemType File -Path (Join-Path $data 'updates\fixture-fail-health') -Force | Out-Null
  $attempts=$status.update.attempts
@@ -140,6 +149,7 @@ try {
  $status=Wait-Status {param($s) $s.version -eq 'v99.0.0' -and $s.update.pending -and $s.update.phase -eq 'retrying' -and $s.update.attempts -gt $attempts} 300
  Set-Feed $true $true
  Assert-Locked;Assert-Owner
+ Write-PhaseDuration 'unhealthy service and rollback'
  Write-Output 'Unhealthy new service was rolled back without reopening admission.'
  Remove-Item -LiteralPath (Join-Path $data 'updates\fixture-fail-health') -Force
  New-Item -ItemType File -Path (Join-Path $data 'updates\fixture-restart-required') -Force | Out-Null
@@ -155,6 +165,7 @@ try {
  & schtasks.exe /Run /TN TranscoderDUpdateRecovery
  if ($LASTEXITCODE -ne 0) { throw 'Post-restart recovery task could not run.' }
  $status=Wait-Status {param($s) $s.version -eq 'v99.1.0' -and -not $s.update.pending} 180
+ Write-PhaseDuration 'restart and post-boot verification'
  Write-Output 'Restart-required state retained the lock; post-boot verification completed through the recovery task.'
  Assert-Owner
  foreach ($key in @('domain','name','workingDirectory','cpuCodec','cpuJobs','gpuCodec','gpuJobs')) { if ($status.settings.$key -ne $settings[$key]) { throw "Upgrade changed the saved setting: $key" } }

@@ -2,37 +2,27 @@
 
 ## Jobs and execution platforms
 
-`.github/workflows/main.yml` has two jobs: the required Linux-hosted `ci` check
-and `windows-native`. CI invokes Mage/Dagger for immutable release-source guards,
-PWA/resource/activity tests, Linux/Windows lint, Go tests, Linux binaries/images/
-E2E, both frontend image architectures, Windows portable distribution, native
-test executables, the desktop installer and two update/recovery fixtures. Each
-Windows target has a separate Actions step and timing. Source resolution, web
-tests and Windows units no longer allocate separate jobs.
+The `source` job resolves the immutable commit and version. Linux checks,
+Windows distribution packaging and Windows update-fixture packaging start
+independently from those outputs. The required `ci` status aggregates all three
+build results. Superseded runs cancel within each PR. Main and release
+completion runs continue independently.
 
-PRs against every base branch run these checks, preserving the former standalone
-lint workflow's coverage. Push/release publication remains restricted to `main`.
+The `windows-native` job consumes `windows-worker` and validates the full
+portable ZIP, desktop installer, native unit tests, media tools, OCR and CPU
+E2E. The `windows-update-native` job consumes `windows-update` and starts as soon
+as its own fixture and harness are available. The two jobs use separate
+`windows-2025` machines for their installed services and recovery tasks.
 
-After CI succeeds, `windows-native` checks network isolation, downloads the
-cross-built tools and executes the unit suites (including frontend), complete
-portable, installed-service, desktop and mandatory-update/recovery checks on
-`windows-2025`. Go unit executables are cross-compiled once in CI and run natively;
-FFmpeg and the codecs are not rebuilt on Windows. Older tagged-source completion
-uses a native Go frontend-test fallback because its original exporters lack
-frontend test executables.
+Update fixtures use the same installer and real SVT-AV1 encoding and OCR.
+PR fixtures contain the English and Spanish traineddata used by the E2E input.
+Pushes to main and manual runs validate fixtures with the full payload.
+Completion of an older release runs the Mage targets from the validated SHA
+and extracts a small native update harness from that checkout's outputs.
 
-Superseded PR runs cancel only earlier runs for the same PR; main and release
-completion runs do not cancel one another. Current CI tools are compiled into
-the runner's temporary directory before switching to validated tagged source;
-Python/GitHub CLI guards and Node 24 web tests run in cached Dagger containers.
-This preserves the new tooling across legacy checkouts without a new Python or
-Node dependency on the Linux runner.
-
-`.github/workflows/windows-debug.yml` is manual-only. Its `artifact_run` input
-selects trusted existing fixtures for the current PowerShell harness. Its token
-is read-only and it has no signing/publication path. The debugger is separated
-because it executes old artifacts with different permissions and does not
-validate new application binaries; it does not appear in ordinary PR runs.
+The read-only `windows-debug.yml` workflow is manual. It can use older combined
+artifacts or the separate distribution and update artifacts. Its execution
+uses the current PowerShell harness and has no release publication path.
 
 ## Engine cache and compiler budget
 
@@ -64,12 +54,12 @@ verification runs before extraction; a checksum mismatch fails immediately.
 The temporary archive is removed on success or failure. These retry limits
 apply to source downloads, without rerunning compilers or whole CI jobs.
 
-Go module/build caches remain mounted in the Engine. Media/OCR directories are
-assembled before adding commit-specific application executables, so worker edits
-do not invalidate the large tool-copy layers. Portable and installer recipes use
-the same worker-binary recipe. Pinned installer prerequisites have
-their own source-independent download graph, shared by production and fixture
-installers. An application commit does not redownload them.
+Go module and build caches remain mounted on the Engine. The portable media ZIP
+is cached independently of the application worker. Dagger adds the linked
+worker to the cached ZIP for each build. The distribution target evaluates a
+maximum of two packaging or cross-compilation outputs at once. Update fixtures
+share the compiler, native harness, published desktop UI and downloaded
+prerequisites where their inputs match.
 
 ## Images, artifacts and publication
 
@@ -81,22 +71,36 @@ for the foreign CPU). Foreign service smoke tests carry a static emulator from t
 Engine image in a test-only container. This works without host binfmt setup;
 the published frontend images keep their original executable entrypoints and
 contain no emulator.
-Frontend publication/archives contain both variants; local Docker loading
-selects the host-compatible variant. Dagger Services run
-the CPU E2E directly. `mage docker:all` still exports distribution archives and
-loads local tags; release runs retain that export step.
-Explicit completion of an older tagged release uses its original `docker:all`
-target, since that immutable source may predate `docker:check`. The source guard
-outputs the compatible target alongside the validated SHA and version.
+Frontend publication and archives contain both variants. Local Docker loading
+selects the host-compatible variant. Dagger Services run the CPU E2E.
+`mage docker:all` exports and loads local images. The release pipeline uses
+`mage release:linuxAssets` to assemble the same OCI archives and Linux binaries
+and upload them from the Engine. The source guard selects `docker:all` when
+a tagged checkout needs its historical image target.
 
-Windows artifact uploads explicitly include Windows files and test directories;
-Linux executables and image tarballs are excluded. The Linux release uploader
-uses an explicit allowlist of Linux binaries/images. It cannot publish Windows
-payloads before native validation, even though both platforms now share `dist`.
-Signed Windows publication still occurs only in `windows-native`, with the
-signature uploaded last. Immutable tagged-source completion guards remain.
+Windows release publication waits for `ci`, both native Windows suites and
+Linux publication when applicable. It checks release version and SHA, uploads
+the validated payloads and manifest, then uploads the signature last.
+Tagged completion preserves previous Linux release assets.
 
 ## Packaging evidence
+
+Six successful PRs from November 5–13 had a median of 21m16s from the start
+of `ci` through native Windows completion. Median Windows build time was 5m,
+transfer took 4m16s, and the native update suite took 7m30s. The
+[frontend PR](https://github.com/segator/transcoderd/actions/runs/43385151713)
+transferred a 3.81 GB artifact. The split workflow reports each artifact size
+and suite time separately. The update harness also logs the wall time of each
+scenario.
+
+
+The first optimized [PR run](https://github.com/segator/transcoderd/actions/runs/43584308152)
+completed in 9m33s including startup queue, or 9m21s from the first job start
+to native completion. The required check passed at 4m08s from workflow start.
+The distribution artifact was 1,988,851,087 bytes and the update artifact was
+572,924,655 bytes, down 33% combined from the previous 3.81 GB artifact.
+Native distribution validation took 3m09s and the update E2E step took 5m17s.
+These figures are one warm GitHub run and are sensitive to runner and network load.
 
 Historical run [41876078723](https://github.com/segator/transcoderd/actions/runs/41876078723)
 took 52m05s overall: Linux CI 1m37s, Windows build 35m24s and native Windows

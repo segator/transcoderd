@@ -35,6 +35,24 @@ jobs:
           path: dist
           run-id: ${{ inputs.artifact_run }}
           github-token: ${{ github.token }}
+      - name: Resolve split update artifact
+        id: update-artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN: ${{ inputs.artifact_run }}
+        run: |
+          if ($env:ARTIFACT_RUN -notmatch '^\d+$') { throw 'Expected a numeric workflow run ID.' }
+          $count = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:ARTIFACT_RUN/artifacts?name=windows-update" --jq '.total_count'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect update artifacts.' }
+          "split=$($count -eq '1')" >> $env:GITHUB_OUTPUT
+      - uses: actions/download-artifact@v8.0.2
+        if: steps.update-artifact.outputs.split == 'True'
+        with:
+          name: windows-update
+          path: dist
+          run-id: ${{ inputs.artifact_run }}
+          github-token: ${{ github.token }}
       - name: Extract portable tools
         shell: pwsh
         run: |

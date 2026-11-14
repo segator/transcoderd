@@ -18,7 +18,7 @@ runs:
         archive_path="$RUNNER_TEMP/$archive"
         install_dir="$RUNNER_TEMP/mage/bin"
 
-        curl --fail --silent --show-error --location \
+        curl --fail --silent --show-error --location --retry 3 --retry-connrefused --connect-timeout 15 --max-time 60 \
           "https://github.com/magefile/mage/releases/download/v${version}/${archive}" \
           --output "$archive_path"
         echo "$expected_sha256  $archive_path" | sha256sum --check --status

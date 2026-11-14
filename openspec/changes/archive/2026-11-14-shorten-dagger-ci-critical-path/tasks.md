@@ -9,5 +9,5 @@
 
 ## 3. Validation
 
-- [ ] 3.1 Pass relevant Go tests, workflow lint and strict OpenSpec validation.
-- [ ] 3.2 Compare completed GitHub runs and validate the full fixtures.
+- [x] 3.1 Pass relevant Go tests, workflow lint and strict OpenSpec validation.
+- [x] 3.2 Compare completed GitHub runs and validate the full fixtures.

@@ -106,6 +106,15 @@ The distribution artifact was 1,988,851,087 bytes and the update artifact was
 Native distribution validation took 3m09s and the update E2E step took 5m17s.
 These figures are one warm GitHub run and are sensitive to runner and network load.
 
+The [next PR optimization](https://github.com/segator/transcoderd/actions/runs/43621717477)
+completed in 6m45s including queue, compared with the previous PR runs of
+9m33s and 10m18s. The Windows fixture build started 10s after workflow
+creation. In native update validation the deliberate health failure and
+rollback took 52.5s, compared with 114.6s in the previous PR run. The
+full Windows distribution suite was the last job to finish. A separate
+[manual run](https://github.com/segator/transcoderd/actions/runs/43622081273)
+passed the native recovery scenarios with the full 1.91 GB update artifact.
+
 Historical run [41876078723](https://github.com/segator/transcoderd/actions/runs/41876078723)
 took 52m05s overall: Linux CI 1m37s, Windows build 35m24s and native Windows
 14m23s. All encoder/OCR dependency builds hit cache. NSIS processed approximately

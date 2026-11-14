@@ -12,6 +12,10 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        # The Go SDK otherwise downloads a second copy of the pinned CLI.
+        dagger_bin=$(command -v dagger)
+        echo "_EXPERIMENTAL_DAGGER_CLI_BIN=$dagger_bin" >> "$GITHUB_ENV"
+
         version=1.17.2
         archive="mage_${version}_Linux-64bit.tar.gz"
         expected_sha256=b1dd189f5a4d38484176dd5be3b651eb7cbc0b78eaf4bb9715738aa24edec644

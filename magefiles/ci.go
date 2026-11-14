@@ -44,6 +44,23 @@ func (Test) Tooling(ctx context.Context) error {
 	return err
 }
 
+// ReleaseSourceGuards tests the immutable release source resolver in Dagger.
+func (Test) ReleaseSourceGuards(ctx context.Context) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	_, err = releaseSourceTests(client).Sync(ctx)
+	return err
+}
+
+func releaseSourceTests(client *dagger.Client) *dagger.Container {
+	source := client.Host().Directory(filepath.Join(projectRoot(), "scripts", "release"), dagger.HostDirectoryOpts{Exclude: []string{"__pycache__"}})
+	return releaseTools(client).WithDirectory("/release", source).WithWorkdir("/release").
+		WithExec([]string{"python3", "-m", "unittest", "discover", "-v"})
+}
+
 // Source validates release guards and appends immutable source outputs for CI.
 // The current CI-tool executable survives a later checkout of an older tag.
 func (Release) Source(ctx context.Context) error {
@@ -60,9 +77,7 @@ func (Release) Source(ctx context.Context) error {
 		return err
 	}
 	defer client.Close()
-	source := client.Host().Directory(filepath.Join(projectRoot(), "scripts", "release"), dagger.HostDirectoryOpts{Exclude: []string{"__pycache__"}})
-	tool := releaseTools(client).WithDirectory("/release", source).WithWorkdir("/release").
-		WithExec([]string{"python3", "-m", "unittest", "discover", "-v"})
+	tool := releaseSourceTests(client)
 	for _, name := range []string{"GITHUB_EVENT_NAME", "GITHUB_REF", "GITHUB_SHA", "GITHUB_REPOSITORY", "RELEASE_TAG"} {
 		tool = tool.WithEnvVariable(name, os.Getenv(name))
 	}

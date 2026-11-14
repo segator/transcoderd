@@ -2,9 +2,10 @@
 
 ## Jobs and execution platforms
 
-The `source` job resolves the immutable commit and version. Linux checks,
-Windows distribution packaging and Windows update-fixture packaging start
-independently from those outputs. The required `ci` status aggregates all three
+PR builds start from the event's merge SHA. The Linux job tests the release
+resolver in Dagger alongside the other checks. For main and manual runs, the
+`source` job resolves the commit and version before the Linux and Windows
+builds fan out. The required `ci` status aggregates all three
 build results. Superseded runs cancel within each PR. Main and release
 completion runs continue independently.
 
@@ -15,8 +16,10 @@ as its own fixture and harness are available. The two jobs use separate
 `windows-2025` machines for their installed services and recovery tasks.
 
 Update fixtures use the same installer and real SVT-AV1 encoding and OCR.
-PR fixtures contain the English and Spanish traineddata used by the E2E input.
-Pushes to main and manual runs validate fixtures with the full payload.
+PRs and main pushes without a release use the English and Spanish traineddata
+required by the E2E input. Focused fixtures shorten the wait after the
+intentionally wrong health response and assert the rollback reason. Release
+builds and manual runs use the full payload and standard health deadline.
 Completion of an older release runs the Mage targets from the validated SHA
 and extracts a small native update harness from that checkout's outputs.
 
@@ -30,6 +33,7 @@ Mage orchestrates targets; Dagger executes their containers on the connected
 Engine. The GitHub runner's CPU count is not the compiler host's CPU count.
 The observed CI jobs connect to `dagger-engine-dagger-helm-engine-0`. A cache
 belongs to that Engine; another Engine needs persisted/shared state of its own.
+The Mage setup passes the already installed Dagger CLI to the Go SDK.
 Installing `dagger-for-github` alone does not configure cache persistence.
 
 `WINDOWS_BUILD_JOBS` is a positive-integer **aggregate C/C++ compiler budget**,

@@ -13,10 +13,7 @@ on:
         default: ''
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  packages: write
+  contents: read
 
 # Superseded PR commits cannot publish releases. Never cancel a main/release
 # run, including another invocation completing missing Windows assets.
@@ -26,8 +23,14 @@ concurrency:
 
 jobs:
   source:
+    # PRs already have an immutable merge SHA and cannot publish.
+    if: github.event_name != 'pull_request'
     runs-on: transcoderd
     timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     outputs:
       release_tag: ${{ steps.release.outputs.tag_name || steps.source.outputs.release_tag }}
       release_publish: ${{ steps.release.outputs.release_created == 'true' || steps.source.outputs.release_tag != '' }}
@@ -66,6 +69,7 @@ jobs:
 
   linux-checks:
     needs: source
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || needs.source.result == 'success') }}
     runs-on: transcoderd
     timeout-minutes: 90
     permissions:
@@ -74,6 +78,8 @@ jobs:
       PROJECT_VERSION: ${{ needs.source.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
       - uses: dagger/dagger-for-github@v8.4.1
         with:
           version: 0.20.6
@@ -91,6 +97,10 @@ jobs:
       - name: Test build tooling
         if: needs.source.outputs.source_ref == ''
         run: mage test:tooling
+
+      - name: Test release source guards
+        if: github.event_name == 'pull_request'
+        run: mage test:releaseSourceGuards
 
       - name: Test tagged-source build tooling
         if: needs.source.outputs.source_ref != ''
@@ -122,7 +132,9 @@ jobs:
 
       - name: Validate Linux container images
         # Tagged source predates docker:check; retain its original target.
-        run: mage ${{ needs.source.outputs.image_target }}
+        env:
+          IMAGE_TARGET: ${{ needs.source.outputs.image_target || 'docker:check' }}
+        run: mage "$IMAGE_TARGET"
 
       - name: E2E Test
         timeout-minutes: 15
@@ -130,6 +142,7 @@ jobs:
 
   windows-distribution:
     needs: source
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || needs.source.result == 'success') }}
     runs-on: transcoderd
     timeout-minutes: 90
     permissions:
@@ -140,6 +153,8 @@ jobs:
       WINDOWS_BUILD_JOBS: '16'
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
       - uses: dagger/dagger-for-github@v8.4.1
         with:
           version: 0.20.6
@@ -186,6 +201,7 @@ jobs:
 
   windows-update-build:
     needs: source
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || needs.source.result == 'success') }}
     runs-on: transcoderd
     timeout-minutes: 90
     permissions:
@@ -196,6 +212,8 @@ jobs:
       WINDOWS_BUILD_JOBS: '16'
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
       - uses: dagger/dagger-for-github@v8.4.1
         with:
           version: 0.20.6
@@ -209,7 +227,7 @@ jobs:
       - name: Build native update fixtures and harness
         if: needs.source.outputs.source_ref == ''
         env:
-          WINDOWS_FULL_UPDATE_PAYLOAD: ${{ github.event_name != 'pull_request' }}
+          WINDOWS_FULL_UPDATE_PAYLOAD: ${{ needs.source.outputs.release_publish == 'true' || github.event_name == 'workflow_dispatch' }}
         run: mage test:windowsUpdateCI
 
       - name: Build Windows update and recovery fixtures
@@ -255,6 +273,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: transcoderd
     timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: write
     env:
       PROJECT_VERSION: ${{ needs.source.outputs.release_tag }}
     steps:
@@ -280,6 +301,7 @@ jobs:
 
   windows-native:
     needs: [source, windows-distribution]
+    if: ${{ !cancelled() && needs.windows-distribution.result == 'success' }}
     runs-on: windows-2025
     timeout-minutes: 60
     permissions:
@@ -287,7 +309,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ needs.source.outputs.source_ref }}
+          ref: ${{ needs.source.outputs.source_ref || github.sha }}
       - name: Validate installer test network isolation
         shell: pwsh
         run: |
@@ -363,6 +385,7 @@ jobs:
 
   windows-update-native:
     needs: [source, windows-update-build]
+    if: ${{ !cancelled() && needs.windows-update-build.result == 'success' }}
     runs-on: windows-2025
     timeout-minutes: 60
     permissions:
@@ -370,7 +393,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ needs.source.outputs.source_ref }}
+          ref: ${{ needs.source.outputs.source_ref || github.sha }}
       - name: Validate installer test network isolation
         shell: pwsh
         run: |
@@ -416,6 +439,8 @@ jobs:
       cancel-in-progress: false
     runs-on: windows-2025
     timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:

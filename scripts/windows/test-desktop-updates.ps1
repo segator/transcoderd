@@ -146,7 +146,7 @@ try {
  New-Item -ItemType File -Path (Join-Path $data 'updates\fixture-fail-health') -Force | Out-Null
  $attempts=$status.update.attempts
  Set-Feed $true
- $status=Wait-Status {param($s) $s.version -eq 'v99.0.0' -and $s.update.pending -and $s.update.phase -eq 'retrying' -and $s.update.attempts -gt $attempts} 300
+ $status=Wait-Status {param($s) $s.version -eq 'v99.0.0' -and $s.update.pending -and $s.update.phase -eq 'retrying' -and $s.update.attempts -gt $attempts -and $s.update.message -eq 'windows service health check failed: installed service reported an unexpected version'} 300
  Set-Feed $true $true
  Assert-Locked;Assert-Owner
  Write-PhaseDuration 'unhealthy service and rollback'

@@ -94,6 +94,9 @@ func exportWindowsUpdateFixtures(ctx context.Context, focused, harness bool) err
 		return err
 	}
 	extra := "-X transcoder/update/managed.FixtureMode=true -X transcoder/update/managed.FixtureKey=" + base64.StdEncoding.EncodeToString(pub) + " -X transcoder/update/managed.FixtureEndpoint=http://127.0.0.1:18781/latest"
+	if focused {
+		extra += " -X transcoder/update/managed.FixtureFastHealthFailure=true"
+	}
 	source := projectSource(client)
 	builds, buildCtx := errgroup.WithContext(ctx)
 	builds.SetLimit(2)

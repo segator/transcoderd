@@ -12,4 +12,4 @@
 ## 3. Validation
 
 - [x] 3.1 Run relevant Go tests, strict OpenSpec validation, and workflow checks.
-- [ ] 3.2 Verify native GitHub CI and record timing and artifact sizes.
+- [x] 3.2 Verify native GitHub CI and record timing and artifact sizes.

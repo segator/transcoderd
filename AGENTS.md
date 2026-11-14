@@ -49,7 +49,7 @@ go test -tags=integration -v -timeout 5m ./integration/...
 
 ## CI Pipeline
 
-- **CI**: `.github/workflows/main.yml` has `ci` and `windows-native`. Mage/Dagger runs source guards, web tests, Linux/Windows lint, Go tests, Linux binaries/images/E2E, frontend amd64/arm64 checks and Windows cross-compilation/packaging in `ci`. Cross-built Windows units and full installation/update checks execute on `windows-2025`. Read-only artifact debugging is a separate manual-only `windows-debug.yml` workflow.
+- **CI**: `.github/workflows/main.yml` resolves the source and runs Linux checks, Windows distribution packaging and Windows update fixture packaging in parallel through Mage/Dagger. The required `ci` check aggregates the build and Linux results. The full Windows distribution and update/recovery suites run on separate `windows-2025` runners. Read-only artifact debugging uses the manual `windows-debug.yml` workflow.
 - **Release**: Release Please (conventional commits) on push to `main`
 - Local tooling: Go 1.26.10, Mage 1.17.2, and Dagger 0.20.6. CI pins and installs these directly; Dagger runs project builds, tests, lint, image publication, and release asset upload.
 

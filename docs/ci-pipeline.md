@@ -94,6 +94,14 @@ and suite time separately. The update harness also logs the wall time of each
 scenario.
 
 
+The first optimized [PR run](https://github.com/segator/transcoderd/actions/runs/43584308152)
+completed in 9m33s including startup queue, or 9m21s from the first job start
+to native completion. The required check passed at 4m08s from workflow start.
+The distribution artifact was 1,988,851,087 bytes and the update artifact was
+572,924,655 bytes, down 33% combined from the previous 3.81 GB artifact.
+Native distribution validation took 3m09s and the update E2E step took 5m17s.
+These figures are one warm GitHub run and are sensitive to runner and network load.
+
 Historical run [41876078723](https://github.com/segator/transcoderd/actions/runs/41876078723)
 took 52m05s overall: Linux CI 1m37s, Windows build 35m24s and native Windows
 14m23s. All encoder/OCR dependency builds hit cache. NSIS processed approximately

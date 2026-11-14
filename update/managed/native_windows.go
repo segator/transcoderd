@@ -174,8 +174,10 @@ func serviceStart() error {
 
 func health(owner, version string) error {
 	deadline := time.Now().Add(60 * time.Second)
+	var fixtureFailureSince time.Time
 	var last error
 	for time.Now().Before(deadline) {
+		fixtureFailure := false
 		timeout := 2 * time.Second
 		c, err := winio.DialPipe(`\\.\pipe\transcoderd-desktop-`+owner, &timeout)
 		if err == nil {
@@ -210,9 +212,21 @@ func health(owner, version string) error {
 				}
 				if err == nil {
 					err = errors.New("installed service reported an unexpected version")
+					fixtureFailure = FixtureMode == "true" && FixtureFastHealthFailure == "true" &&
+						r.Error == "" && r.Status.Version == "unhealthy-fixture"
 				}
 			}
 			c.Close()
+		}
+		// Start the shorter budget only once the synthetic response is observed.
+		if fixtureFailure {
+			if fixtureFailureSince.IsZero() {
+				fixtureFailureSince = time.Now()
+			} else if time.Since(fixtureFailureSince) >= 5*time.Second {
+				return fmt.Errorf("windows service health check failed: %w", err)
+			}
+		} else {
+			fixtureFailureSince = time.Time{}
 		}
 		last = err
 		time.Sleep(time.Second)

@@ -262,22 +262,21 @@ func buildBinaryWith(ctx context.Context, client *dagger.Client, src *dagger.Dir
 		return err
 	}
 
-	_, err := goContainer(client, src).
-		WithEnvVariable("GOOS", runtime.GOOS).
-		WithEnvVariable("GOARCH", runtime.GOARCH).
-		WithExec([]string{
-			"go", "build",
-			"-ldflags", ldflags("transcoderd-" + component),
-			"-o", "/output/transcoderd-" + component,
-			"./" + component + "/main.go",
-		}).
-		File("/output/transcoderd-"+component).
-		Export(ctx, output)
+	_, err := applicationBinary(client, src, component, runtime.GOOS, runtime.GOARCH).Export(ctx, output)
 	if err != nil {
 		return fmt.Errorf("build %s: %w", component, err)
 	}
 	fmt.Printf("Built %s\n", output)
 	return nil
+}
+
+func applicationBinary(client *dagger.Client, src *dagger.Directory, component, goos, arch string) *dagger.File {
+	name := "transcoderd-" + component
+	return goContainer(client, src).
+		WithEnvVariable("GOOS", goos).
+		WithEnvVariable("GOARCH", arch).
+		WithExec([]string{"go", "build", "-ldflags", ldflags(name), "-o", "/output/" + name, "./" + component + "/main.go"}).
+		File("/output/" + name)
 }
 
 // ---------------------------------------------------------------------------
@@ -379,25 +378,8 @@ func (Test) E2e(ctx context.Context) error {
 		WithExposedPort(5432).
 		AsService()
 
-	// Build both binaries in one Go container. The E2E runner starts them in
-	// the same container and talks to the server over localhost.
-	goBinaries := goContainer(client, src).
-		WithEnvVariable("GOOS", "linux").
-		WithEnvVariable("GOARCH", "amd64").
-		WithExec([]string{
-			"go", "build",
-			"-ldflags", ldflags("transcoderd-server"),
-			"-o", "/output/transcoderd-server",
-			"./server/main.go",
-		}).
-		WithExec([]string{
-			"go", "build",
-			"-ldflags", ldflags("transcoderd-worker"),
-			"-o", "/output/transcoderd-worker",
-			"./worker/main.go",
-		})
-	serverBinary := goBinaries.File("/output/transcoderd-server")
-	workerBinary := goBinaries.File("/output/transcoderd-worker")
+	serverBinary := applicationBinary(client, src, "server", "linux", "amd64")
+	workerBinary := applicationBinary(client, src, "worker", "linux", "amd64")
 
 	ffmpegBins := ffmpegBuilderImage(client)
 	pgsBins := pgsBuilderImage(client)
@@ -788,6 +770,47 @@ func (Release) Upload(ctx context.Context) error {
 	return nil
 }
 
+// LinuxAssets publishes binaries and OCI archives without exporting them to
+// the runner or loading its Docker daemon.
+func (Release) LinuxAssets(ctx context.Context) error {
+	token, tag := os.Getenv("GH_TOKEN"), os.Getenv("RELEASE_TAG")
+	if token == "" || tag == "" {
+		return fmt.Errorf("GH_TOKEN and RELEASE_TAG are required to upload Linux assets")
+	}
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return fmt.Errorf("dagger connect: %w", err)
+	}
+	defer client.Close()
+
+	src := projectSource(client)
+	assets := client.Directory()
+	args := []string{"gh", "release", "upload", tag, "--clobber"}
+	for _, component := range []string{"server", "worker", "frontend"} {
+		images, err := applicationImages(ctx, client, src, component)
+		if err != nil {
+			return err
+		}
+		archiveName := component + "-image.tar"
+		binaryName := "transcoderd-" + component
+		assets = assets.
+			WithFile(archiveName, applicationImageArchive(images)).
+			WithFile(binaryName, applicationBinary(client, src, component, "linux", "amd64"))
+		args = append(args, "/dist/"+archiveName, "/dist/"+binaryName)
+	}
+	_, err = releaseTools(client).
+		WithMountedDirectory("/dist", assets).
+		WithEnvVariable("GH_REPO", "segator/transcoderd").
+		WithEnvVariable("RELEASE_UPLOAD_RUN", time.Now().UTC().Format(time.RFC3339Nano)).
+		WithSecretVariable("GH_TOKEN", client.SetSecret("github-token", token)).
+		WithExec(args).
+		Sync(ctx)
+	if err != nil {
+		return fmt.Errorf("upload Linux release assets: %w", err)
+	}
+	return nil
+}
+
 func isLinuxReleaseAsset(name string) bool {
 	switch name {
 	case "transcoderd-server", "transcoderd-worker", "transcoderd-frontend",
@@ -809,9 +832,7 @@ func buildContainerImage(ctx context.Context, client *dagger.Client, src *dagger
 	}
 
 	tarPath := filepath.Join(projectRoot(), "dist", component+"-image.tar")
-	_, err = images[0].AsTarball(dagger.ContainerAsTarballOpts{
-		PlatformVariants: images[1:], ForcedCompression: dagger.ImageLayerCompressionGzip,
-	}).Export(ctx, tarPath)
+	_, err = applicationImageArchive(images).Export(ctx, tarPath)
 	if err != nil {
 		return fmt.Errorf("export %s: %w", component, err)
 	}
@@ -829,20 +850,17 @@ func buildContainerImage(ctx context.Context, client *dagger.Client, src *dagger
 	return nil
 }
 
+func applicationImageArchive(images []*dagger.Container) *dagger.File {
+	return images[0].AsTarball(dagger.ContainerAsTarballOpts{
+		PlatformVariants: images[1:], ForcedCompression: dagger.ImageLayerCompressionGzip,
+	})
+}
+
 func containerImage(ctx context.Context, client *dagger.Client, src *dagger.Directory, component string) (*dagger.Container, error) {
 	if component == "frontend" {
 		return frontendImage(client, src, frontendPlatforms[0]), nil
 	}
-	goBinary := goContainer(client, src).
-		WithEnvVariable("GOOS", "linux").
-		WithEnvVariable("GOARCH", "amd64").
-		WithExec([]string{
-			"go", "build",
-			"-ldflags", ldflags("transcoderd-" + component),
-			"-o", "/output/transcoderd-" + component,
-			"./" + component + "/main.go",
-		}).
-		File("/output/transcoderd-" + component)
+	goBinary := applicationBinary(client, src, component, "linux", "amd64")
 
 	ffmpegBins := ffmpegBuilderImage(client)
 

@@ -21,17 +21,31 @@ func (Build) Windows(ctx context.Context) error {
 		return err
 	}
 	defer client.Close()
-	binary := windowsWorkerBinary(client, projectSource(client))
-	if _, err := binary.Export(ctx, filepath.Join(projectRoot(), "dist", "transcoderd-worker-windows-amd64.exe")); err != nil {
-		return err
-	}
-	bundle, err := windowsWorkerBundle(ctx, client, binary)
+	source := projectSource(client)
+	tools, err := windowsWorkerTools(ctx, client)
 	if err != nil {
 		return err
 	}
-	archive := "transcoderd-worker-" + projectVersion + "-windows-amd64.zip"
-	_, err = bundle.WithWorkdir("/bundle").WithExec([]string{"zip", "-q", "-3", "-r", "/" + archive, "."}).File("/"+archive).Export(ctx, filepath.Join(projectRoot(), "dist", archive))
+	binary := windowsWorkerBinary(client, source)
+	if _, err := binary.Export(ctx, filepath.Join(projectRoot(), "dist", "transcoderd-worker-windows-amd64.exe")); err != nil {
+		return err
+	}
+	archive, name := windowsPortableArchive(tools, binary)
+	_, err = archive.Export(ctx, filepath.Join(projectRoot(), "dist", name))
 	return err
+}
+
+// Compress the pinned files once. Adding the current worker rewrites the ZIP
+// directory and compresses one entry, even when the worker changes on every PR.
+func windowsPortableArchive(tools *dagger.Container, binary *dagger.File) (*dagger.File, string) {
+	archive := "transcoderd-worker-" + projectVersion + "-windows-amd64.zip"
+	base := tools.WithWorkdir("/bundle").
+		WithExec([]string{"zip", "-q", "-3", "-r", "/portable.zip", "."})
+	return base.
+		WithFile("/bundle/transcoderd-worker.exe", binary).
+		WithExec([]string{"mv", "/portable.zip", "/" + archive}).
+		WithExec([]string{"zip", "-q", "-3", "/" + archive, "transcoderd-worker.exe"}).
+		File("/" + archive), archive
 }
 
 // WindowsBinary cross-compiles only the worker executable, without media tools.
@@ -57,13 +71,21 @@ func (Test) WindowsBinaries(ctx context.Context) error {
 		return err
 	}
 	defer client.Close()
-	_, err = goContainer(client, projectSource(client)).
-		WithEnvVariable("GOOS", "windows").WithEnvVariable("GOARCH", "amd64").
-		WithExec([]string{"bash", "-c", `set -eu; mkdir -p /output; for pkg in $(go list ./cmd/... ./helper/... ./model/... ./update/... ./version/... ./worker/... ./frontend/...); do name=$(echo "$pkg" | tr / _); go test -c -o "/output/$name.test.exe" "$pkg"; done`}).
-		WithExec([]string{"go", "test", "-c", "-tags=integration", "-o", "/output/windows-bundle.test.exe", "./integration"}).
-		WithExec([]string{"go", "build", "-ldflags", ldflags("transcoderd-server"), "-o", "/output/windows-e2e-server.exe", "./server"}).
-		Directory("/output").Export(ctx, filepath.Join(projectRoot(), "dist", "windows-tests"))
+	_, err = windowsTestBinaries(client, projectSource(client)).Export(ctx, filepath.Join(projectRoot(), "dist", "windows-tests"))
 	return err
+}
+
+func windowsE2eBinaries(client *dagger.Client, source *dagger.Directory) *dagger.Container {
+	return goContainer(client, source).
+		WithEnvVariable("GOOS", "windows").WithEnvVariable("GOARCH", "amd64").
+		WithExec([]string{"go", "test", "-c", "-tags=integration", "-o", "/output/windows-bundle.test.exe", "./integration"}).
+		WithExec([]string{"go", "build", "-ldflags", ldflags("transcoderd-server"), "-o", "/output/windows-e2e-server.exe", "./server"})
+}
+
+func windowsTestBinaries(client *dagger.Client, source *dagger.Directory) *dagger.Directory {
+	return windowsE2eBinaries(client, source).
+		WithExec([]string{"bash", "-c", `set -eu; for pkg in $(go list ./cmd/... ./helper/... ./model/... ./update/... ./version/... ./worker/... ./frontend/...); do name=$(echo "$pkg" | tr / _); go test -c -o "/output/$name.test.exe" "$pkg"; done`}).
+		Directory("/output")
 }
 
 func windowsCompilePlan(value string) (budget, parallel, jobs int, err error) {
@@ -121,14 +143,6 @@ func windowsFFmpeg(ctx context.Context, client *dagger.Client) (*dagger.Containe
 
 func windowsPGS(client *dagger.Client) *dagger.Container {
 	return pgsBuilderImage(client).WithExec([]string{"bash", "-c", fmt.Sprintf("cd /src/PgsToSrt-%s/src && dotnet publish PgsToSrt/PgsToSrt.csproj -c Release -f net8.0 -r win-x64 --self-contained true -o /windows-pgs", pgstosrtVersion)})
-}
-
-func windowsWorkerBundle(ctx context.Context, client *dagger.Client, binary *dagger.File) (*dagger.Container, error) {
-	tools, err := windowsWorkerTools(ctx, client)
-	if err != nil {
-		return nil, err
-	}
-	return tools.WithFile("/bundle/transcoderd-worker.exe", binary), nil
 }
 
 func windowsWorkerTools(ctx context.Context, client *dagger.Client) (*dagger.Container, error) {
@@ -247,21 +261,62 @@ func (Build) WindowsInstaller(ctx context.Context) error {
 	}
 	defer client.Close()
 	src := projectSource(client)
-	builder, setup, err := windowsInstallerBuild(ctx, client, src, projectVersion, "", false)
+	tools, err := windowsWorkerTools(ctx, client)
 	if err != nil {
 		return err
 	}
+	return exportWindowsInstaller(ctx, client, src, tools)
+}
+
+func exportWindowsInstaller(ctx context.Context, client *dagger.Client, src *dagger.Directory, tools *dagger.Container) error {
+	builder, setup := windowsInstallerBuild(client, src, tools.Directory("/bundle"), projectVersion, "", false)
 	for _, entry := range []struct{ source, target string }{
 		{"/stage/transcoderd-desktop-service.exe", "transcoderd-desktop-service.exe"},
 		{"/stage/transcoderd-updater.exe", "transcoderd-updater.exe"},
 		{"/windows-installation-files.json", "windows-installation-files.json"},
 		{"/" + setup, setup},
 	} {
-		if _, err = builder.File(entry.source).Export(ctx, filepath.Join(projectRoot(), "dist", entry.target)); err != nil {
+		if _, err := builder.File(entry.source).Export(ctx, filepath.Join(projectRoot(), "dist", entry.target)); err != nil {
 			return err
 		}
 	}
 	tool := windowsGoBinary(client, src, "./cmd/windows-update-manifest", "windows-update-manifest", projectVersion, "", "windows")
-	_, err = tool.Export(ctx, filepath.Join(projectRoot(), "dist", "windows-update-manifest.exe"))
+	_, err := tool.Export(ctx, filepath.Join(projectRoot(), "dist", "windows-update-manifest.exe"))
 	return err
+}
+
+// WindowsDistribution prepares the complete portable and desktop packages and
+// the native test executables from the same Dagger session.
+func (Build) WindowsDistribution(ctx context.Context) error {
+	client, err := daggerClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	source := projectSource(client)
+	tools, err := windowsWorkerTools(ctx, client)
+	if err != nil {
+		return err
+	}
+	binary := windowsWorkerBinary(client, source)
+	dist := filepath.Join(projectRoot(), "dist")
+	builds, buildCtx := errgroup.WithContext(ctx)
+	builds.SetLimit(2)
+	builds.Go(func() error {
+		archive, name := windowsPortableArchive(tools, binary)
+		if _, err := archive.Export(buildCtx, filepath.Join(dist, name)); err != nil {
+			return fmt.Errorf("export Windows portable ZIP: %w", err)
+		}
+		_, err := binary.Export(buildCtx, filepath.Join(dist, "transcoderd-worker-windows-amd64.exe"))
+		return err
+	})
+	builds.Go(func() error {
+		return exportWindowsInstaller(buildCtx, client, source, tools)
+	})
+	builds.Go(func() error {
+		_, err := windowsTestBinaries(client, source).Export(buildCtx, filepath.Join(dist, "windows-tests"))
+		return err
+	})
+	return builds.Wait()
 }

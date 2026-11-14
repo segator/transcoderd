@@ -12,13 +12,17 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        # The Go SDK otherwise downloads a second copy of the pinned CLI.
+        dagger_bin=$(command -v dagger)
+        echo "_EXPERIMENTAL_DAGGER_CLI_BIN=$dagger_bin" >> "$GITHUB_ENV"
+
         version=1.17.2
         archive="mage_${version}_Linux-64bit.tar.gz"
         expected_sha256=b1dd189f5a4d38484176dd5be3b651eb7cbc0b78eaf4bb9715738aa24edec644
         archive_path="$RUNNER_TEMP/$archive"
         install_dir="$RUNNER_TEMP/mage/bin"
 
-        curl --fail --silent --show-error --location \
+        curl --fail --silent --show-error --location --retry 3 --retry-connrefused --connect-timeout 15 --max-time 60 \
           "https://github.com/magefile/mage/releases/download/v${version}/${archive}" \
           --output "$archive_path"
         echo "$expected_sha256  $archive_path" | sha256sum --check --status

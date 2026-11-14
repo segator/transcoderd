@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.15.0](https://github.com/segator/transcoderd/compare/v2.14.0...v2.15.0) (2026-11-14)
+
+
+### 🎉 Features
+
+* **dashboard:** add a compact searchable workers list ([#224](https://github.com/segator/transcoderd/issues/224)) ([9aab06a](https://github.com/segator/transcoderd/commit/9aab06a0cffedafc8da49f4c5ffb342452e079d3))
+* **dashboard:** add themes, persistent SSO and grouped Windows workers ([#222](https://github.com/segator/transcoderd/issues/222)) ([9343f7d](https://github.com/segator/transcoderd/commit/9343f7dddae17db68bb611199249523d72f8c045))
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/spf13/pflag from 1.0.10 to 1.1.0 ([#218](https://github.com/segator/transcoderd/issues/218)) ([a245bdc](https://github.com/segator/transcoderd/commit/a245bdc85c8c0ffc721cfc3182288a7570a0c13c))
+* **deps:** bump golang.org/x/oauth2 from 0.37.0 to 0.38.0 ([#221](https://github.com/segator/transcoderd/issues/221)) ([ff1a457](https://github.com/segator/transcoderd/commit/ff1a457b8235a46c10f2b291e0999fa3e72dfc91))
+* **deps:** bump golang.org/x/sys from 0.49.0 to 0.50.0 ([#220](https://github.com/segator/transcoderd/issues/220)) ([b06a915](https://github.com/segator/transcoderd/commit/b06a915bb174addb9061ecc3c7f11d841b621672))
+
 ## [2.14.0](https://github.com/segator/transcoderd/compare/v2.13.2...v2.14.0) (2026-11-08)
 
 

@@ -130,6 +130,14 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 		if sourceChecksum != bodyString {
 			return fmt.Errorf("checksum error on download source:%s downloaded:%s", bodyString, sourceChecksum)
 		}
+		// A completed download can later be parked across a process restart.
+		// Its data must reach durable storage before a snapshot can reference it.
+		if err := downloadFile.Sync(); err != nil {
+			return fmt.Errorf("sync downloaded source: %w", err)
+		}
+		if err := downloadFile.Close(); err != nil {
+			return fmt.Errorf("close downloaded source: %w", err)
+		}
 
 		tracker.UpdateValue(contentLength)
 		return nil

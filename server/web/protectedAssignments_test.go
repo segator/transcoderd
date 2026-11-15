@@ -71,11 +71,21 @@ func TestProtectedAssignmentHandlers(t *testing.T) {
 	}
 	started := current.AddEvent(model.JobNotification, model.StartedNotificationStatus)
 	started.WorkerName = "node"
-	claim, _ := json.Marshal(model.AssignmentClaim{JobID: assigned.Id, Generation: assigned.Generation, Capability: assigned.Capability})
+	claimValue := model.AssignmentClaim{JobID: assigned.Id, Generation: assigned.Generation, Capability: assigned.Capability, InstanceID: uuid.New()}
+	claim, _ := json.Marshal(claimValue)
+	if got := request(access.lease, string(claim), "node", token).Code; got != http.StatusOK {
+		t.Fatalf("acquire lease = %d, want 200", got)
+	}
+	otherInstance := claimValue
+	otherInstance.InstanceID = uuid.New()
+	otherClaim, _ := json.Marshal(otherInstance)
+	if got := request(access.lease, string(otherClaim), "node", token).Code; got != http.StatusConflict {
+		t.Fatalf("acquire conflicting lease = %d, want 409", got)
+	}
 	eventBody, _ := json.Marshal(struct {
 		Claim model.AssignmentClaim `json:"claim"`
 		Event model.TaskEventType   `json:"event"`
-	}{Claim: model.AssignmentClaim{JobID: assigned.Id, Generation: assigned.Generation, Capability: assigned.Capability}, Event: *started})
+	}{Claim: claimValue, Event: *started})
 	for i := 0; i < 2; i++ {
 		if got := request(access.notify, string(eventBody), "node", token).Code; got != http.StatusNoContent {
 			t.Fatalf("event attempt %d = %d, want 204", i, got)
@@ -86,7 +96,7 @@ func TestProtectedAssignmentHandlers(t *testing.T) {
 	completeBody, _ := json.Marshal(struct {
 		Claim model.AssignmentClaim `json:"claim"`
 		Event model.TaskEventType   `json:"event"`
-	}{Claim: model.AssignmentClaim{JobID: assigned.Id, Generation: assigned.Generation, Capability: assigned.Capability}, Event: *complete})
+	}{Claim: claimValue, Event: *complete})
 	if got := request(access.notify, string(completeBody), "node", token).Code; got != http.StatusConflict {
 		t.Fatalf("completion without staged output = %d, want 409", got)
 	}

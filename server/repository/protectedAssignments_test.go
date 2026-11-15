@@ -96,10 +96,29 @@ func testProtectedParking(t *testing.T, repo Repository) {
 	started := job.AddEvent(model.JobNotification, model.StartedNotificationStatus)
 	started.WorkerName = "worker"
 	claim := model.AssignmentClaim{JobID: job.Id, Generation: assigned.Generation, Capability: assigned.Capability}
+	acquireTestLease(t, repo, "worker", &claim)
 	for i := 0; i < 2; i++ {
 		if err := repo.ApplyProtectedEvent(ctx, "worker", claim, *started); err != nil {
 			t.Fatalf("ApplyProtectedEvent() attempt %d = %v", i, err)
 		}
+	}
+	progress := model.TaskProgressType{Event: model.Event{WorkerName: "worker", EventTime: time.Now().UTC()}, JobId: job.Id, ProgressID: uuid.NewString(), NotificationType: model.DownloadNotification, Status: model.ProgressingTaskProgressTypeStatus, Percent: 40}
+	for i := 0; i < 2; i++ {
+		if err := repo.ApplyProtectedProgress(ctx, "worker", claim, progress, 1); err != nil {
+			t.Fatalf("ApplyProtectedProgress() attempt %d = %v", i, err)
+		}
+	}
+	nextProgress := progress
+	nextProgress.Percent = 80
+	if err := repo.ApplyProtectedProgress(ctx, "worker", claim, nextProgress, 2); err != nil {
+		t.Fatalf("ApplyProtectedProgress(newer) = %v", err)
+	}
+	if err := repo.ApplyProtectedProgress(ctx, "worker", claim, progress, 1); !errors.Is(err, ErrEventConflict) {
+		t.Fatalf("ApplyProtectedProgress(out of order) = %v", err)
+	}
+	nextProgress.Percent = 60
+	if err := repo.ApplyProtectedProgress(ctx, "worker", claim, nextProgress, 2); !errors.Is(err, ErrEventConflict) {
+		t.Fatalf("ApplyProtectedProgress(conflicting retry) = %v", err)
 	}
 	conflicting := *started
 	conflicting.Message = "different"
@@ -113,6 +132,20 @@ func testProtectedParking(t *testing.T, repo Repository) {
 		if err := repo.ParkProtectedJob(ctx, "worker", claim); err != nil {
 			t.Fatalf("ParkProtectedJob() attempt %d = %v", i, err)
 		}
+	}
+	oldClaim := claim
+	acquireTestLease(t, repo, "worker", &claim)
+	if err := repo.ParkProtectedJob(ctx, "worker", oldClaim); !errors.Is(err, ErrStaleAssignment) {
+		t.Fatalf("ParkProtectedJob(old process) = %v, want stale assignment", err)
+	}
+	if err := repo.ApplyProtectedEvent(ctx, "worker", oldClaim, *started); !errors.Is(err, ErrStaleAssignment) {
+		t.Fatalf("ApplyProtectedEvent(old process) = %v, want stale assignment", err)
+	}
+	if err := repo.ApplyProtectedProgress(ctx, "worker", oldClaim, progress, 3); !errors.Is(err, ErrStaleAssignment) {
+		t.Fatalf("ApplyProtectedProgress(old process) = %v, want stale assignment", err)
+	}
+	if err := repo.ParkProtectedJob(ctx, "worker", claim); err != nil {
+		t.Fatalf("ParkProtectedJob(reclaimed) = %v", err)
 	}
 	if requeued, err := repo.RequeueTimedOutJob(ctx, job.Id.String(), started.EventID, time.Now().Add(time.Hour)); err != nil || requeued {
 		t.Fatalf("RequeueTimedOutJob(parked) = %t, %v", requeued, err)
@@ -136,6 +169,14 @@ func testProtectedParking(t *testing.T, repo Repository) {
 	newAssignment, err := repo.RequestProtectedJob(ctx, "worker", uuid.NewString(), keys)
 	if err != nil || newAssignment == nil || newAssignment.Id != job.Id || newAssignment.Generation != assigned.Generation+1 || newAssignment.Capability == assigned.Capability {
 		t.Fatalf("reassigned job = %+v, %v; want next generation", newAssignment, err)
+	}
+}
+
+func acquireTestLease(t *testing.T, repo Repository, worker string, claim *model.AssignmentClaim) {
+	t.Helper()
+	claim.InstanceID = uuid.New()
+	if _, err := repo.AcquireProtectedLease(context.Background(), worker, *claim, claim.InstanceID, time.Minute); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -169,6 +210,7 @@ func testProtectedParkTimeoutRace(t *testing.T, repo Repository) {
 		t.Fatal(err)
 	}
 	claim := model.AssignmentClaim{JobID: job.Id, Generation: assigned.Generation, Capability: assigned.Capability}
+	acquireTestLease(t, repo, "worker", &claim)
 	start := make(chan struct{})
 	var parkErr, timeoutErr error
 	var requeued bool
@@ -216,6 +258,7 @@ func testProtectedUploadRevocation(t *testing.T, repo Repository) {
 	started := job.AddEvent(model.JobNotification, model.StartedNotificationStatus)
 	started.WorkerName = "worker"
 	claim := model.AssignmentClaim{JobID: job.Id, Generation: assigned.Generation, Capability: assigned.Capability}
+	acquireTestLease(t, repo, "worker", &claim)
 	if err := repo.ApplyProtectedEvent(ctx, "worker", claim, *started); err != nil {
 		t.Fatal(err)
 	}
@@ -287,6 +330,7 @@ func testProtectedPublication(t *testing.T, repo Repository) {
 		t.Fatal(err)
 	}
 	claim := model.AssignmentClaim{JobID: job.Id, Generation: assigned.Generation, Capability: assigned.Capability}
+	acquireTestLease(t, repo, "worker", &claim)
 	started := job.AddEvent(model.JobNotification, model.StartedNotificationStatus)
 	started.WorkerName = "worker"
 	if err := repo.ApplyProtectedEvent(ctx, "worker", claim, *started); err != nil {

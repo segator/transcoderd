@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"transcoder/model"
 	"transcoder/server/assignment"
@@ -22,12 +23,70 @@ import (
 type protectedScheduler interface {
 	RequestProtectedJob(context.Context, string, string, *assignment.Keyring) (*model.ProtectedAssignment, error)
 	ParkProtectedJob(context.Context, string, model.AssignmentClaim) error
+	AcquireProtectedLease(context.Context, string, model.AssignmentClaim, time.Duration) (time.Time, error)
 	ApplyProtectedEvent(context.Context, string, model.AssignmentClaim, model.TaskEventType) error
+	ApplyProtectedProgress(context.Context, string, model.AssignmentClaim, model.TaskProgressType, uint64) error
 	CompleteProtectedJob(context.Context, string, model.AssignmentClaim, model.TaskEventType) error
 	GetProtectedDownload(context.Context, string, model.AssignmentClaim) (*scheduler.DownloadJobStream, error)
 	GetProtectedUpload(context.Context, string, model.AssignmentClaim) (*scheduler.UploadJobStream, error)
 	StageProtectedUpload(context.Context, string, model.AssignmentClaim, *scheduler.UploadJobStream, string, int64) error
 	GetProtectedChecksum(context.Context, string, model.AssignmentClaim) (string, error)
+}
+
+func (p *protectedAccess) progress(w http.ResponseWriter, r *http.Request) {
+	worker, ok := p.authenticate(w, r)
+	if !ok {
+		return
+	}
+	defer r.Body.Close()
+	var input struct {
+		Claim    model.AssignmentClaim  `json:"claim"`
+		Progress model.TaskProgressType `json:"progress"`
+		Sequence uint64                 `json:"sequence"`
+	}
+	if err := decodeDashboardJSON(w, r, &input); err != nil || (input.Progress.WorkerName != "" && input.Progress.WorkerName != worker) {
+		http.Error(w, "invalid protected progress", http.StatusBadRequest)
+		return
+	}
+	input.Progress.WorkerName = worker
+	if err := p.scheduler.ApplyProtectedProgress(r.Context(), worker, input.Claim, input.Progress, input.Sequence); err != nil {
+		if errors.Is(err, repository.ErrStaleAssignment) || errors.Is(err, repository.ErrEventConflict) {
+			http.Error(w, "protected progress conflicts with current assignment", http.StatusConflict)
+			return
+		}
+		http.Error(w, "could not record protected progress", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+const protectedLeaseDuration = time.Minute
+
+// lease grants or renews a process-specific lease. The client must measure its
+// local deadline from before issuing this request, not from the response.
+func (p *protectedAccess) lease(w http.ResponseWriter, r *http.Request) {
+	worker, ok := p.authenticate(w, r)
+	if !ok {
+		return
+	}
+	defer r.Body.Close()
+	var claim model.AssignmentClaim
+	if err := decodeDashboardJSON(w, r, &claim); err != nil || claim.InstanceID == uuid.Nil {
+		http.Error(w, "invalid assignment claim", http.StatusBadRequest)
+		return
+	}
+	if _, err := p.scheduler.AcquireProtectedLease(r.Context(), worker, claim, protectedLeaseDuration); err != nil {
+		if errors.Is(err, repository.ErrStaleAssignment) || errors.Is(err, repository.ErrLeaseHeld) {
+			http.Error(w, "assignment lease is unavailable", http.StatusConflict)
+			return
+		}
+		http.Error(w, "could not acquire assignment lease", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		LeaseSeconds int `json:"leaseSeconds"`
+	}{LeaseSeconds: int(protectedLeaseDuration / time.Second)})
 }
 
 func (p *protectedAccess) notify(w http.ResponseWriter, r *http.Request) {
@@ -165,10 +224,11 @@ func protectedTransferClaim(r *http.Request) (model.AssignmentClaim, error) {
 	}
 	generation, err := strconv.ParseUint(r.Header.Get("X-Assignment-Generation"), 10, 64)
 	capability := r.Header.Get("X-Assignment-Capability")
-	if err != nil || generation == 0 || capability == "" || len(capability) > 256 {
+	instance, instanceErr := uuid.Parse(r.Header.Get("X-Worker-Instance"))
+	if err != nil || instanceErr != nil || instance == uuid.Nil || generation == 0 || capability == "" || len(capability) > 256 {
 		return model.AssignmentClaim{}, errors.New("invalid assignment identity")
 	}
-	return model.AssignmentClaim{JobID: id, Generation: generation, Capability: capability}, nil
+	return model.AssignmentClaim{JobID: id, Generation: generation, Capability: capability, InstanceID: instance}, nil
 }
 
 func protectedTransferError(w http.ResponseWriter, err error) {

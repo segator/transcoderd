@@ -6,6 +6,9 @@ CREATE TABLE protected_assignments (
     key_id text NOT NULL,
     capability_hash bytea NOT NULL CHECK (octet_length(capability_hash) = 32),
     state text NOT NULL CHECK (state IN ('assigned', 'parked', 'running', 'publishing', 'completed', 'revoked')),
+    lease_instance uuid,
+    lease_expires_at timestamptz,
+    CHECK ((lease_instance IS NULL) = (lease_expires_at IS NULL)),
     updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -38,4 +41,16 @@ CREATE TABLE protected_publications (
     delete_source_pending boolean NOT NULL DEFAULT false,
     cleanup_pending boolean NOT NULL DEFAULT true,
     PRIMARY KEY (job_id, generation)
+);
+
+-- Sequence numbers prevent delayed progress samples from moving a current
+-- assignment backwards. Payload hashes make identical retries idempotent.
+CREATE TABLE protected_progress (
+    job_id varchar(255) NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    generation bigint NOT NULL CHECK (generation > 0),
+    progress_id text NOT NULL,
+    notification_type text NOT NULL,
+    sequence bigint NOT NULL CHECK (sequence > 0),
+    payload_hash bytea NOT NULL CHECK (octet_length(payload_hash) = 32),
+    PRIMARY KEY (job_id, generation, progress_id, notification_type)
 );

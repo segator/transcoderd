@@ -58,6 +58,9 @@ FROM protected_publications WHERE job_id=$1 AND generation=$2`, claim.JobID.Stri
 			}
 			return nil
 		}
+		if err := protectedLeaseValid(ctx, conn, claim, false); err != nil {
+			return err
+		}
 		lastJob := job.Events.GetLatestPerNotificationType(model.JobNotification)
 		lastEvent := job.Events.GetLatest()
 		if (state != "assigned" && state != "running") || publication.State != "staged" || lastJob == nil || lastJob.WorkerName != worker || lastJob.Status != model.StartedNotificationStatus || lastEvent == nil || lastEvent.EventID+1 != event.EventID {

@@ -15,6 +15,7 @@ type AssignmentClaim struct {
 	JobID      uuid.UUID `json:"jobId"`
 	Generation uint64    `json:"generation"`
 	Capability string    `json:"capability"`
+	InstanceID uuid.UUID `json:"instanceId"`
 }
 
 type ProtectedPublication struct {

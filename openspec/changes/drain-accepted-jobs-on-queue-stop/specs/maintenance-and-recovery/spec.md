@@ -1,11 +1,15 @@
 ## MODIFIED Requirements
 
 ### Requirement: Assignment timeout
-The server SHALL requeue an assigned or started job whose last job event is older than `server.scheduler.jobTimeout`, whose registered default is 24 hours, unless its current assignment has a confirmed parked state. It SHALL record cancellation of the old assignment before the new queued event.
+The server SHALL requeue an assigned or started job whose last job event is older than `server.scheduler.jobTimeout`, whose registered default is 24 hours, unless its current assignment has a confirmed parked state or an unexpired execution lease. It SHALL record cancellation of the old assignment before the new queued event.
 
 #### Scenario: Assignment exceeds timeout
-- **WHEN** the last job event of an assigned or started job is older than the configured timeout
+- **WHEN** the last job event of an assigned or started job is older than the configured timeout and the assignment is neither parked nor covered by an unexpired execution lease
 - **THEN** the server appends `Job/canceled` followed by `Job/queued`
+
+#### Scenario: Resumed assignment has an old job event
+- **WHEN** a worker resumes a parked assignment whose last job event is older than the timeout and holds a current execution lease
+- **THEN** timeout maintenance retains the assignment while that lease remains valid
 
 ### Requirement: Persist local worker context
 The worker SHALL persist a JSON job context after publishing a task event, including the job ID, current event, source information, output information when present, and working directory.

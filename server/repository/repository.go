@@ -13,6 +13,8 @@ import (
 	"time"
 	"transcoder/model"
 	"transcoder/server/assignment"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -20,6 +22,7 @@ var (
 	ErrStaleAssignment = errors.New("assignment is no longer current")
 	ErrJobPublishing   = errors.New("job output publication is in progress")
 	ErrEventConflict   = errors.New("protected event conflicts with history")
+	ErrLeaseHeld       = errors.New("assignment lease is held by another worker process")
 )
 
 type Repository interface {
@@ -52,8 +55,10 @@ type Repository interface {
 	RetrieveQueuedJob(ctx context.Context) (*model.Job, error)
 	RequestProtectedJob(context.Context, string, string, *assignment.Keyring) (*model.ProtectedAssignment, error)
 	ParkProtectedJob(context.Context, string, model.AssignmentClaim) error
+	AcquireProtectedLease(context.Context, string, model.AssignmentClaim, uuid.UUID, time.Duration) (time.Time, error)
 	GetProtectedJob(context.Context, string, model.AssignmentClaim) (*model.Job, error)
 	ApplyProtectedEvent(context.Context, string, model.AssignmentClaim, model.TaskEventType) error
+	ApplyProtectedProgress(context.Context, string, model.AssignmentClaim, model.TaskProgressType, uint64) error
 	StageProtectedUpload(context.Context, string, model.AssignmentClaim, string, string, int64, func() error) error
 	BeginProtectedPublication(context.Context, string, model.AssignmentClaim, model.TaskEventType, bool) (*model.ProtectedPublication, error)
 	FinishProtectedPublication(context.Context, model.ProtectedPublication, string, int64, *model.MediaProbe) error

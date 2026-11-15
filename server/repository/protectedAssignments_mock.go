@@ -26,6 +26,8 @@ type protectedJobState struct {
 	worker, keyID, state string
 	generation           uint64
 	capabilityHash       [sha256.Size]byte
+	leaseInstance        uuid.UUID
+	leaseExpiry          time.Time
 }
 type protectedUploadKey struct {
 	jobID      string
@@ -66,6 +68,9 @@ func (r *InMemoryRepository) BeginProtectedPublication(ctx context.Context, work
 			return nil, ErrEventConflict
 		}
 	} else {
+		if !memoryProtectedLeaseValid(state, claim, false) {
+			return nil, ErrStaleAssignment
+		}
 		lastJob := model.TaskEvents(r.events[id]).GetLatestPerNotificationType(model.JobNotification)
 		lastEvent := model.TaskEvents(r.events[id]).GetLatest()
 		if (state.state != "assigned" && state.state != "running") || upload.state != "staged" || lastJob == nil || lastJob.WorkerName != worker || lastJob.Status != model.StartedNotificationStatus || lastEvent == nil || lastEvent.EventID+1 != event.EventID {
@@ -226,6 +231,7 @@ func (r *InMemoryRepository) RequestProtectedJob(ctx context.Context, worker, re
 	}
 	state.generation++
 	state.worker, state.keyID, state.state = worker, keys.ActiveKeyID(), "assigned"
+	state.leaseInstance, state.leaseExpiry = uuid.Nil, time.Time{}
 	capability, err := keys.Capability(state.keyID, worker, id, state.generation)
 	if err != nil {
 		return nil, err
@@ -243,6 +249,40 @@ func (r *InMemoryRepository) RequestProtectedJob(ctx context.Context, worker, re
 	prior := protectedRequestResult{jobID: id, keyID: state.keyID, name: filepath.Base(chosen.SourcePath), generation: state.generation, eventID: event.EventID}
 	r.protectedRequests[request] = prior
 	return protectedResponse(keys, worker, prior)
+}
+
+func (r *InMemoryRepository) AcquireProtectedLease(ctx context.Context, worker string, claim model.AssignmentClaim, instance uuid.UUID, duration time.Duration) (time.Time, error) {
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, err
+	}
+	if err := validateLeaseRequest(worker, claim, instance, duration); err != nil {
+		return time.Time{}, err
+	}
+	r.assignmentMu.Lock()
+	defer r.assignmentMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := claim.JobID.String()
+	state, ok := r.protectedJobs[id]
+	provided := sha256.Sum256([]byte(claim.Capability))
+	last := model.TaskEvents(r.events[id]).GetLatestPerNotificationType(model.JobNotification)
+	if !ok || state.worker != worker || state.generation != claim.Generation || subtle.ConstantTimeCompare(state.capabilityHash[:], provided[:]) != 1 || (state.state != "assigned" && state.state != "running" && state.state != "parked") || last == nil || last.WorkerName != worker || (last.Status != model.AssignedNotificationStatus && last.Status != model.StartedNotificationStatus) {
+		return time.Time{}, ErrStaleAssignment
+	}
+	now := time.Now()
+	if state.state != "parked" && state.leaseInstance != uuid.Nil && state.leaseInstance != instance && state.leaseExpiry.After(now) {
+		return time.Time{}, ErrLeaseHeld
+	}
+	state.leaseInstance, state.leaseExpiry = instance, now.Add(duration)
+	if state.state == "parked" {
+		state.state = "assigned"
+	}
+	r.protectedJobs[id] = state
+	return state.leaseExpiry, nil
+}
+
+func memoryProtectedLeaseValid(state protectedJobState, claim model.AssignmentClaim, parkedAck bool) bool {
+	return claim.InstanceID != uuid.Nil && claim.InstanceID == state.leaseInstance && (state.leaseExpiry.After(time.Now()) || (parkedAck && state.state == "parked"))
 }
 
 func protectedResponse(keys *assignment.Keyring, worker string, request protectedRequestResult) (*model.ProtectedAssignment, error) {
@@ -325,6 +365,9 @@ func (r *InMemoryRepository) ApplyProtectedEvent(ctx context.Context, worker str
 	if !ok || job == nil || state.worker != worker || state.generation != claim.Generation || state.state == "revoked" || subtle.ConstantTimeCompare(state.capabilityHash[:], provided[:]) != 1 {
 		return ErrStaleAssignment
 	}
+	if !memoryProtectedLeaseValid(state, claim, false) {
+		return ErrStaleAssignment
+	}
 	for _, existing := range r.events[id] {
 		if existing.EventID == event.EventID {
 			if sameProtectedEvent(existing, event) {
@@ -345,6 +388,7 @@ func (r *InMemoryRepository) ApplyProtectedEvent(ctx context.Context, worker str
 	job.Status, job.StatusPhase, job.StatusMessage, job.LastUpdate = string(event.Status), event.NotificationType, event.Message, &event.EventTime
 	if event.NotificationType == model.JobNotification && event.Status == model.FailedNotificationStatus {
 		state.state = "completed"
+		r.abandonProtectedUpload(id, state.generation)
 	} else if event.NotificationType == model.FFMPEGSNotification && event.Status == model.StartedNotificationStatus {
 		state.state = "running"
 	}
@@ -368,6 +412,9 @@ func (r *InMemoryRepository) StageProtectedUpload(ctx context.Context, worker st
 	provided := sha256.Sum256([]byte(claim.Capability))
 	last := model.TaskEvents(r.events[id]).GetLatestPerNotificationType(model.JobNotification)
 	if !ok || worker == "" || claim.Capability == "" || state.worker != worker || state.generation != claim.Generation || (state.state != "assigned" && state.state != "running") || subtle.ConstantTimeCompare(state.capabilityHash[:], provided[:]) != 1 || last == nil || last.WorkerName != worker || last.Status != model.StartedNotificationStatus {
+		return ErrStaleAssignment
+	}
+	if !memoryProtectedLeaseValid(state, claim, false) {
 		return ErrStaleAssignment
 	}
 	key := protectedUploadKey{id, claim.Generation}
@@ -397,6 +444,9 @@ func (r *InMemoryRepository) ParkProtectedJob(ctx context.Context, worker string
 	if !ok || claim.Capability == "" || state.worker != worker || state.generation != claim.Generation || (state.state != "assigned" && state.state != "parked") || subtle.ConstantTimeCompare(state.capabilityHash[:], provided[:]) != 1 || last == nil || last.WorkerName != worker || last.Status != model.StartedNotificationStatus {
 		return ErrStaleAssignment
 	}
+	if !memoryProtectedLeaseValid(state, claim, true) {
+		return ErrStaleAssignment
+	}
 	state.state = "parked"
 	r.protectedJobs[id] = state
 	return nil
@@ -414,6 +464,9 @@ func (r *InMemoryRepository) GetProtectedJob(ctx context.Context, worker string,
 	last := model.TaskEvents(r.events[id]).GetLatestPerNotificationType(model.JobNotification)
 	provided := sha256.Sum256([]byte(claim.Capability))
 	if !ok || job == nil || worker == "" || claim.Capability == "" || state.worker != worker || state.generation != claim.Generation || (state.state != "assigned" && state.state != "running") || subtle.ConstantTimeCompare(state.capabilityHash[:], provided[:]) != 1 || last == nil || last.WorkerName != worker || last.Status != model.StartedNotificationStatus {
+		return nil, ErrStaleAssignment
+	}
+	if !memoryProtectedLeaseValid(state, claim, false) {
 		return nil, ErrStaleAssignment
 	}
 	copyJob := *job
@@ -471,7 +524,7 @@ func (r *InMemoryRepository) RequeueTimedOutJob(ctx context.Context, id string, 
 		return false, nil
 	}
 	state, protected := r.protectedJobs[id]
-	if protected && (state.state == "publishing" || (state.state == "parked" && state.worker == last.WorkerName)) {
+	if protected && (state.state == "publishing" || state.leaseExpiry.After(time.Now()) || (state.state == "parked" && state.worker == last.WorkerName)) {
 		return false, nil
 	}
 	if protected {

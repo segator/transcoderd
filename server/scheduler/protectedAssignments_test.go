@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"transcoder/model"
 	"transcoder/server/assignment"
@@ -83,6 +84,10 @@ func TestProtectedUploadCannotCommitAfterCancellation(t *testing.T) {
 		t.Fatalf("RequestProtectedJob() = %+v, %v", assigned, err)
 	}
 	claim := model.AssignmentClaim{JobID: job.Id, Generation: assigned.Generation, Capability: assigned.Capability}
+	claim.InstanceID = uuid.New()
+	if _, err := repo.AcquireProtectedLease(ctx, "node", claim, claim.InstanceID, time.Minute); err != nil {
+		t.Fatal(err)
+	}
 	current, err := repo.GetJob(ctx, job.Id.String())
 	if err != nil {
 		t.Fatal(err)
@@ -143,6 +148,10 @@ func TestRecoverAbandonedUploadPreservesSource(t *testing.T) {
 		t.Fatalf("RequestProtectedJob() = %+v, %v", assigned, err)
 	}
 	claim := model.AssignmentClaim{JobID: job.Id, Generation: assigned.Generation, Capability: assigned.Capability}
+	claim.InstanceID = uuid.New()
+	if _, err := repo.AcquireProtectedLease(ctx, "node", claim, claim.InstanceID, time.Minute); err != nil {
+		t.Fatal(err)
+	}
 	current, err := repo.GetJob(ctx, job.Id.String())
 	if err != nil {
 		t.Fatal(err)

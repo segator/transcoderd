@@ -29,6 +29,7 @@ type InMemoryRepository struct {
 	protectedJobs       map[string]protectedJobState
 	protectedRequests   map[protectedRequestKey]protectedRequestResult
 	protectedUploads    map[protectedUploadKey]protectedUpload
+	protectedProgress   map[protectedProgressKey]protectedProgressState
 }
 
 func NewInMemoryRepository() *InMemoryRepository {
@@ -47,6 +48,7 @@ func NewInMemoryRepository() *InMemoryRepository {
 		protectedJobs:       make(map[string]protectedJobState),
 		protectedRequests:   make(map[protectedRequestKey]protectedRequestResult),
 		protectedUploads:    make(map[protectedUploadKey]protectedUpload),
+		protectedProgress:   make(map[protectedProgressKey]protectedProgressState),
 	}
 }
 

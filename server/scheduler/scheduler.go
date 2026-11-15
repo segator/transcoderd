@@ -79,8 +79,16 @@ func (r *RuntimeScheduler) ParkProtectedJob(ctx context.Context, worker string, 
 	return r.repo.ParkProtectedJob(ctx, worker, claim)
 }
 
+func (r *RuntimeScheduler) AcquireProtectedLease(ctx context.Context, worker string, claim model.AssignmentClaim, duration time.Duration) (time.Time, error) {
+	return r.repo.AcquireProtectedLease(ctx, worker, claim, claim.InstanceID, duration)
+}
+
 func (r *RuntimeScheduler) ApplyProtectedEvent(ctx context.Context, worker string, claim model.AssignmentClaim, event model.TaskEventType) error {
 	return r.repo.ApplyProtectedEvent(ctx, worker, claim, event)
+}
+
+func (r *RuntimeScheduler) ApplyProtectedProgress(ctx context.Context, worker string, claim model.AssignmentClaim, progress model.TaskProgressType, sequence uint64) error {
+	return r.repo.ApplyProtectedProgress(ctx, worker, claim, progress, sequence)
 }
 
 func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*model.RequestJobResponse, error) {

@@ -90,7 +90,7 @@ FOR UPDATE OF j SKIP LOCKED LIMIT 1`).Scan(&nextJob)
 		err = conn.QueryRowContext(ctx, `INSERT INTO protected_assignments(job_id,generation,worker_name,key_id,capability_hash,state)
 VALUES($1,1,$2,$3,decode(repeat('00',32),'hex'),'assigned')
 ON CONFLICT(job_id) DO UPDATE SET generation=protected_assignments.generation+1, worker_name=EXCLUDED.worker_name,
-key_id=EXCLUDED.key_id, capability_hash=EXCLUDED.capability_hash, state='assigned', updated_at=CURRENT_TIMESTAMP
+key_id=EXCLUDED.key_id, capability_hash=EXCLUDED.capability_hash, state='assigned', lease_instance=NULL, lease_expires_at=NULL, updated_at=CURRENT_TIMESTAMP
 WHERE protected_assignments.state IN ('revoked','completed') RETURNING generation`, nextJob, worker, key).Scan(&nextGeneration)
 		if err != nil {
 			return fmt.Errorf("reserve protected assignment: %w", err)
@@ -239,6 +239,9 @@ func (s *SQLRepository) ApplyProtectedEvent(ctx context.Context, worker string, 
 		if owner != worker || generation < 1 || uint64(generation) != claim.Generation || subtle.ConstantTimeCompare(expected, provided[:]) != 1 || state == "revoked" {
 			return ErrStaleAssignment
 		}
+		if err := protectedLeaseValid(ctx, conn, claim, false); err != nil {
+			return err
+		}
 		for _, existing := range job.Events {
 			if existing.EventID == event.EventID {
 				if sameProtectedEvent(existing, event) {
@@ -254,7 +257,10 @@ func (s *SQLRepository) ApplyProtectedEvent(ctx context.Context, worker string, 
 			return err
 		}
 		if event.NotificationType == model.JobNotification && event.Status == model.FailedNotificationStatus {
-			_, err = conn.ExecContext(ctx, `UPDATE protected_assignments SET state='completed',updated_at=CURRENT_TIMESTAMP WHERE job_id=$1`, claim.JobID.String())
+			if _, err = conn.ExecContext(ctx, `UPDATE protected_assignments SET state='completed',updated_at=CURRENT_TIMESTAMP WHERE job_id=$1`, claim.JobID.String()); err != nil {
+				return err
+			}
+			_, err = conn.ExecContext(ctx, `UPDATE protected_publications SET state='abandoned' WHERE job_id=$1 AND generation=$2 AND state='staged'`, claim.JobID.String(), generation)
 		} else if event.NotificationType == model.FFMPEGSNotification && event.Status == model.StartedNotificationStatus {
 			_, err = conn.ExecContext(ctx, `UPDATE protected_assignments SET state='running',updated_at=CURRENT_TIMESTAMP WHERE job_id=$1`, claim.JobID.String())
 		}
@@ -300,6 +306,9 @@ func (s *SQLRepository) StageProtectedUpload(ctx context.Context, worker string,
 		last := job.Events.GetLatestPerNotificationType(model.JobNotification)
 		if owner != worker || generation < 1 || uint64(generation) != claim.Generation || (state != "assigned" && state != "running") || subtle.ConstantTimeCompare(expected, provided[:]) != 1 || last == nil || last.WorkerName != worker || last.Status != model.StartedNotificationStatus {
 			return ErrStaleAssignment
+		}
+		if err := protectedLeaseValid(ctx, conn, claim, false); err != nil {
+			return err
 		}
 		var savedPath, savedChecksum, savedState string
 		var savedSize int64
@@ -347,6 +356,9 @@ func (s *SQLRepository) ParkProtectedJob(ctx context.Context, worker string, cla
 		if owner != worker || generation < 1 || uint64(generation) != claim.Generation || (state != "assigned" && state != "parked") || subtle.ConstantTimeCompare(expected, provided[:]) != 1 || last == nil || last.WorkerName != worker || last.Status != model.StartedNotificationStatus {
 			return ErrStaleAssignment
 		}
+		if err := protectedLeaseValid(ctx, conn, claim, true); err != nil {
+			return err
+		}
 		_, err = conn.ExecContext(ctx, `UPDATE protected_assignments SET state='parked',updated_at=CURRENT_TIMESTAMP WHERE job_id=$1`, claim.JobID.String())
 		return err
 	})
@@ -376,6 +388,9 @@ func (s *SQLRepository) GetProtectedJob(ctx context.Context, worker string, clai
 		last := job.Events.GetLatestPerNotificationType(model.JobNotification)
 		if owner != worker || generation < 1 || uint64(generation) != claim.Generation || (state != "assigned" && state != "running") || subtle.ConstantTimeCompare(expected, provided[:]) != 1 || last == nil || last.WorkerName != worker || last.Status != model.StartedNotificationStatus {
 			return ErrStaleAssignment
+		}
+		if err := protectedLeaseValid(ctx, conn, claim, false); err != nil {
+			return err
 		}
 		result = job
 		return nil
@@ -429,11 +444,12 @@ func (s *SQLRepository) RequeueTimedOutJob(ctx context.Context, id string, event
 			return nil
 		}
 		var state, owner string
-		err = conn.QueryRowContext(ctx, `SELECT state,worker_name FROM protected_assignments WHERE job_id=$1`, id).Scan(&state, &owner)
+		var leaseValid bool
+		err = conn.QueryRowContext(ctx, `SELECT state,worker_name,COALESCE(lease_expires_at > clock_timestamp(),false) FROM protected_assignments WHERE job_id=$1`, id).Scan(&state, &owner, &leaseValid)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if state == "publishing" || (state == "parked" && owner == last.WorkerName) {
+		if state == "publishing" || leaseValid || (state == "parked" && owner == last.WorkerName) {
 			return nil
 		}
 		if state != "" {

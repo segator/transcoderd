@@ -36,7 +36,7 @@ At startup, the worker SHALL find JSON contexts in its workspace and recover eac
 ## ADDED Requirements
 
 ### Requirement: Durable parked assignment ownership
-The server SHALL durably acknowledge a parked assignment and fence resume, cancellation and reassignment to prevent duplicate execution. Worker and server SHALL reconcile interrupted park transitions. An explicit recovery path SHALL exist for permanently unavailable parked work.
+The server SHALL durably acknowledge a parked assignment and fence resume, cancellation and reassignment to prevent stale generations from changing authoritative state or publishing output. Worker and server SHALL reconcile interrupted park transitions. An explicit recovery path SHALL exist for permanently unavailable parked work.
 
 #### Scenario: Lost park acknowledgement
 - **WHEN** the worker loses an acknowledgement while parking a prefetched assignment
@@ -44,4 +44,4 @@ The server SHALL durably acknowledge a parked assignment and fence resume, cance
 
 #### Scenario: Concurrent resume and reassignment
 - **WHEN** resume races a cancellation or reassignment
-- **THEN** stale ownership cannot start the same job concurrently
+- **THEN** stale ownership cannot update authoritative job state or publish an output

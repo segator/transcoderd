@@ -1,5 +1,16 @@
 ## ADDED Requirements
 
+### Requirement: Idempotent protected job request
+An upgraded worker SHALL persist a unique request identity before requesting an assignment. The server SHALL atomically associate that identity with one assignment or no-job result and return the same result for retries, including across server replicas. A subsequent poll SHALL use a new identity.
+
+#### Scenario: Lost response after assignment
+- **WHEN** a worker retries the same request identity after an assignment response is lost
+- **THEN** the server returns that assignment without assigning an additional job
+
+#### Scenario: Repeated empty request
+- **WHEN** an empty request is retried after jobs have subsequently entered the queue
+- **THEN** the server returns the original empty result and a new request identity can obtain queued work
+
 ### Requirement: Safely idle with prefetched jobs
 When admission is stopped, the worker SHALL finish running encodes and their remaining phases while holding prefetched jobs before encoding. It SHALL distinguish running work, unresolved reservations and durably parked jobs. It SHALL report safe idle only with admission closed, no executing or suspended work, no unresolved requests and all parked jobs recoverable and acknowledged by the server.
 
@@ -14,6 +25,10 @@ When admission is stopped, the worker SHALL finish running encodes and their rem
 #### Scenario: In-flight request returns after stop
 - **WHEN** a request reserved before queue stop returns an assignment
 - **THEN** the worker retains the assigned job, keeps admission closed and cannot report safe idle until the request and any required preparation and parking finish
+
+#### Scenario: Assignment response is lost
+- **WHEN** a job request response is lost and the worker retries the same request
+- **THEN** the server returns the same assignment or no-job result without assigning a second job
 
 #### Scenario: Suspended running encode
 - **WHEN** a running encode remains paused in RAM or by an individual hold

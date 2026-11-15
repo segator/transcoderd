@@ -24,6 +24,8 @@ None.
 - `operations-dashboard`: display running work, parked prefetched jobs and safe-idle state independently.
 - `windows-desktop-worker`: safe shutdown and manual update can retain parked prefetched jobs.
 - `self-update`: an update of a stopped worker preserves parked work rather than starting its encodes.
+- `events-and-progress`: accept worker events only for the current assignment and make event retries safe.
+- `media-transfer`: fence transfer staging and final publication by assignment, including cancellation races.
 
 ## Impact
 

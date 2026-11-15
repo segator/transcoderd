@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.15.1](https://github.com/segator/transcoderd/compare/v2.15.0...v2.15.1) (2026-11-15)
+
+
+### 🐛 Bug Fixes
+
+* **server:** accept TS and M2TS job sources ([#226](https://github.com/segator/transcoderd/issues/226)) ([c5c6313](https://github.com/segator/transcoderd/commit/c5c63131e27cbf78fc3134ba30f9ed2d18f9d99b))
+
 ## [2.15.0](https://github.com/segator/transcoderd/compare/v2.14.0...v2.15.0) (2026-11-14)
 
 

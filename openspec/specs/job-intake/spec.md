@@ -18,11 +18,15 @@ The server SHALL accept `POST /api/v1/job/` with a JSON `sourcePath` and SHALL r
 - **THEN** the API returns HTTP 200 with per-file results
 
 ### Requirement: File discovery
-The scheduler SHALL walk the requested path beneath `server.scheduler.sourcePath` and evaluate files against the configured minimum byte size and supported extension list. A directory request SHALL allow multiple files to be evaluated in one response.
+The scheduler SHALL walk the requested path beneath `server.scheduler.sourcePath` and evaluate files against the configured minimum byte size and supported extension list. It SHALL support `.ts` and `.m2ts` files. A directory request SHALL allow multiple files to be evaluated in one response.
 
 #### Scenario: Directory with eligible media
 - **WHEN** a requested directory contains files with supported extensions and sufficient size
 - **THEN** the scheduler attempts to create a job for each eligible file
+
+#### Scenario: MPEG transport stream source
+- **WHEN** a `.ts` or `.m2ts` file meets the existing intake criteria
+- **THEN** the server queues it with a provisional `.mkv` destination
 
 #### Scenario: File too small
 - **WHEN** a file is smaller than `server.scheduler.minFileSize`

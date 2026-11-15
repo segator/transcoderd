@@ -238,6 +238,9 @@ func (e *JobExecutor) resumeJobs() {
 			}
 
 			notificationType := jobContext.LastEvent.NotificationType
+			if jobContext.NextPhase != "" && notificationType != model.JobNotification {
+				notificationType = jobContext.NextPhase
+			}
 			if notificationType == model.JobNotification {
 				switch jobContext.LastEvent.Status {
 				case model.AssignedNotificationStatus, model.StartedNotificationStatus:

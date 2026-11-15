@@ -139,4 +139,17 @@ func TestContextPersistJobContext(t *testing.T) {
 	if loadedCtx.JobId != ctx.JobId {
 		t.Errorf("Loaded JobId = %v, want %v", loadedCtx.JobId, ctx.JobId)
 	}
+
+	ctx.NextPhase = model.FFMPEGSNotification
+	if err := ctx.PersistJobContext(); err != nil {
+		t.Fatalf("PersistJobContext() replacement error = %v", err)
+	}
+	reloaded, err := ReadContextFromDiskByPath(contextFile)
+	if err != nil || reloaded.NextPhase != model.FFMPEGSNotification {
+		t.Fatalf("ReadContextFromDiskByPath() = %+v, %v, want FFmpeg next phase", reloaded, err)
+	}
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("context directory contains %d entries, err = %v; want one snapshot", len(entries), err)
+	}
 }

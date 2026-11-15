@@ -9,6 +9,8 @@ import (
 	"transcoder/worker/control"
 	"transcoder/worker/job"
 	"transcoder/worker/step"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type jobRegistry struct {
@@ -64,7 +66,14 @@ func (r *jobRegistry) snapshot() []control.JobState {
 func (e *JobExecutor) trackPipeline(executors map[model.NotificationType]*step.Executor) {
 	for phase, executor := range executors {
 		oldAdd, oldJob := executor.OnAdd, executor.OnJob
-		executor.OnAdd = func(j *job.Context) { e.jobs.set(j, phase, "queued"); oldAdd(j) }
+		executor.OnAdd = func(j *job.Context) {
+			j.NextPhase = phase
+			if err := j.PersistJobContext(); err != nil {
+				log.WithError(err).WithField("job_id", j.JobId.String()).Error("Failed to persist next job phase")
+			}
+			e.jobs.set(j, phase, "queued")
+			oldAdd(j)
+		}
 		executor.OnJob = func(j *job.Context) { e.jobs.set(j, phase, "running"); oldJob(j) }
 	}
 }

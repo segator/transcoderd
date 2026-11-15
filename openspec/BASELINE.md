@@ -106,6 +106,8 @@ The original frontend image recipe explicitly compiled amd64 and its Kubernetes 
 
 The fleet's former Pause both/Profile button wrote zero limits, which stopped new work but did not invoke the worker RAM controller and offered no restore action. `align-remote-worker-controls` separates worker-acknowledged RAM and queue commands, retains positive resume capacity and preserves independent holds. Its Workers view applies the selected presence window inside the 30-day maximum and adds compact in-tab hardware history. Real child-process tests cover suspension, queue drain semantics, independent holds and acknowledgement retry; PostgreSQL and Chromium regressions cover storage, filtered pages and controls.
 
+The live monitoring requirement says accepted work continues when both limits are zero, but the job-dispatch and remote queue-control requirements hold queued encodes and the worker implements that hold. An accepted prefetched job can consequently prevent a stopped worker from being reported safely idle. `drain-accepted-jobs-on-queue-stop` proposes distinguishing executing work from recoverable prefetched work while retaining the queue hold.
+
 
 ### Reporting scope and individual fleet controls (2026-11-06)
 

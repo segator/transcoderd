@@ -102,6 +102,25 @@ func TestResumeJobsRoutesStartedJobContextToDownload(t *testing.T) {
 	}
 }
 
+func TestResumeJobsUsesPersistedNextPhase(t *testing.T) {
+	executor, downloadExecutor, _ := newResumeTestExecutor(t)
+	encodeExecutor := step.NewStepExecutor(model.FFMPEGSNotification, nil)
+	executor.stepExecutors[model.FFMPEGSNotification] = encodeExecutor
+	jobContext := persistResumeTestContext(t, executor.tempPath, model.DownloadNotification, model.CompletedNotificationStatus)
+	executor.trackPipeline(executor.stepExecutors)
+	encodeExecutor.AddJob(jobContext)
+	<-encodeExecutor.GetJobChan() // Simulate process loss before the encode starts.
+
+	executor.resumeJobs()
+
+	if got := len(downloadExecutor.GetJobChan()); got != 0 {
+		t.Errorf("queued download jobs = %d, want 0", got)
+	}
+	if got := len(encodeExecutor.GetJobChan()); got != 1 {
+		t.Errorf("queued encode jobs = %d, want 1", got)
+	}
+}
+
 func TestResumeJobsSkipsUnreadableAndUnsupportedContexts(t *testing.T) {
 	executor, downloadExecutor, _ := newResumeTestExecutor(t)
 	if err := os.WriteFile(filepath.Join(executor.tempPath, "broken.json"), []byte("{"), 0o600); err != nil {

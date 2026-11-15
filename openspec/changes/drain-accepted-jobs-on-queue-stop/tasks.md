@@ -2,7 +2,7 @@
 
 ## 1. Parked ownership and recovery
 
-- [ ] 1.1 Add durable assignment generations, authenticated parked ownership, idempotent request keys and reconciliation, with explicit cancellation and safe recovery; test timeouts, server replicas, lost request/park responses and concurrent resume/reassignment.
+- [ ] 1.1 Add durable assignment generations, per-worker credentials, reproducible capabilities with shared versioned server keys, authenticated parked ownership, idempotent request keys and reconciliation, with explicit cancellation and safe recovery; test worker impersonation, key rotation and loss, timeouts, server replicas, lost request/park responses and concurrent resume/reassignment.
 - [ ] 1.2 Persist and restore the recoverable next phase, encoder profile and prefetched data atomically; test legacy snapshots, missing/corrupt workspaces and restarting after a completed download without downloading again.
 - [ ] 1.3 Fence and deduplicate worker notifications and progress by current generation, persist pending notifications locally and reconcile lost acknowledgements; test stale and duplicate events and crashes around acknowledgement.
 - [ ] 1.4 Isolate uploads by generation and implement a durable, recoverable publication intent that serializes finalization with cancellation and reassignment; test uploads already streaming during revocation, duplicate completion, crashes at each filesystem/database boundary and safe source deletion.

@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 
@@ -70,6 +71,7 @@ func (e *JobExecutor) trackPipeline(executors map[model.NotificationType]*step.E
 			j.NextPhase = phase
 			if err := j.PersistJobContext(); err != nil {
 				log.WithError(err).WithField("job_id", j.JobId.String()).Error("Failed to persist next job phase")
+				e.recordRecoveryError(fmt.Errorf("persist next phase for job %s: %w", j.JobId, err), false)
 			}
 			e.jobs.set(j, phase, "queued")
 			oldAdd(j)

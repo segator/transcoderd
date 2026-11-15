@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -12,6 +14,7 @@ import (
 
 	"transcoder/model"
 	"transcoder/worker/config"
+	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
 	"transcoder/worker/step"
 )
@@ -107,6 +110,13 @@ func TestResumeJobsUsesPersistedNextPhase(t *testing.T) {
 	encodeExecutor := step.NewStepExecutor(model.FFMPEGSNotification, nil)
 	executor.stepExecutors[model.FFMPEGSNotification] = encodeExecutor
 	jobContext := persistResumeTestContext(t, executor.tempPath, model.DownloadNotification, model.CompletedNotificationStatus)
+	data := []byte("prefetched video")
+	path := filepath.Join(jobContext.WorkingDir, "source.mkv")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	jobContext.Source = &job.VideoData{FilePath: path, Size: int64(len(data)), Checksum: hex.EncodeToString(sum[:]), FFProbeData: &ffmpeg.NormalizedFFProbe{}}
 	executor.trackPipeline(executor.stepExecutors)
 	encodeExecutor.AddJob(jobContext)
 	<-encodeExecutor.GetJobChan() // Simulate process loss before the encode starts.
@@ -121,20 +131,60 @@ func TestResumeJobsUsesPersistedNextPhase(t *testing.T) {
 	}
 }
 
+func TestResumeJobsRejectsMissingPrefetchedSource(t *testing.T) {
+	executor, _, _ := newResumeTestExecutor(t)
+	encodeExecutor := step.NewStepExecutor(model.FFMPEGSNotification, nil)
+	executor.stepExecutors[model.FFMPEGSNotification] = encodeExecutor
+	jobContext := persistResumeTestContext(t, executor.tempPath, model.DownloadNotification, model.CompletedNotificationStatus)
+	jobContext.NextPhase = model.FFMPEGSNotification
+	if err := jobContext.PersistJobContext(); err != nil {
+		t.Fatal(err)
+	}
+
+	executor.resumeJobs()
+
+	if got := len(encodeExecutor.GetJobChan()); got != 0 {
+		t.Errorf("queued encode jobs = %d, want 0", got)
+	}
+	if executor.ReserveJobSlot() || executor.AdmissionStatus().RecoveryError == "" {
+		t.Fatal("missing prefetched source did not close admission and report recovery error")
+	}
+	if got := executor.ActiveJobs(); got != 1 {
+		t.Errorf("ActiveJobs() = %d, want 1 for unresolved recovery", got)
+	}
+}
+
 func TestResumeJobsSkipsUnreadableAndUnsupportedContexts(t *testing.T) {
 	executor, downloadExecutor, _ := newResumeTestExecutor(t)
-	if err := os.WriteFile(filepath.Join(executor.tempPath, "broken.json"), []byte("{"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(executor.tempPath, uuid.NewString()+".json"), []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	persistResumeTestContext(t, executor.tempPath, model.NotificationType("Unknown"), model.StartedNotificationStatus)
 
 	executor.resumeJobs()
 
-	if got := executor.ActiveJobs(); got != 0 {
-		t.Errorf("ActiveJobs() = %d, want 0", got)
+	if got := executor.ActiveJobs(); got != 2 {
+		t.Errorf("ActiveJobs() = %d, want 2 unresolved contexts", got)
 	}
 	if got := len(downloadExecutor.GetJobChan()); got != 0 {
 		t.Errorf("queued download jobs = %d, want 0", got)
+	}
+}
+
+func TestResumeJobsRejectsMismatchedIdentity(t *testing.T) {
+	executor, downloadExecutor, contextPath := newResumeTestExecutor(t)
+	jobContext := persistResumeTestContext(t, executor.tempPath, model.JobNotification, model.StartedNotificationStatus)
+	oldPath := contextPath(jobContext)
+	jobContext.JobId = uuid.New()
+	if err := jobContext.PersistJobContext(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(contextPath(jobContext), oldPath); err != nil {
+		t.Fatal(err)
+	}
+	executor.resumeJobs()
+	if executor.AdmissionStatus().RecoveryError == "" || executor.ActiveJobs() != 1 || len(downloadExecutor.GetJobChan()) != 0 {
+		t.Fatal("mismatched snapshot must keep admission closed and remain unresolved")
 	}
 }
 
@@ -169,7 +219,8 @@ func newResumeTestExecutor(t *testing.T) (*JobExecutor, *step.Executor, func(*jo
 	}
 	downloadExecutor := step.NewStepExecutor(model.DownloadNotification, nil)
 	executor := &JobExecutor{
-		tempPath: tempPath,
+		tempPath: tempPath, workerConfig: &config.Config{MaxActiveJobs: 1}, maxActiveJobs: 1,
+		encodePool: newEncodeConcurrency(1),
 		stepExecutors: map[model.NotificationType]*step.Executor{
 			model.DownloadNotification: downloadExecutor,
 		},

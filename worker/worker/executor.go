@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +33,7 @@ type JobExecutor struct {
 	admissionHeld   bool
 	finishing       bool
 	managedLimits   bool
+	recoveryError   string
 
 	workerConfig    *config.Config
 	tempPath        string
@@ -227,19 +229,41 @@ func (e *JobExecutor) resumeJobs() {
 			return nil
 		}
 		if filepath.Ext(path) == ".json" {
+			// Only job snapshots use UUID filenames; other JSON files in a
+			// workspace are not evidence of an unresolvable assignment.
+			fileJobID, err := uuid.Parse(strings.TrimSuffix(filepath.Base(path), ".json"))
+			if err != nil {
+				return nil
+			}
 			jobContext, err := job.ReadContextFromDiskByPath(path)
 			if err != nil {
-				log.WithError(err).Warn("Ignoring unreadable persisted job context")
+				e.recordRecoveryError(fmt.Errorf("unreadable persisted job context %s: %w", path, err), true)
+				return nil
+			}
+			if jobContext.JobId == uuid.Nil || jobContext.JobId != fileJobID {
+				e.recordRecoveryError(fmt.Errorf("persisted job context %s has a mismatched job identity", path), true)
 				return nil
 			}
 			if jobContext.LastEvent == nil {
-				log.WithField("context_path", path).Warn("Ignoring persisted job context without a last event")
+				e.recordRecoveryError(fmt.Errorf("persisted job context %s has no last event", path), true)
 				return nil
 			}
 
 			notificationType := jobContext.LastEvent.NotificationType
 			if jobContext.NextPhase != "" && notificationType != model.JobNotification {
 				notificationType = jobContext.NextPhase
+				if notificationType == model.FFMPEGSNotification {
+					workspace, workspaceErr := filepath.Abs(jobContext.WorkingDir)
+					contextDir, contextErr := filepath.Abs(filepath.Dir(path))
+					if workspaceErr != nil || contextErr != nil || workspace != contextDir {
+						e.recordRecoveryError(fmt.Errorf("prefetched job %s has an invalid workspace", jobContext.JobId), true)
+						return nil
+					}
+					if err := jobContext.ValidatePrefetchedSource(); err != nil {
+						e.recordRecoveryError(fmt.Errorf("prefetched job %s: %w", jobContext.JobId, err), true)
+						return nil
+					}
+				}
 			}
 			if notificationType == model.JobNotification {
 				switch jobContext.LastEvent.Status {
@@ -258,22 +282,14 @@ func (e *JobExecutor) resumeJobs() {
 					}
 					return nil
 				default:
-					log.WithFields(log.Fields{
-						"context_path": path,
-						"job_id":       jobContext.JobId.String(),
-						"status":       jobContext.LastEvent.Status,
-					}).Warn("Ignoring persisted job context with unsupported job status")
+					e.recordRecoveryError(fmt.Errorf("persisted job %s has unsupported status %s", jobContext.JobId, jobContext.LastEvent.Status), true)
 					return nil
 				}
 			}
 
 			stepExecutor, ok := e.stepExecutors[notificationType]
 			if !ok || stepExecutor == nil {
-				log.WithFields(log.Fields{
-					"context_path": path,
-					"job_id":       jobContext.JobId.String(),
-					"phase":        notificationType,
-				}).Warn("Ignoring persisted job context with unsupported phase")
+				e.recordRecoveryError(fmt.Errorf("persisted job %s has unsupported phase %s", jobContext.JobId, notificationType), true)
 				return nil
 			}
 
@@ -285,8 +301,20 @@ func (e *JobExecutor) resumeJobs() {
 	})
 
 	if err != nil {
-		panic(err)
+		e.recordRecoveryError(fmt.Errorf("scan worker workspace: %w", err), true)
 	}
+}
+
+func (e *JobExecutor) recordRecoveryError(err error, countJob bool) {
+	log.WithError(err).Error("Worker recovery is incomplete; admission remains closed")
+	e.admissionMu.Lock()
+	if e.recoveryError == "" {
+		e.recoveryError = err.Error()
+	}
+	if countJob {
+		atomic.AddUint32(&e.activeJobs, 1)
+	}
+	e.admissionMu.Unlock()
 }
 
 type AdmissionStatus = control.AdmissionStatus
@@ -333,7 +361,8 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 		mode = config.PauseFinish
 	}
 	return AdmissionStatus{
-		Accepting:        !e.admissionHeld && !e.finishing && !e.settingsPending && !e.ramPaused && e.maxActiveJobs > 0 && withinSchedule,
+		Accepting:        !e.admissionHeld && !e.finishing && !e.settingsPending && e.recoveryError == "" && !e.ramPaused && e.maxActiveJobs > 0 && withinSchedule,
+		RecoveryError:    e.recoveryError,
 		RAMPaused:        !e.admissionHeld && (e.ramPaused || (e.maxActiveJobs == 0 && e.pauseMode == config.PauseRAM)),
 		ActiveJobs:       e.ActiveJobs(),
 		ReservedJobs:     e.reservedJobs,
@@ -582,7 +611,7 @@ func (e *JobExecutor) ReserveJobSlot() bool {
 }
 
 func (e *JobExecutor) canReserveJobSlotAt(now time.Time) bool {
-	if e.admissionHeld || e.finishing || e.settingsPending || e.ramPaused || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
+	if e.admissionHeld || e.finishing || e.settingsPending || e.recoveryError != "" || e.ramPaused || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
 		return false
 	}
 	encodeTarget := e.maxActiveJobs

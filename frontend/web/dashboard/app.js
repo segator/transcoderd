@@ -932,7 +932,9 @@
         limit = rt?.[`${kind}Jobs`];
       return `<div class="encoder-lane ${kind}"><div class="load-labels"><span><b>${kind.toUpperCase()}</b> · ${esc(rt?.[`${kind}Encoder`] || rt?.encoder || "No telemetry")}</span><strong>${modern ? `${active} / ${limit}` : "—"}</strong></div><div class="progress-track"><span data-width="${modern && limit > 0 ? (active / limit) * 100 : 0}"></span></div><p class="lane-note">${!modern ? "Update the worker to enable capacity controls." : limit === 0 ? "New encodes stopped" : `${limit} encoding slots · ${active} occupied`}</p></div>`;
     };
-    const note = pending
+    const note = rt?.recoveryError
+      ? `Recovery needs attention: ${rt.recoveryError}`
+      : pending
       ? "Waiting for the worker to apply the new concurrency."
       : !modern
         ? "Update this worker to enable controls."

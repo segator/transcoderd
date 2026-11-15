@@ -40,6 +40,7 @@ type AdmissionStatus struct {
 	MaxEncodes       int            `json:"maxEncodes"`
 	WithinSchedule   bool           `json:"withinSchedule"`
 	Paused           bool           `json:"paused"`
+	RecoveryError    string         `json:"recoveryError,omitempty"`
 	Progress         []TaskProgress `json:"progress,omitempty"`
 	Jobs             []JobState     `json:"jobs,omitempty"`
 }
@@ -304,6 +305,9 @@ func runCLI(args []string, output io.Writer, socketPath string) error {
 	}
 	if req.Command == "status" {
 		_, err = fmt.Fprintf(output, "accepting=%t active=%d reserved=%d max_jobs=%d admitted_limit=%d encodes=%d/%d within_schedule=%t paused=%t ram_paused=%t pause_mode=%s suspended_encodes=%d\n", result.Status.Accepting, result.Status.ActiveJobs, result.Status.ReservedJobs, result.Status.MaxActiveJobs, result.Status.MaxAcceptedJobs, result.Status.ActiveEncodes, result.Status.MaxEncodes, result.Status.WithinSchedule, result.Status.Paused, result.Status.RAMPaused, result.Status.PauseMode, result.Status.SuspendedEncodes)
+		if err == nil && result.Status.RecoveryError != "" {
+			_, err = fmt.Fprintf(output, "recovery_error=%q\n", result.Status.RecoveryError)
+		}
 		return err
 	}
 	if req.Command == "pause-encodes" || req.Command == "resume-encodes" {

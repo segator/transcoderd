@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -247,6 +248,10 @@ func (s *Server) upload(writer http.ResponseWriter, request *http.Request) {
 	case webError(writer, err, 500):
 		return
 	}
+	receiveUpload(writer, request, uploadStream, func(_ string, _ int64) error { return uploadStream.Commit() })
+}
+
+func receiveUpload(writer http.ResponseWriter, request *http.Request, uploadStream *scheduler.UploadJobStream, commit func(string, int64) error) {
 	closed := false
 	defer func() {
 		if !closed {
@@ -271,7 +276,7 @@ func (s *Server) upload(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	size, err := strconv.ParseUint(request.Header.Get("Content-Length"), 10, 64)
-	if err != nil {
+	if err != nil || size > math.MaxInt64 {
 		webError(writer, fmt.Errorf("invalid size %v", err), 400)
 		return
 	}
@@ -320,8 +325,12 @@ loop:
 		webError(writer, fmt.Errorf("could not persist uploaded output: %w", err), 500)
 		return
 	}
-	if err = uploadStream.Commit(); err != nil {
-		webError(writer, fmt.Errorf("could not publish uploaded output: %w", err), 500)
+	if err = commit(checksumUpload, int64(size)); err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, repository.ErrStaleAssignment) || errors.Is(err, repository.ErrEventConflict) {
+			code = http.StatusConflict
+		}
+		webError(writer, fmt.Errorf("could not publish uploaded output: %w", err), code)
 		return
 	}
 	writer.WriteHeader(201)
@@ -399,12 +408,15 @@ func (s *Server) checksum(writer http.ResponseWriter, request *http.Request) {
 }
 
 type Config struct {
-	Port              int               `mapstructure:"port" envconfig:"WEB_PORT"`
-	Token             string            `mapstructure:"token" envconfig:"WEB_TOKEN"`
-	Domain            string            `mapstructure:"domain" envconfig:"WEB_DOMAIN"`
-	DashboardToken    string            `mapstructure:"dashboardToken"`
-	MediaRoots        map[string]string `mapstructure:"mediaRoots"`
-	PreviewMaxStreams int               `mapstructure:"previewMaxStreams"`
+	Port                  int               `mapstructure:"port" envconfig:"WEB_PORT"`
+	Token                 string            `mapstructure:"token" envconfig:"WEB_TOKEN"`
+	Domain                string            `mapstructure:"domain" envconfig:"WEB_DOMAIN"`
+	DashboardToken        string            `mapstructure:"dashboardToken"`
+	MediaRoots            map[string]string `mapstructure:"mediaRoots"`
+	PreviewMaxStreams     int               `mapstructure:"previewMaxStreams"`
+	ProtectedWorkerHashes map[string]string `mapstructure:"protectedWorkerHashes"`
+	AssignmentSigningKeys map[string]string `mapstructure:"assignmentSigningKeys"`
+	ActiveAssignmentKey   string            `mapstructure:"activeAssignmentKey"`
 }
 
 type ActiveTracker struct {

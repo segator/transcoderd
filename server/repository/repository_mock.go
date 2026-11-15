@@ -14,6 +14,7 @@ import (
 // InMemoryRepository implementa Repository en memoria para tests
 type InMemoryRepository struct {
 	mu                  sync.RWMutex
+	assignmentMu        sync.Mutex
 	jobs                map[string]*model.Job
 	events              map[string][]*model.TaskEventType
 	progress            map[string]*model.TaskProgressType
@@ -25,6 +26,9 @@ type InMemoryRepository struct {
 	oidcSessions        map[[32]byte]oidcDashboardSession
 	mediaProbes         map[string]cachedMediaProbe
 	jobsByPath          map[string]*model.Job
+	protectedJobs       map[string]protectedJobState
+	protectedRequests   map[protectedRequestKey]protectedRequestResult
+	protectedUploads    map[protectedUploadKey]protectedUpload
 }
 
 func NewInMemoryRepository() *InMemoryRepository {
@@ -40,6 +44,9 @@ func NewInMemoryRepository() *InMemoryRepository {
 		oidcSessions:        make(map[[32]byte]oidcDashboardSession),
 		mediaProbes:         make(map[string]cachedMediaProbe),
 		jobsByPath:          make(map[string]*model.Job),
+		protectedJobs:       make(map[string]protectedJobState),
+		protectedRequests:   make(map[protectedRequestKey]protectedRequestResult),
+		protectedUploads:    make(map[protectedUploadKey]protectedUpload),
 	}
 }
 
@@ -134,6 +141,9 @@ func (r *InMemoryRepository) RetrieveQueuedJob(ctx context.Context) (*model.Job,
 	defer r.mu.RUnlock()
 
 	for _, job := range r.jobs {
+		if _, protected := r.protectedJobs[job.Id.String()]; protected {
+			continue
+		}
 		events := r.events[job.Id.String()]
 		if len(events) == 0 {
 			continue
@@ -243,8 +253,8 @@ func (r *InMemoryRepository) GetTimeoutJobs(ctx context.Context, timeout time.Du
 			continue
 		}
 
-		lastEvent := events[len(events)-1]
-		if lastEvent.EventTime.Before(cutoff) &&
+		lastEvent := model.TaskEvents(events).GetLatestPerNotificationType(model.JobNotification)
+		if lastEvent != nil && lastEvent.EventTime.Before(cutoff) &&
 			(lastEvent.Status == model.AssignedNotificationStatus ||
 				lastEvent.Status == model.StartedNotificationStatus) {
 			result = append(result, lastEvent)
@@ -268,7 +278,8 @@ func (r *InMemoryRepository) PingServerUpdate(ctx context.Context, remoteAddr st
 }
 
 func (r *InMemoryRepository) WithTransaction(ctx context.Context, fn func(context.Context, Repository) error) error {
-	// Para el test en memoria, simplemente ejecutamos la función
+	r.assignmentMu.Lock()
+	defer r.assignmentMu.Unlock()
 	return fn(ctx, r)
 }
 

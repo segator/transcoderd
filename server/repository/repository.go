@@ -12,10 +12,14 @@ import (
 	"path/filepath"
 	"time"
 	"transcoder/model"
+	"transcoder/server/assignment"
 )
 
 var (
 	ErrElementNotFound = fmt.Errorf("element not found")
+	ErrStaleAssignment = errors.New("assignment is no longer current")
+	ErrJobPublishing   = errors.New("job output publication is in progress")
+	ErrEventConflict   = errors.New("protected event conflicts with history")
 )
 
 type Repository interface {
@@ -26,6 +30,9 @@ type Repository interface {
 	GetJobs(ctx context.Context) (*[]model.Job, error)
 	GetJobsByStatus(ctx context.Context, notificationType model.NotificationType, status model.NotificationStatus) (jobs []*model.Job, returnError error)
 	GetJob(ctx context.Context, uuid string) (*model.Job, error)
+	GetJobForMutation(context.Context, string) (*model.Job, string, error)
+	IsProtectedJob(context.Context, string) (bool, error)
+	WithLegacyJob(context.Context, string, func(Repository, *model.Job) error) error
 	GetJobByPath(ctx context.Context, path string) (*model.Job, error)
 	AddJob(ctx context.Context, video *model.Job) error
 	UpdateJob(ctx context.Context, video *model.Job) error
@@ -43,6 +50,17 @@ type Repository interface {
 	AckWorkerControl(context.Context, string, model.WorkerControlAck) error
 	SetWorkerSettings(ctx context.Context, name string, settings model.WorkerSettings) error
 	RetrieveQueuedJob(ctx context.Context) (*model.Job, error)
+	RequestProtectedJob(context.Context, string, string, *assignment.Keyring) (*model.ProtectedAssignment, error)
+	ParkProtectedJob(context.Context, string, model.AssignmentClaim) error
+	GetProtectedJob(context.Context, string, model.AssignmentClaim) (*model.Job, error)
+	ApplyProtectedEvent(context.Context, string, model.AssignmentClaim, model.TaskEventType) error
+	StageProtectedUpload(context.Context, string, model.AssignmentClaim, string, string, int64, func() error) error
+	BeginProtectedPublication(context.Context, string, model.AssignmentClaim, model.TaskEventType, bool) (*model.ProtectedPublication, error)
+	FinishProtectedPublication(context.Context, model.ProtectedPublication, string, int64, *model.MediaProbe) error
+	ListPendingProtectedPublications(context.Context) ([]model.ProtectedPublication, error)
+	ClearProtectedSourceDeletion(context.Context, string, uint64) error
+	CancelJobAssignment(context.Context, string) error
+	RequeueTimedOutJob(context.Context, string, int, time.Time) (bool, error)
 	ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error)
 	GetAllProgressJobs(ctx context.Context) ([]model.TaskProgressType, error)
 	GetDashboard(ctx context.Context, hours int, now time.Time, ranges ...model.DashboardRange) (*model.Dashboard, error)
@@ -760,7 +778,10 @@ func (s *SQLRepository) WithTransaction(ctx context.Context, transactionFunc fun
 }
 
 func (s *SQLRepository) queuedJob(ctx context.Context, tx SQLDBOperations) (*model.Job, error) {
-	rows, err := tx.QueryContext(ctx, "select job_id, job_event_id from job_status where notification_type='Job' and status='queued' order by event_time asc limit 1")
+	rows, err := tx.QueryContext(ctx, `SELECT s.job_id, s.job_event_id FROM job_status s
+JOIN jobs j ON j.id=s.job_id LEFT JOIN protected_assignments p ON p.job_id=j.id
+WHERE s.notification_type='Job' AND s.status='queued' AND p.job_id IS NULL
+ORDER BY s.event_time ASC, s.job_id ASC FOR UPDATE OF j SKIP LOCKED LIMIT 1`)
 	if err != nil {
 		return nil, err
 	}
@@ -769,6 +790,9 @@ func (s *SQLRepository) queuedJob(ctx context.Context, tx SQLDBOperations) (*mod
 		event := model.TaskEventType{}
 		err := rows.Scan(&event.JobId, &event.EventID)
 		if err != nil {
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
 			return nil, err
 		}
 		return s.getJob(ctx, tx, event.JobId.String())

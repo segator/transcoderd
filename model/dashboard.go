@@ -19,6 +19,7 @@ type WorkerJobRuntime struct {
 
 type WorkerRuntime struct {
 	Version          string             `json:"version,omitempty"`
+	RecoveryError    string             `json:"recoveryError,omitempty"`
 	ControlVersion   int                `json:"controlVersion,omitempty"`
 	Resources        *WorkerResources   `json:"resources,omitempty"`
 	Paused           bool               `json:"paused"`

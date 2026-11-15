@@ -1,10 +1,15 @@
 package job
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -13,6 +18,8 @@ import (
 	"transcoder/worker/config"
 	"transcoder/worker/ffmpeg"
 )
+
+var ErrInvalidPrefetchedSource = errors.New("invalid prefetched source")
 
 type Context struct {
 	JobId            uuid.UUID              `json:"job_id"`
@@ -103,8 +110,54 @@ func (e *Context) PersistJobContext() error {
 	if err = eventFile.Close(); err != nil {
 		return fmt.Errorf("close job context: %w", err)
 	}
-	if err = os.Rename(tempPath, filepath.Join(e.WorkingDir, fmt.Sprintf("%s.json", e.JobId))); err != nil {
+	if err = replaceContextFile(tempPath, filepath.Join(e.WorkingDir, fmt.Sprintf("%s.json", e.JobId))); err != nil {
 		return fmt.Errorf("replace job context: %w", err)
+	}
+	return nil
+}
+
+// ValidatePrefetchedSource verifies the downloaded data before it is treated as
+// recoverable. The path must stay inside the saved job workspace.
+func (e *Context) ValidatePrefetchedSource() error {
+	if e.WorkingDir == "" || e.Source == nil || e.Source.FilePath == "" || e.Source.Size <= 0 || e.Source.Checksum == "" || e.Source.FFProbeData == nil {
+		return fmt.Errorf("%w: incomplete source metadata", ErrInvalidPrefetchedSource)
+	}
+	rootPath, err := filepath.Abs(e.WorkingDir)
+	if err != nil {
+		return fmt.Errorf("%w: resolve workspace: %v", ErrInvalidPrefetchedSource, err)
+	}
+	sourcePath, err := filepath.Abs(e.Source.FilePath)
+	if err != nil {
+		return fmt.Errorf("%w: resolve source: %v", ErrInvalidPrefetchedSource, err)
+	}
+	relative, err := filepath.Rel(rootPath, sourcePath)
+	if err != nil || !filepath.IsLocal(relative) {
+		return fmt.Errorf("%w: source outside workspace", ErrInvalidPrefetchedSource)
+	}
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return fmt.Errorf("%w: open workspace: %v", ErrInvalidPrefetchedSource, err)
+	}
+	defer root.Close()
+	file, err := root.Open(relative)
+	if err != nil {
+		return fmt.Errorf("%w: open source: %v", ErrInvalidPrefetchedSource, err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() != e.Source.Size {
+		return fmt.Errorf("%w: source is not a regular file of the expected size", ErrInvalidPrefetchedSource)
+	}
+	hash := sha256.New()
+	n, err := io.Copy(hash, file)
+	if err != nil {
+		return fmt.Errorf("%w: read source: %v", ErrInvalidPrefetchedSource, err)
+	}
+	if n != e.Source.Size {
+		return fmt.Errorf("%w: source changed while reading", ErrInvalidPrefetchedSource)
+	}
+	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), e.Source.Checksum) {
+		return fmt.Errorf("%w: checksum mismatch", ErrInvalidPrefetchedSource)
 	}
 	return nil
 }

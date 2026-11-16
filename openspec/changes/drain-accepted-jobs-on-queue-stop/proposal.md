@@ -26,6 +26,7 @@ None.
 - `self-update`: an update of a stopped worker preserves parked work rather than starting its encodes.
 - `events-and-progress`: accept worker events only for the current assignment and make event retries safe.
 - `media-transfer`: fence transfer staging and final publication by assignment, including cancellation races.
+- `configuration-and-runtime`: configure protected worker credentials, signing keys and persistent workspace identity.
 
 ## Impact
 

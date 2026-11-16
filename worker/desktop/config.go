@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	workerconfig "transcoder/worker/config"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -28,6 +30,10 @@ type Settings struct {
 	CPUJobs          int    `json:"cpuJobs"`
 	GPUCodec         string `json:"gpuCodec,omitempty"`
 	GPUJobs          int    `json:"gpuJobs"`
+	CPUCredential    string `json:"cpuCredential,omitempty"`
+	CPUWorkspaceID   string `json:"cpuWorkspaceId,omitempty"`
+	GPUCredential    string `json:"gpuCredential,omitempty"`
+	GPUWorkspaceID   string `json:"gpuWorkspaceId,omitempty"`
 	// Codec and MaxJobs keep older service.json files and local control clients readable.
 	Codec    string   `json:"codec,omitempty"`
 	MaxJobs  int      `json:"maxJobs,omitempty"`
@@ -44,12 +50,16 @@ type PublicSettings struct {
 	CPUJobs          int      `json:"cpuJobs"`
 	GPUCodec         string   `json:"gpuCodec"`
 	GPUJobs          int      `json:"gpuJobs"`
+	CPUCredentialSet bool     `json:"cpuCredentialSet"`
+	CPUWorkspaceID   string   `json:"cpuWorkspaceId,omitempty"`
+	GPUCredentialSet bool     `json:"gpuCredentialSet"`
+	GPUWorkspaceID   string   `json:"gpuWorkspaceId,omitempty"`
 	Schedule         []string `json:"schedule"`
 }
 
 func (s Settings) Public() PublicSettings {
 	s = s.Normalized()
-	return PublicSettings{PauseMode: s.PauseMode, Domain: s.Domain, TokenSet: s.Token != "", Name: s.Name, WorkingDirectory: s.WorkingDirectory, CPUCodec: s.CPUCodec, CPUJobs: s.CPUJobs, GPUCodec: s.GPUCodec, GPUJobs: s.GPUJobs, Schedule: s.Schedule}
+	return PublicSettings{PauseMode: s.PauseMode, Domain: s.Domain, TokenSet: s.Token != "", Name: s.Name, WorkingDirectory: s.WorkingDirectory, CPUCodec: s.CPUCodec, CPUJobs: s.CPUJobs, GPUCodec: s.GPUCodec, GPUJobs: s.GPUJobs, CPUCredentialSet: s.CPUCredential != "", CPUWorkspaceID: s.CPUWorkspaceID, GPUCredentialSet: s.GPUCredential != "", GPUWorkspaceID: s.GPUWorkspaceID, Schedule: s.Schedule}
 }
 
 func (s Settings) Normalized() Settings {
@@ -105,6 +115,25 @@ func (s Settings) Validate() error {
 	}
 	if s.CPUJobs < 0 || s.GPUJobs < 0 || s.CPUJobs > 64 || s.GPUJobs > 64 || s.CPUJobs+s.GPUJobs > 64 {
 		return errors.New("CPU and GPU concurrent encodes must each be between 0 and 64 and total no more than 64")
+	}
+	for _, profile := range []struct{ name, credential, workspace string }{{"CPU", s.CPUCredential, s.CPUWorkspaceID}, {"GPU", s.GPUCredential, s.GPUWorkspaceID}} {
+		if profile.credential == "" && profile.workspace == "" {
+			continue
+		}
+		id, err := uuid.Parse(profile.workspace)
+		if strings.TrimSpace(profile.credential) != profile.credential || profile.credential == "" || len(profile.credential) > 4096 || strings.ContainsAny(profile.credential, "\x00\r\n") || err != nil || id == uuid.Nil {
+			return fmt.Errorf("%s protected profile requires a valid credential and workspace ID", profile.name)
+		}
+	}
+	if s.CPUCredential != "" && s.CPUCredential == s.GPUCredential {
+		return errors.New("CPU and GPU protected profiles require different credentials")
+	}
+	if s.CPUWorkspaceID != "" && s.GPUWorkspaceID != "" {
+		cpuID, _ := uuid.Parse(s.CPUWorkspaceID)
+		gpuID, _ := uuid.Parse(s.GPUWorkspaceID)
+		if cpuID == gpuID {
+			return errors.New("CPU and GPU protected profiles require different workspace identities")
+		}
 	}
 	if len(s.Schedule) > 32 {
 		return errors.New("too many schedule windows")
@@ -213,7 +242,15 @@ func WorkerConfigForProfile(dir string, s Settings, profile Profile, paused bool
 	if workingDirectory == "" {
 		workingDirectory = filepath.Join(dir, "work")
 	}
-	value := map[string]any{"web": map[string]any{"domain": s.Domain, "token": s.Token}, "worker": map[string]any{"pauseMode": workerconfig.PauseFinish, "ramPaused": ram, "name": profile.Name, "maxActiveJobs": maxJobs, "temporalPath": workingDirectory, "ffmpegConfig": map[string]any{"videoCodec": profile.Codec, "parallelJobs": max(1, profile.Jobs)}, "schedule": map[string]any{"timeZone": "Local", "windows": s.Schedule}}}
+	worker := map[string]any{"pauseMode": workerconfig.PauseFinish, "ramPaused": ram, "name": profile.Name, "maxActiveJobs": maxJobs, "temporalPath": workingDirectory, "ffmpegConfig": map[string]any{"videoCodec": profile.Codec, "parallelJobs": max(1, profile.Jobs)}, "schedule": map[string]any{"timeZone": "Local", "windows": s.Schedule}}
+	credential, identity := s.CPUCredential, s.CPUWorkspaceID
+	if profile.Key == "gpu" {
+		credential, identity = s.GPUCredential, s.GPUWorkspaceID
+	}
+	if credential != "" || identity != "" {
+		worker["protected"] = map[string]any{"credential": credential, "workspaceId": identity}
+	}
+	value := map[string]any{"web": map[string]any{"domain": s.Domain, "token": s.Token}, "worker": worker}
 	return writeWorkerConfig(filepath.Join(dir, "config-"+profile.Key+".yaml"), value)
 }
 

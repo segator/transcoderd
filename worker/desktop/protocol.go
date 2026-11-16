@@ -18,18 +18,19 @@ type Request struct {
 }
 
 type Status struct {
-	ShutdownPending bool                               `json:"shutdownPending"`
-	Configured      bool                               `json:"configured"`
-	Running         bool                               `json:"running"`
-	Version         string                             `json:"version"`
-	Pending         bool                               `json:"pending"`
-	Settings        *PublicSettings                    `json:"settings,omitempty"`
-	Worker          *control.AdmissionStatus           `json:"worker,omitempty"`
-	Profiles        map[string]control.AdmissionStatus `json:"profiles,omitempty"`
-	Queue           *model.QueueSnapshot               `json:"queue,omitempty"`
-	QueueError      string                             `json:"queueError,omitempty"`
-	Message         string                             `json:"message,omitempty"`
-	Update          *managed.Status                    `json:"update,omitempty"`
+	ShutdownPending        bool                               `json:"shutdownPending"`
+	Configured             bool                               `json:"configured"`
+	Running                bool                               `json:"running"`
+	Version                string                             `json:"version"`
+	Pending                bool                               `json:"pending"`
+	CanCancelConfiguration bool                               `json:"canCancelConfiguration,omitempty"`
+	Settings               *PublicSettings                    `json:"settings,omitempty"`
+	Worker                 *control.AdmissionStatus           `json:"worker,omitempty"`
+	Profiles               map[string]control.AdmissionStatus `json:"profiles,omitempty"`
+	Queue                  *model.QueueSnapshot               `json:"queue,omitempty"`
+	QueueError             string                             `json:"queueError,omitempty"`
+	Message                string                             `json:"message,omitempty"`
+	Update                 *managed.Status                    `json:"update,omitempty"`
 }
 
 type Response struct {

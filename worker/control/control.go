@@ -175,6 +175,12 @@ func (s *Server) handle(conn net.Conn) {
 		} else {
 			result.Error = "mandatory admission hold is unavailable"
 		}
+	case "release-admission":
+		if h, ok := s.state.(interface{ ReleaseAdmission() }); ok {
+			h.ReleaseAdmission()
+		} else {
+			result.Error = "admission hold release is unavailable"
+		}
 	case "pause-job", "resume-job":
 		if p, ok := s.state.(interface{ SetJobPaused(string, bool) error }); ok {
 			if err := p.SetJobPaused(req.JobID, req.Command == "pause-job"); err != nil {

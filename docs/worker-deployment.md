@@ -14,6 +14,34 @@ the complete job has been validated on an RTX 5080. CPU-only hosts explicitly
 select `libsvtav1`. See [the encoder reference](encoding-profiles.md) for settings
 and [the local validation](av1-worker-profile-validation.md) for measured results.
 
+## Protected prefetched work
+
+Protected mode keeps a completed prefetch assigned to its worker while a stopped
+queue is idle. Enable `web.protectedEnabled` on the server with a unique
+`web.protectedWorkerHashes` entry per worker, a shared `web.assignmentSigningKeys`
+keyring and `web.activeAssignmentKey`. Each credential hash is the SHA-256 hex
+digest of that worker's secret; signing keys are base64-encoded random bytes at
+least 32 bytes long. All server replicas need the same keyring, and previous keys
+must remain available until their assignments are terminal. Protect the server
+configuration and use TLS on untrusted networks. The shared `web.token` remains
+required in addition to the per-worker credential.
+
+Configure `worker.protected.credential` and `worker.protected.workspaceId` for
+the worker. Before starting it, create a `.workspace-id` file containing that
+UUID inside `<worker.temporalPath>/worker-<worker.name>` on storage that survives
+the intended restart. The marker is deliberately never created automatically:
+an empty replacement volume must not be mistaken for the original workspace.
+Both settings can also be supplied through `TR_WORKER_PROTECTED_CREDENTIAL` and
+`TR_WORKER_PROTECTED_WORKSPACE_ID`. A host-local volume only supports recovery on
+the same host; a pod scheduled elsewhere needs the same persistent storage.
+
+The local `control wait-safe-idle <duration>` closes a restart barrier and waits
+for active work and transfers to finish and prefetched work to be durably parked.
+It leaves the barrier held on success or timeout; use
+`control release-restart-barrier` if no restart follows. A missing capability,
+marker, unresolved request or recovery error cannot establish safe idle. Inspect
+`control status` and resolve ownership before restarting in those cases.
+
 ## NVIDIA GeForce RTX 50-series on Linux
 
 1. Install a distribution-supported NVIDIA driver that recognizes the GPU.

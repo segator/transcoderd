@@ -24,7 +24,7 @@ const context = {
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(`${assetRoot}/activity.js`, 'utf8'), context);
 vm.runInContext(fs.readFileSync(`${assetRoot}/app.js`, 'utf8'), context);
-const originalQueueClick=element('toggle-pause').handlers.click,originalRAMClick=element('toggle-encodes').handlers.click;
+const originalQueueClick=element('toggle-pause').handlers.click,originalRAMClick=element('toggle-encodes').handlers.click,originalCancelClick=element('cancel-pending-configuration').handlers.click;
 
 context.render({version:'2.8.2-test',configured:true,worker:{maxActiveJobs:0,maxEncodes:1,activeEncodes:1,jobs:[
   {jobId:'1',name:'<img src=x onerror=alert(1)>',phase:'FFMPEG',state:'running',downloaded:true,profile:'gpu',codec:'av1_nvenc'},
@@ -130,6 +130,13 @@ assert.ok(saved.has('transcoderd.pending-update'),'update lock must survive a pa
   assert.equal(element('settings-controls').disabled,false,'verified service status releases the lock');
   assert.equal(saved.has('transcoderd.pending-update'),false);
   const state={configured:true,pending:false,worker:{maxActiveJobs:2,maxEncodes:2,activeEncodes:2,pauseMode:'ram',paused:false,jobs:[{jobId:'individual',name:'one.mkv',phase:'FFMPEG',state:'running',canPause:true},{jobId:'other',phase:'FFMPEG',state:'running',canPause:true}],progress:[]}};
+  state.pending=true;state.canCancelConfiguration=true;
+  context.render(state);
+  let canceled='';const savedRequest=context.request;
+  context.request=async command=>{canceled=command;state.pending=false;state.canCancelConfiguration=false;return state;};
+  await originalCancelClick();
+  assert.equal(canceled,'cancel-pending-configuration','pending configuration can be canceled without resuming work');
+  context.request=savedRequest;
   context.render(state);
   let complete;
   const sent=[],originalRequest=context.request;

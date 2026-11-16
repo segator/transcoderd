@@ -107,6 +107,72 @@ func TestMixedProfileSettingsGenerateIndependentWorkerConfigs(t *testing.T) {
 	}
 }
 
+func TestProtectedProfileConfigurationAndRedaction(t *testing.T) {
+	settings := Settings{Domain: "https://server.test", Token: "fleet-secret", Name: "node", CPUJobs: 1, GPUJobs: 1,
+		CPUCredential: "cpu-secret", CPUWorkspaceID: "7c395c98-0407-4d0b-b636-71de9c05c975",
+		GPUCredential: "gpu-secret", GPUWorkspaceID: "91d3b22a-95e9-41fa-ac26-e9e84c051214"}
+	if err := settings.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	public, err := json.Marshal(settings.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{settings.Token, settings.CPUCredential, settings.GPUCredential} {
+		if strings.Contains(string(public), secret) {
+			t.Fatalf("public settings disclose a credential: %s", public)
+		}
+	}
+	dir := t.TempDir()
+	for _, profile := range settings.Profiles() {
+		if err := WorkerConfigForProfile(dir, settings, profile, false); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "config-"+profile.Key+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var actual struct {
+			Worker struct {
+				Protected *workerconfig.ProtectedConfig `json:"protected"`
+			} `json:"worker"`
+		}
+		if err := json.Unmarshal(data, &actual); err != nil {
+			t.Fatal(err)
+		}
+		credential, identity := settings.CPUCredential, settings.CPUWorkspaceID
+		if profile.Key == "gpu" {
+			credential, identity = settings.GPUCredential, settings.GPUWorkspaceID
+		}
+		if actual.Worker.Protected == nil || actual.Worker.Protected.Credential != credential || actual.Worker.Protected.WorkspaceID != identity {
+			t.Fatalf("%s profile has incorrect protected configuration", profile.Key)
+		}
+		parser := viper.New()
+		parser.SetConfigType("json")
+		if err := parser.ReadConfig(strings.NewReader(string(data))); err != nil {
+			t.Fatal(err)
+		}
+		var decoded struct {
+			Worker *workerconfig.Config `mapstructure:"worker"`
+		}
+		if err := parser.Unmarshal(&decoded); err != nil || decoded.Worker == nil || decoded.Worker.Protected == nil || decoded.Worker.Protected.Credential != credential || decoded.Worker.Protected.WorkspaceID != identity {
+			t.Fatalf("%s profile is not decoded by the worker: %v", profile.Key, err)
+		}
+	}
+	for _, mutate := range []func(*Settings){
+		func(s *Settings) { s.CPUWorkspaceID = "" },
+		func(s *Settings) { s.GPUCredential = "" },
+		func(s *Settings) { s.GPUCredential = s.CPUCredential },
+		func(s *Settings) { s.GPUWorkspaceID = strings.ToUpper(s.CPUWorkspaceID) },
+	} {
+		invalid := settings
+		mutate(&invalid)
+		if err := invalid.Validate(); err == nil {
+			t.Fatal("invalid or shared protected profile configuration was accepted")
+		}
+	}
+}
+
 func TestLegacyProfileSettingsMigrateToMatchingEncoder(t *testing.T) {
 	for _, tt := range []struct {
 		codec   string

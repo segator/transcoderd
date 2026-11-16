@@ -270,6 +270,12 @@ func (f *fakeController) HoldAdmission() error {
 	return nil
 }
 
+func (f *fakeController) ReleaseAdmission() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status.Accepting = true
+}
+
 func TestMandatoryHoldPreservesLimitsAndAcceptedWork(t *testing.T) {
 	state := &fakeController{status: AdmissionStatus{Accepting: true, MaxActiveJobs: 4, MaxEncodes: 4, ActiveJobs: 3, ReservedJobs: 1}}
 	path := filepath.Join(t.TempDir(), "worker.sock")
@@ -284,6 +290,10 @@ func TestMandatoryHoldPreservesLimitsAndAcceptedWork(t *testing.T) {
 	}
 	if got.Status.Accepting || got.Status.MaxActiveJobs != 4 || got.Status.ActiveJobs != 3 || got.Status.ReservedJobs != 1 || state.persisted != 0 {
 		t.Fatalf("mandatory hold changed accepted work/limits: %+v", got.Status)
+	}
+	got, err = Call(path, Request{Command: "release-admission"})
+	if err != nil || !got.Status.Accepting || got.Status.MaxActiveJobs != 4 {
+		t.Fatalf("admission hold release = %+v, %v", got.Status, err)
 	}
 }
 

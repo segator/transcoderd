@@ -56,3 +56,20 @@ Manual Setup SHALL use its bundled helper to close CPU and GPU admission and wai
 #### Scenario: Wait timeout or cancellation
 - **WHEN** the helper wait is canceled or exceeds 24 hours
 - **THEN** Setup does not stop active work or replace files; any existing admission hold permits accepted work to finish and persisted settings remain unchanged
+
+## ADDED Requirements
+
+### Requirement: Protected Windows profile configuration
+The desktop service SHALL support independently provisioned protected credentials and persistent workspace identities for its CPU and GPU profiles. Credentials SHALL remain private to the service and SHALL NOT appear in public status. The configured workspace marker SHALL be verified by each worker before protected admission or safe idle is enabled; an absent or different marker SHALL NOT be silently replaced.
+
+#### Scenario: Both profiles are provisioned
+- **WHEN** the operator provides a distinct server credential and matching persistent workspace identity for each profile
+- **THEN** each child worker uses the corresponding credential and workspace identity, and public service status does not reveal either credential
+
+#### Scenario: Provisioning is incomplete or storage changes
+- **WHEN** a profile has an incomplete credential/identity pair or its expected workspace marker is absent or different
+- **THEN** the service rejects the configuration or the profile refuses protected admission and cannot report safe idle
+
+#### Scenario: Cancel a blocked configuration change
+- **WHEN** stopped or suspended work prevents a configuration change from applying and the operator cancels the pending change
+- **THEN** the service retains the existing configuration and releases its temporary admission hold without altering queue or encoding pauses

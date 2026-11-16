@@ -752,6 +752,17 @@ func (e *JobExecutor) HoldAdmission() error {
 	return nil
 }
 
+// ReleaseAdmission releases only the temporary admission hold. Persisted queue,
+// RAM, per-job and restart-barrier holds remain in force.
+func (e *JobExecutor) ReleaseAdmission() {
+	e.admissionMu.Lock()
+	defer e.admissionMu.Unlock()
+	e.admissionHeld = false
+	if e.encodePool != nil {
+		e.encodePool.SetPaused((e.ramPaused || e.maxActiveJobs == 0 || e.settingsPending) && !e.drainEncodes && !e.finishing)
+	}
+}
+
 func (e *JobExecutor) MarkWorkerSettingsResolved() {
 	e.admissionMu.Lock()
 	defer e.admissionMu.Unlock()

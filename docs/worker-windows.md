@@ -37,6 +37,17 @@ One worker per Windows user owns the default control endpoint. Stop the worker
 with Ctrl+C. Its supervised encoder and OCR process trees are terminated during
 shutdown. Schedule syntax and server API settings are shared with Linux.
 
+For protected restart, the desktop service uses separate CPU and GPU worker
+names and credentials. Provision each profile on the server and set its
+credential and workspace UUID in the profile's protected restart settings.
+Create each matching `.workspace-id` marker in that profile's
+`worker-<profile-name>` directory under the configured working directory before
+starting it; the service does not replace a missing marker. The profiles need
+distinct credentials and workspace IDs, including a disabled profile if both
+are expected to confirm safe idle for a supervised restart. See
+[protected prefetched work](worker-deployment.md#protected-prefetched-work) for
+server keys, persistent storage and the restart barrier.
+
 Binary self-updates select `transcoderd-worker-windows-amd64.exe`. They preserve
 the installed media tools. To upgrade the toolchain, stop the worker and replace
 the complete bundle. `--noUpdates` keeps the extracted bundle version fixed.

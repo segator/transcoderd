@@ -6,7 +6,7 @@ This reference records the configuration accepted by the current binaries. The O
 
 Both binaries register CLI flags, read YAML through Viper, and enable environment lookup with the `TR_` prefix. Configuration files are searched in `/etc/transcoderd/`, `$HOME/.transcoderd/`, and the current directory. CLI flags override values read from the file. The application does not install a Viper environment-key replacer; nested environment variable spellings such as `TR_WORKER_FFMPEGCONFIG_VIDEOCRF` have not been established as a supported interface. Use YAML or CLI flags for nested values unless the mapping is verified.
 
-The `envconfig` struct tags are not consumed by the Viper setup. They document field intent, but are not evidence that the corresponding environment variable works. Dashboard settings explicitly bind `TR_WORKER_DASHBOARD_LISTEN_ADDRESS`, `TR_WORKER_DASHBOARD_TOKEN` and the server login credential `TR_WEB_DASHBOARD_TOKEN`.
+The `envconfig` struct tags are not consumed by the Viper setup. They document field intent, but are not evidence that the corresponding environment variable works. Dashboard settings explicitly bind `TR_WORKER_DASHBOARD_LISTEN_ADDRESS`, `TR_WORKER_DASHBOARD_TOKEN` and the server login credential `TR_WEB_DASHBOARD_TOKEN`. Protected workers explicitly bind `TR_WORKER_PROTECTED_CREDENTIAL` and `TR_WORKER_PROTECTED_WORKSPACE_ID`.
 
 Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDeltaTime` is a number of seconds, not a duration string. `server.database.scheme` is passed as the PostgreSQL database name (`dbname`).
 
@@ -18,6 +18,10 @@ Durations such as `5m` and `24h` are parsed as Go durations. `worker.verifyDelta
 | `web.token` | `admin` | Bearer token for job and event control routes. |
 | `web.dashboardToken` | `encoding123` | API-owned dashboard login credential; token-mode user token or private OIDC frontend login credential. Explicit env TR_WEB_DASHBOARD_TOKEN. Separate from worker API credentials. |
 | `web.domain` | `http://localhost:8080` | Base URL used by workers for requests and media transfer. |
+| `web.protectedEnabled` | `false` | Enable the protected worker protocol after provisioning worker credential hashes and assignment signing keys. |
+| `web.protectedWorkerHashes` | Empty | YAML map from worker name to the SHA-256 hex digest of its unique credential. |
+| `web.assignmentSigningKeys` | Empty | YAML map from key ID to a base64-encoded signing key of at least 32 bytes. All server replicas need the same keys. |
+| `web.activeAssignmentKey` | Empty | Key ID for new protected assignments. Keep previous keys until their assignments are terminal. |
 | `updateCheckInterval` | `15m` | Minimum interval between release queries. |
 | `noUpdates` | `false` | Disable executable replacement. |
 | `verbose` | `false` | Enable debug logging. |
@@ -65,6 +69,8 @@ server:
 | `worker.ramPaused` | `false` | Startup preference for the independent RAM encoding hold. It blocks requests and encode starts without changing limits; it is not a durable encoder checkpoint. |
 | `worker.pauseMode` | `finish` | `finish` lets active encodes finish on pause; `ram` suspends owned FFmpeg encoders on Windows/Linux and retains RAM/VRAM until Resume. Neither process exit nor reboot preserves suspended state. |
 | `worker.temporalPath` | OS temporary directory | Parent of `worker-<name>` workspaces. |
+| `worker.protected.credential` | Empty (protected mode disabled) | Individual credential for this worker, also available as `TR_WORKER_PROTECTED_CREDENTIAL`. It is separate from `web.token`. |
+| `worker.protected.workspaceId` | Empty | UUID expected in `worker-<name>/.workspace-id` on restart-persistent storage; also available as `TR_WORKER_PROTECTED_WORKSPACE_ID`. Both protected settings are required together. |
 | `worker.threads` | Number of CPUs, capped at 16 | Registered flag; the current encoder does not read this field. See `BASELINE.md`. |
 | `worker.maxActiveJobs` | `2` | Startup FFmpeg encode target. The worker may admit up to one additional pipeline job beyond the effective encode target (including a positive `parallelJobs` override) for preparation and verification/upload overlap. A value saved by `control set-max-jobs N` in the server database takes precedence on subsequent starts; `0` pauses new requests and queued encodes while active encodes follow `worker.pauseMode` and downstream work finishes; the last positive encode target is retained. Windows service profiles instead retain the desktop limits and synchronize them to the server before admission. |
 | `worker.dashboard.listenAddress` | Empty (disabled) | Optional local HTTP dashboard address, for example `127.0.0.1:8090` or `0.0.0.0:8090` inside Docker. Requires a dashboard token. YAML, `--worker.dashboard.listenAddress`, or `TR_WORKER_DASHBOARD_LISTEN_ADDRESS`. |

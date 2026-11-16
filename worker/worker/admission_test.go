@@ -44,6 +44,26 @@ func TestManagedAdmissionHoldSurvivesPersistedLimits(t *testing.T) {
 	}
 }
 
+func TestReleaseAdmissionPreservesQueueAndRestartBarrier(t *testing.T) {
+	worker := testAdmissionWorker(1)
+	if err := worker.SetMaxActiveJobs(0); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.HoldAdmission(); err != nil {
+		t.Fatal(err)
+	}
+	worker.BeginRestartBarrier()
+	worker.ReleaseAdmission()
+	status := worker.AdmissionStatus()
+	if status.Accepting || !status.Paused || !status.RestartBarrier || status.Draining {
+		t.Fatalf("release changed an independent hold: %+v", status)
+	}
+	worker.ReleaseRestartBarrier()
+	if !worker.AdmissionStatus().Paused || worker.ReserveJobSlot() {
+		t.Fatal("releasing the barrier reopened the stopped queue")
+	}
+}
+
 func TestZeroMaximumStopsAdmissionAndPositiveMaximumRestoresIt(t *testing.T) {
 	worker := testAdmissionWorker(2)
 	if err := worker.SetMaxActiveJobs(0); err != nil {

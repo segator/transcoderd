@@ -32,6 +32,9 @@ type Context struct {
 	TargetMediaProbe *model.MediaProbe      `json:"target_media_probe,omitempty"`
 	EncodeKind       string                 `json:"encode_kind,omitempty"`
 	EncodeConfig     *config.FFMPEGConfig   `json:"encode_config,omitempty"`
+	Assignment       *model.AssignmentClaim `json:"assignment,omitempty"`
+	RequestID        uuid.UUID              `json:"request_id,omitempty"`
+	PendingEvent     *model.TaskEventType   `json:"pending_event,omitempty"`
 	mu               sync.Mutex
 }
 
@@ -84,6 +87,12 @@ func (j *Context) UpdateEvent(notificationType model.NotificationType, status mo
 }
 
 func (e *Context) PersistJobContext() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.persistJobContextLocked()
+}
+
+func (e *Context) persistJobContextLocked() error {
 	if e.WorkingDir == "" {
 		return fmt.Errorf("persist job context: working directory is empty")
 	}
@@ -91,9 +100,13 @@ func (e *Context) PersistJobContext() error {
 	if err != nil {
 		return err
 	}
+	return writeAtomicContextFile(e.WorkingDir, fmt.Sprintf("%s.json", e.JobId), b)
+}
+
+func writeAtomicContextFile(dir, name string, b []byte) error {
 	// Write the complete snapshot before replacing the previous one. A crash or
 	// short write must not destroy the only recoverable copy of an accepted job.
-	eventFile, err := os.CreateTemp(e.WorkingDir, ".job-context-*")
+	eventFile, err := os.CreateTemp(dir, ".job-context-*")
 	if err != nil {
 		return err
 	}
@@ -110,7 +123,7 @@ func (e *Context) PersistJobContext() error {
 	if err = eventFile.Close(); err != nil {
 		return fmt.Errorf("close job context: %w", err)
 	}
-	if err = replaceContextFile(tempPath, filepath.Join(e.WorkingDir, fmt.Sprintf("%s.json", e.JobId))); err != nil {
+	if err = replaceContextFile(tempPath, filepath.Join(dir, name)); err != nil {
 		return fmt.Errorf("replace job context: %w", err)
 	}
 	return nil

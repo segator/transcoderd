@@ -2,9 +2,12 @@ package scheduler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -667,7 +670,12 @@ func (r *RuntimeScheduler) downloadJobWriter(video *model.Job) (*DownloadJobStre
 		return nil, fmt.Errorf("job %s has a non-local source path", video.Id)
 	}
 	filePath := filepath.Join(r.config.SourcePath, video.SourcePath)
-	downloadFile, err := os.Open(filePath)
+	root, err := os.OpenRoot(r.config.SourcePath)
+	if err != nil {
+		return nil, err
+	}
+	downloadFile, err := root.Open(video.SourcePath)
+	_ = root.Close()
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrorJobNotFound
@@ -677,7 +685,12 @@ func (r *RuntimeScheduler) downloadJobWriter(video *model.Job) (*DownloadJobStre
 	}
 	dfStat, err := downloadFile.Stat()
 	if err != nil {
+		_ = downloadFile.Close()
 		return nil, err
+	}
+	if !dfStat.Mode().IsRegular() {
+		_ = downloadFile.Close()
+		return nil, ErrorJobNotFound
 	}
 	return &DownloadJobStream{
 		JobStream: &JobStream{
@@ -774,12 +787,28 @@ func (r *RuntimeScheduler) GetProtectedChecksum(ctx context.Context, worker stri
 	if err != nil {
 		return "", err
 	}
-	filePath := filepath.Join(r.config.SourcePath, video.SourcePath)
-	checksum := r.pathChecksumMap[filePath]
-	if checksum == "" {
-		return "", fmt.Errorf("%w: checksum not available", ErrorJobNotFound)
+	stream, err := r.downloadJobWriter(video)
+	if err != nil {
+		return "", err
 	}
-	return checksum, nil
+	defer stream.Close(false)
+	hash := sha256.New()
+	if _, err := io.Copy(hash, &contextReader{ctx: ctx, reader: stream.file}); err != nil {
+		return "", fmt.Errorf("calculate protected source checksum: %w", err)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 
 func (r *RuntimeScheduler) GetChecksum(ctx context.Context, uuid string) (string, error) {

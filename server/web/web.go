@@ -251,7 +251,14 @@ func (s *Server) upload(writer http.ResponseWriter, request *http.Request) {
 	receiveUpload(writer, request, uploadStream, func(_ string, _ int64) error { return uploadStream.Commit() })
 }
 
-func receiveUpload(writer http.ResponseWriter, request *http.Request, uploadStream *scheduler.UploadJobStream, commit func(string, int64) error) {
+type uploadSink interface {
+	Write([]byte) (int, error)
+	Close(bool) error
+	Clean() error
+	GetHash() string
+}
+
+func receiveUpload(writer http.ResponseWriter, request *http.Request, uploadStream uploadSink, commit func(string, int64) error) {
 	closed := false
 	defer func() {
 		if !closed {
@@ -297,9 +304,10 @@ loop:
 		default:
 			readedBytes, readErr := reader.Read(b)
 			readed += uint64(readedBytes)
-			_, writeErr := uploadStream.Write(b[0:readedBytes])
-			if writeErr != nil {
-				break loop
+			written, writeErr := uploadStream.Write(b[0:readedBytes])
+			if writeErr != nil || written != readedBytes {
+				webError(writer, fmt.Errorf("could not write uploaded output"), http.StatusInternalServerError)
+				return
 			}
 			if errors.Is(readErr, io.EOF) {
 				break loop

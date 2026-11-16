@@ -188,6 +188,19 @@ func TestResumeJobsRejectsMismatchedIdentity(t *testing.T) {
 	}
 }
 
+func TestResumeJobsDoesNotUseLegacyProtocolForProtectedContext(t *testing.T) {
+	executor, downloadExecutor, _ := newResumeTestExecutor(t)
+	jobContext := persistResumeTestContext(t, executor.tempPath, model.JobNotification, model.StartedNotificationStatus)
+	jobContext.Assignment = &model.AssignmentClaim{JobID: jobContext.JobId, Generation: 1, Capability: "secret", InstanceID: uuid.New()}
+	if err := jobContext.PersistJobContext(); err != nil {
+		t.Fatal(err)
+	}
+	executor.resumeJobs()
+	if executor.AdmissionStatus().RecoveryError == "" || executor.ActiveJobs() != 1 || len(downloadExecutor.GetJobChan()) != 0 {
+		t.Fatal("protected recovery must not fall back to the legacy protocol")
+	}
+}
+
 func TestCleanJobReleasesActiveSlotAfterCleanup(t *testing.T) {
 	executor := &JobExecutor{}
 	atomic.StoreUint32(&executor.activeJobs, 1)

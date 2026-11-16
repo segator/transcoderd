@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,6 +19,60 @@ import (
 
 	"github.com/google/uuid"
 )
+
+func TestProtectedChecksumAvailableAcrossServerReplicas(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	data := []byte("prefetched source")
+	if err := os.WriteFile(filepath.Join(root, "film.mkv"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.NewInMemoryRepository()
+	job := &model.Job{Id: uuid.New(), SourcePath: "film.mkv"}
+	if err := repo.AddJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddNewTaskEvent(ctx, job.AddEvent(model.JobNotification, model.QueuedNotificationStatus)); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := assignment.NewKeyring("key", map[string][]byte{"key": bytes.Repeat([]byte{1}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assigned, err := repo.RequestProtectedJob(ctx, "node", uuid.NewString(), keys)
+	if err != nil || assigned == nil {
+		t.Fatalf("RequestProtectedJob() = %+v, %v", assigned, err)
+	}
+	claim := model.AssignmentClaim{JobID: job.Id, Generation: assigned.Generation, Capability: assigned.Capability, InstanceID: uuid.New()}
+	if _, err := repo.AcquireProtectedLease(ctx, "node", claim, claim.InstanceID, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	current, err := repo.GetJob(ctx, job.Id.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := current.AddEvent(model.JobNotification, model.StartedNotificationStatus)
+	started.WorkerName = "node"
+	if err := repo.ApplyProtectedEvent(ctx, "node", claim, *started); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := NewScheduler(&Config{SourcePath: root}, repo)
+	second, _ := NewScheduler(&Config{SourcePath: root}, repo)
+	stream, err := first.GetProtectedDownload(ctx, "node", claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := io.ReadAll(stream); err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("protected download = %q, %v", got, err)
+	}
+	if err := stream.Close(false); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	if got, err := second.GetProtectedChecksum(ctx, "node", claim); err != nil || got != hex.EncodeToString(sum[:]) {
+		t.Fatalf("checksum on another replica = %s, %v", got, err)
+	}
+}
 
 func TestProtectedAssignmentRejectsLegacyTraffic(t *testing.T) {
 	ctx := context.Background()

@@ -244,6 +244,13 @@ func (e *JobExecutor) resumeJobs() {
 				e.recordRecoveryError(fmt.Errorf("persisted job context %s has a mismatched job identity", path), true)
 				return nil
 			}
+			// Protected contexts require lease and outbox reconciliation before
+			// execution. Until that path is connected, never fall back to legacy
+			// events or downloads for an already protected assignment.
+			if jobContext.Assignment != nil || jobContext.PendingProtectedEvent() != nil {
+				e.recordRecoveryError(fmt.Errorf("protected job %s requires assignment reconciliation", jobContext.JobId), true)
+				return nil
+			}
 			if jobContext.LastEvent == nil {
 				e.recordRecoveryError(fmt.Errorf("persisted job context %s has no last event", path), true)
 				return nil

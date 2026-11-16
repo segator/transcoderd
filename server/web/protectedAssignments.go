@@ -258,7 +258,7 @@ func (p *protectedAccess) download(w http.ResponseWriter, r *http.Request) {
 		protectedTransferError(w, err)
 		return
 	}
-	defer stream.Close(true)
+	defer stream.Close(false)
 	w.Header().Set("Content-Length", strconv.FormatInt(stream.Size(), 10))
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", url.PathEscape(stream.Name())))
 	_, _ = io.Copy(w, stream)

@@ -125,6 +125,16 @@ func testProtectedParking(t *testing.T, repo Repository) {
 	if err := repo.ApplyProtectedEvent(ctx, "worker", claim, conflicting); !errors.Is(err, ErrEventConflict) {
 		t.Fatalf("ApplyProtectedEvent(conflicting) = %v, want event conflict", err)
 	}
+	conflictingTime := *started
+	conflictingTime.EventTime = conflictingTime.EventTime.Add(time.Second)
+	if err := repo.ApplyProtectedEvent(ctx, "worker", claim, conflictingTime); !errors.Is(err, ErrEventConflict) {
+		t.Fatalf("ApplyProtectedEvent(changed timestamp) = %v, want event conflict", err)
+	}
+	outOfOrder := *started
+	outOfOrder.EventID += 2
+	if err := repo.ApplyProtectedEvent(ctx, "worker", claim, outOfOrder); !errors.Is(err, ErrEventConflict) {
+		t.Fatalf("ApplyProtectedEvent(out of order) = %v, want event conflict", err)
+	}
 	if err := repo.ParkProtectedJob(ctx, "other", claim); !errors.Is(err, ErrStaleAssignment) {
 		t.Fatalf("ParkProtectedJob(other) = %v, want stale assignment", err)
 	}
@@ -377,6 +387,11 @@ func testProtectedPublication(t *testing.T, repo Repository) {
 	conflicting.Message = "different"
 	if _, err := repo.BeginProtectedPublication(ctx, "worker", claim, conflicting, true); !errors.Is(err, ErrEventConflict) {
 		t.Fatalf("BeginProtectedPublication(conflict) = %v, want ErrEventConflict", err)
+	}
+	conflictingTime := *complete
+	conflictingTime.EventTime = conflictingTime.EventTime.Add(time.Second)
+	if _, err := repo.BeginProtectedPublication(ctx, "worker", claim, conflictingTime, true); !errors.Is(err, ErrEventConflict) {
+		t.Fatalf("BeginProtectedPublication(changed timestamp) = %v, want ErrEventConflict", err)
 	}
 	pending, err := repo.ListPendingProtectedPublications(ctx)
 	if err != nil || len(pending) != 1 || pending[0].JobID != job.Id {

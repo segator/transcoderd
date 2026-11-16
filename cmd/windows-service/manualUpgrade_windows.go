@@ -57,28 +57,29 @@ func holdProfilesForManualUpgrade(status desktop.Status, call func(string, contr
 			problems = append(problems, fmt.Errorf("%s worker is unavailable; refusing to assume it is idle", profile))
 			continue
 		}
-		response, err := call(profile, control.Request{Command: "hold-admission"})
+		response, err := call(profile, control.Request{Command: "begin-restart-barrier"})
 		if err != nil {
-			problems = append(problems, fmt.Errorf("hold %s admission: %w", profile, err))
+			problems = append(problems, fmt.Errorf("hold %s restart barrier: %w", profile, err))
 			continue
 		}
 		if response.Error != "" {
 			problems = append(problems, errors.New(response.Error))
 			continue
 		}
-		if response.Status.Accepting {
-			problems = append(problems, fmt.Errorf("%s worker did not confirm closed admission", profile))
+		if response.Status.Accepting || !response.Status.RestartBarrier || response.Status.SafeIdle == nil {
+			problems = append(problems, fmt.Errorf("%s worker cannot confirm safe idle", profile))
 			continue
 		}
-		// Include queued jobs and transient counter disagreement conservatively.
-		active += max(int(response.Status.ActiveJobs), response.Status.ActiveEncodes, len(response.Status.Jobs))
+		if !*response.Status.SafeIdle {
+			active += max(1, response.Status.RunningJobs+response.Status.PendingJobs, response.Status.ActiveEncodes, response.Status.SuspendedEncodes)
+		}
 		reserved += response.Status.ReservedJobs
 	}
 	return active, reserved, errors.Join(problems...)
 }
 
 func waitForManualUpgrade(ctx context.Context, probe func() (int, int, error), interval time.Duration, output io.Writer) error {
-	fmt.Fprintln(output, "Waiting for accepted work before upgrading. The service will remain running until CPU and GPU are idle.")
+	fmt.Fprintln(output, "Waiting for running work before upgrading. Prefetched jobs remain parked until the queue resumes.")
 	previousActive, previousReserved := -1, -1
 	lastPrint := time.Time{}
 	for {
@@ -93,12 +94,12 @@ func waitForManualUpgrade(ctx context.Context, probe func() (int, int, error), i
 			return fmt.Errorf("upgrade wait ended without stopping the service: %w", err)
 		}
 		if active != previousActive || reserved != previousReserved || time.Since(lastPrint) >= 30*time.Second {
-			fmt.Fprintf(output, "Remaining: %d accepted jobs, %d requests. New CPU/GPU assignments are blocked.\n", active, reserved)
+			fmt.Fprintf(output, "Remaining: %d running or pending jobs, %d requests. New CPU/GPU assignments are blocked.\n", active, reserved)
 			previousActive, previousReserved = active, reserved
 			lastPrint = time.Now()
 		}
 		if active == 0 && reserved == 0 {
-			fmt.Fprintln(output, "All accepted work has finished. Preparing service replacement.")
+			fmt.Fprintln(output, "All running work has finished. Preparing service replacement.")
 			return nil
 		}
 		select {
@@ -110,7 +111,7 @@ func waitForManualUpgrade(ctx context.Context, probe func() (int, int, error), i
 }
 
 func (s *supervisor) prepareUpgradeLocked() string {
-	s.shutdownPending = false
+	s.cancelPendingShutdownLocked()
 	if s.updatePending() {
 		return managed.LockedMessage
 	}
@@ -124,16 +125,20 @@ func (s *supervisor) prepareUpgradeLocked() string {
 			}
 			continue
 		}
-		response, err := s.callWorker(profile, control.Request{Command: "drain"})
+		response, err := s.callWorker(profile, control.Request{Command: "begin-restart-barrier"})
 		if err != nil {
-			problems = append(problems, fmt.Errorf("drain %s: %w", profile, err))
+			problems = append(problems, fmt.Errorf("hold %s restart barrier: %w", profile, err))
 			continue
 		}
 		if response.Error != "" {
 			problems = append(problems, errors.New(response.Error))
 			continue
 		}
-		if response.Status.ActiveJobs != 0 || response.Status.ReservedJobs != 0 || response.Status.ActiveEncodes != 0 || len(response.Status.Jobs) > 0 {
+		if response.Status.Accepting || !response.Status.RestartBarrier || response.Status.SafeIdle == nil {
+			problems = append(problems, fmt.Errorf("%s worker cannot confirm safe idle", profile))
+			continue
+		}
+		if !*response.Status.SafeIdle || response.Status.ReservedJobs != 0 || response.Status.ActiveEncodes != 0 || response.Status.SuspendedEncodes != 0 {
 			busy = true
 		}
 	}

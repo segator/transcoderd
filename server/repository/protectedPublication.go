@@ -19,8 +19,12 @@ func (s *SQLRepository) BeginProtectedPublication(ctx context.Context, worker st
 	if worker == "" || claim.JobID == uuid.Nil || claim.Generation == 0 || claim.Capability == "" || event.JobId != claim.JobID || event.WorkerName != worker || event.NotificationType != model.JobNotification || event.Status != model.CompletedNotificationStatus || event.EventID < 0 {
 		return nil, ErrStaleAssignment
 	}
+	payloadHash, err := protectedEventHash(event)
+	if err != nil {
+		return nil, err
+	}
 	var publication *model.ProtectedPublication
-	err := s.WithTransaction(ctx, func(ctx context.Context, tx Repository) error {
+	err = s.WithTransaction(ctx, func(ctx context.Context, tx Repository) error {
 		conn, job, err := lockJob(ctx, tx, claim.JobID.String())
 		if err != nil {
 			return err
@@ -42,9 +46,10 @@ func (s *SQLRepository) BeginProtectedPublication(ctx context.Context, worker st
 		publication = &model.ProtectedPublication{JobID: claim.JobID, Generation: claim.Generation, WorkerName: worker}
 		var completionID sql.NullInt64
 		var message, finalPath sql.NullString
-		err = conn.QueryRowContext(ctx, `SELECT staging_path,checksum,size_bytes,state,completion_event_id,completion_message,final_path,delete_source_pending,cleanup_pending
+		var savedHash []byte
+		err = conn.QueryRowContext(ctx, `SELECT staging_path,checksum,size_bytes,state,completion_event_id,completion_message,final_path,delete_source_pending,cleanup_pending,completion_hash
 FROM protected_publications WHERE job_id=$1 AND generation=$2`, claim.JobID.String(), generation).
-			Scan(&publication.StagingPath, &publication.Checksum, &publication.SizeBytes, &publication.State, &completionID, &message, &finalPath, &publication.DeleteSource, &publication.CleanupPending)
+			Scan(&publication.StagingPath, &publication.Checksum, &publication.SizeBytes, &publication.State, &completionID, &message, &finalPath, &publication.DeleteSource, &publication.CleanupPending, &savedHash)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrEventConflict
 		}
@@ -53,7 +58,7 @@ FROM protected_publications WHERE job_id=$1 AND generation=$2`, claim.JobID.Stri
 		}
 		publication.EventID, publication.Message, publication.FinalPath = int(completionID.Int64), message.String, finalPath.String
 		if state == "publishing" || state == "completed" {
-			if !completionID.Valid || publication.EventID != event.EventID || publication.Message != event.Message || publication.State != state {
+			if !completionID.Valid || publication.EventID != event.EventID || publication.Message != event.Message || publication.State != state || subtle.ConstantTimeCompare(savedHash, payloadHash[:]) != 1 {
 				return ErrEventConflict
 			}
 			return nil
@@ -66,7 +71,7 @@ FROM protected_publications WHERE job_id=$1 AND generation=$2`, claim.JobID.Stri
 		if (state != "assigned" && state != "running") || publication.State != "staged" || lastJob == nil || lastJob.WorkerName != worker || lastJob.Status != model.StartedNotificationStatus || lastEvent == nil || lastEvent.EventID+1 != event.EventID {
 			return ErrEventConflict
 		}
-		if _, err = conn.ExecContext(ctx, `UPDATE protected_publications SET state='publishing',completion_event_id=$3,completion_message=$4,delete_source_pending=$5 WHERE job_id=$1 AND generation=$2`, claim.JobID.String(), generation, event.EventID, event.Message, deleteSource); err != nil {
+		if _, err = conn.ExecContext(ctx, `UPDATE protected_publications SET state='publishing',completion_event_id=$3,completion_message=$4,delete_source_pending=$5,completion_hash=$6 WHERE job_id=$1 AND generation=$2`, claim.JobID.String(), generation, event.EventID, event.Message, deleteSource, payloadHash[:]); err != nil {
 			return err
 		}
 		if _, err = conn.ExecContext(ctx, `UPDATE protected_assignments SET state='publishing',updated_at=CURRENT_TIMESTAMP WHERE job_id=$1`, claim.JobID.String()); err != nil {

@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -209,8 +210,12 @@ func validateProtectedEvent(worker string, claim model.AssignmentClaim, event mo
 	return nil
 }
 
-func sameProtectedEvent(a *model.TaskEventType, b model.TaskEventType) bool {
-	return a.JobId == b.JobId && a.EventID == b.EventID && a.WorkerName == b.WorkerName && a.NotificationType == b.NotificationType && a.Status == b.Status && a.Message == b.Message
+func protectedEventHash(event model.TaskEventType) ([sha256.Size]byte, error) {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	return sha256.Sum256(data), nil
 }
 
 // ApplyProtectedEvent fences and appends an event under the same row lock used
@@ -218,6 +223,10 @@ func sameProtectedEvent(a *model.TaskEventType, b model.TaskEventType) bool {
 // Completion is handled separately by the recoverable publication protocol.
 func (s *SQLRepository) ApplyProtectedEvent(ctx context.Context, worker string, claim model.AssignmentClaim, event model.TaskEventType) error {
 	if err := validateProtectedEvent(worker, claim, event); err != nil {
+		return err
+	}
+	payloadHash, err := protectedEventHash(event)
+	if err != nil {
 		return err
 	}
 	return s.WithTransaction(ctx, func(ctx context.Context, tx Repository) error {
@@ -244,8 +253,13 @@ func (s *SQLRepository) ApplyProtectedEvent(ctx context.Context, worker string, 
 		}
 		for _, existing := range job.Events {
 			if existing.EventID == event.EventID {
-				if sameProtectedEvent(existing, event) {
+				var saved []byte
+				err := conn.QueryRowContext(ctx, `SELECT payload_hash FROM protected_events WHERE job_id=$1 AND generation=$2 AND event_id=$3`, claim.JobID.String(), generation, event.EventID).Scan(&saved)
+				if err == nil && subtle.ConstantTimeCompare(saved, payloadHash[:]) == 1 {
 					return nil
+				}
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
 				}
 				return ErrEventConflict
 			}
@@ -253,7 +267,14 @@ func (s *SQLRepository) ApplyProtectedEvent(ctx context.Context, worker string, 
 		if state != "assigned" && state != "running" {
 			return ErrStaleAssignment
 		}
+		last := job.Events.GetLatest()
+		if last == nil || event.EventID != last.EventID+1 {
+			return ErrEventConflict
+		}
 		if err := tx.AddNewTaskEvent(ctx, &event); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO protected_events(job_id,generation,event_id,payload_hash) VALUES($1,$2,$3,$4)`, claim.JobID.String(), generation, event.EventID, payloadHash[:]); err != nil {
 			return err
 		}
 		if event.NotificationType == model.JobNotification && event.Status == model.FailedNotificationStatus {

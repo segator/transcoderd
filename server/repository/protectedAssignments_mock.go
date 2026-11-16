@@ -33,12 +33,18 @@ type protectedUploadKey struct {
 	jobID      string
 	generation uint64
 }
+type protectedEventKey struct {
+	jobID      string
+	generation uint64
+	eventID    int
+}
 type protectedUpload struct {
 	path, checksum, state, message, finalPath string
 	size                                      int64
 	eventID                                   int
 	deleteSource                              bool
 	cleanupPending                            bool
+	completionHash                            [sha256.Size]byte
 }
 
 func (r *InMemoryRepository) BeginProtectedPublication(ctx context.Context, worker string, claim model.AssignmentClaim, event model.TaskEventType, deleteSource bool) (*model.ProtectedPublication, error) {
@@ -47,6 +53,10 @@ func (r *InMemoryRepository) BeginProtectedPublication(ctx context.Context, work
 	}
 	if worker == "" || claim.JobID == uuid.Nil || claim.Generation == 0 || claim.Capability == "" || event.JobId != claim.JobID || event.WorkerName != worker || event.NotificationType != model.JobNotification || event.Status != model.CompletedNotificationStatus || event.EventID < 0 {
 		return nil, ErrStaleAssignment
+	}
+	payloadHash, err := protectedEventHash(event)
+	if err != nil {
+		return nil, err
 	}
 	r.assignmentMu.Lock()
 	defer r.assignmentMu.Unlock()
@@ -64,7 +74,7 @@ func (r *InMemoryRepository) BeginProtectedPublication(ctx context.Context, work
 		return nil, ErrEventConflict
 	}
 	if state.state == "publishing" || state.state == "completed" {
-		if upload.state != state.state || upload.eventID != event.EventID || upload.message != event.Message {
+		if upload.state != state.state || upload.eventID != event.EventID || upload.message != event.Message || subtle.ConstantTimeCompare(upload.completionHash[:], payloadHash[:]) != 1 {
 			return nil, ErrEventConflict
 		}
 	} else {
@@ -79,6 +89,7 @@ func (r *InMemoryRepository) BeginProtectedPublication(ctx context.Context, work
 		state.state = "publishing"
 		r.protectedJobs[id] = state
 		upload.state, upload.eventID, upload.message, upload.deleteSource = "publishing", event.EventID, event.Message, deleteSource
+		upload.completionHash = payloadHash
 		r.protectedUploads[key] = upload
 	}
 	return &model.ProtectedPublication{JobID: claim.JobID, Generation: claim.Generation, WorkerName: worker, StagingPath: upload.path, Checksum: upload.checksum, SizeBytes: upload.size, EventID: upload.eventID, Message: upload.message, State: upload.state, FinalPath: upload.finalPath, DeleteSource: upload.deleteSource, CleanupPending: upload.cleanupPending}, nil
@@ -355,6 +366,10 @@ func (r *InMemoryRepository) ApplyProtectedEvent(ctx context.Context, worker str
 	if err := validateProtectedEvent(worker, claim, event); err != nil {
 		return err
 	}
+	payloadHash, err := protectedEventHash(event)
+	if err != nil {
+		return err
+	}
 	r.assignmentMu.Lock()
 	defer r.assignmentMu.Unlock()
 	r.mu.Lock()
@@ -371,7 +386,8 @@ func (r *InMemoryRepository) ApplyProtectedEvent(ctx context.Context, worker str
 	}
 	for _, existing := range r.events[id] {
 		if existing.EventID == event.EventID {
-			if sameProtectedEvent(existing, event) {
+			saved, ok := r.protectedEvents[protectedEventKey{id, claim.Generation, event.EventID}]
+			if ok && subtle.ConstantTimeCompare(saved[:], payloadHash[:]) == 1 {
 				return nil
 			}
 			return ErrEventConflict
@@ -386,6 +402,7 @@ func (r *InMemoryRepository) ApplyProtectedEvent(ctx context.Context, worker str
 	}
 	event.EventTime = time.Now().UTC()
 	r.events[id] = append(r.events[id], &event)
+	r.protectedEvents[protectedEventKey{id, claim.Generation, event.EventID}] = payloadHash
 	job.Status, job.StatusPhase, job.StatusMessage, job.LastUpdate = string(event.Status), event.NotificationType, event.Message, &event.EventTime
 	if event.NotificationType == model.JobNotification && event.Status == model.FailedNotificationStatus {
 		state.state = "completed"

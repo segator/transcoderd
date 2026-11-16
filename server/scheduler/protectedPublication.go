@@ -36,6 +36,9 @@ func (r *RuntimeScheduler) finalizeProtectedPublication(ctx context.Context, pub
 		if err := removeUploadStagingFile(filepath.Join(r.config.SourcePath, publication.StagingPath)); err != nil {
 			return fmt.Errorf("clean abandoned protected upload: %w", err)
 		}
+		if err := syncProtectedCleanup(r.config.SourcePath, publication.StagingPath); err != nil {
+			return err
+		}
 		return r.repo.ClearProtectedSourceDeletion(ctx, publication.JobID.String(), publication.Generation)
 	}
 	if publication.State == "completed" {
@@ -95,6 +98,9 @@ func (r *RuntimeScheduler) finalizeProtectedPublication(ctx context.Context, pub
 	if err != nil || !filepath.IsLocal(relative) {
 		return errors.New("protected final output is outside the media root")
 	}
+	if err := syncProtectedFinal(r.config.SourcePath, relative); err != nil {
+		return err
+	}
 	if err := r.repo.FinishProtectedPublication(ctx, publication, relative, n, mediaProbe); err != nil {
 		return err
 	}
@@ -108,17 +114,52 @@ func (r *RuntimeScheduler) finishProtectedCleanup(ctx context.Context, publicati
 	}
 	stage := filepath.Join(r.config.SourcePath, publication.StagingPath)
 	final := filepath.Join(r.config.SourcePath, publication.FinalPath)
+	source := filepath.Join(r.config.SourcePath, job.SourcePath)
+	if samePath(source, final) {
+		return errors.New("protected final output cannot be the source")
+	}
+	if err := verifyProtectedFinal(ctx, r.config.SourcePath, publication); err != nil {
+		return err
+	}
 	if !samePath(stage, final) {
 		if err := removeUploadStagingFile(stage); err != nil {
 			return fmt.Errorf("clean protected staged output: %w", err)
 		}
 	}
 	if publication.DeleteSource {
-		if err := os.Remove(filepath.Join(r.config.SourcePath, job.SourcePath)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(source); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("delete completed source: %w", err)
 		}
 	}
+	if err := syncProtectedCleanup(r.config.SourcePath, publication.StagingPath); err != nil {
+		return err
+	}
 	return r.repo.ClearProtectedSourceDeletion(ctx, publication.JobID.String(), publication.Generation)
+}
+
+func verifyProtectedFinal(ctx context.Context, rootPath string, publication model.ProtectedPublication) error {
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	file, err := root.Open(publication.FinalPath)
+	if err != nil {
+		return fmt.Errorf("open protected final output for cleanup: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() != publication.SizeBytes {
+		return errors.New("protected final output is missing or has changed")
+	}
+	hash := sha256.New()
+	if _, err := io.Copy(hash, &contextReader{ctx: ctx, reader: file}); err != nil {
+		return fmt.Errorf("verify protected final output for cleanup: %w", err)
+	}
+	if hex.EncodeToString(hash.Sum(nil)) != publication.Checksum {
+		return errors.New("protected final output checksum changed")
+	}
+	return nil
 }
 
 func (r *RuntimeScheduler) recoverProtectedPublications(ctx context.Context) error {

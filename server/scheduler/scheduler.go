@@ -744,12 +744,12 @@ func (r *RuntimeScheduler) uploadJobWriter(video *model.Job, generation uint64) 
 	if err != nil || !filepath.IsLocal(stagingName) {
 		return nil, fmt.Errorf("resolve upload staging path for job %s", video.Id)
 	}
-	err = os.MkdirAll(filepath.Dir(temporalPath), os.ModePerm)
+	root, err := os.OpenRoot(r.config.SourcePath)
 	if err != nil {
 		return nil, err
 	}
-	root, err := os.OpenRoot(r.config.SourcePath)
-	if err != nil {
+	if err := root.MkdirAll(filepath.Dir(stagingName), os.ModePerm); err != nil {
+		_ = root.Close()
 		return nil, err
 	}
 	attemptName := filepath.Join(filepath.Dir(stagingName), "."+uploadStagingName(video.Id.String())+"-"+uuid.NewString()+".tmp")
@@ -757,7 +757,7 @@ func (r *RuntimeScheduler) uploadJobWriter(video *model.Job, generation uint64) 
 	if errors.Is(err, os.ErrNotExist) {
 		// Finalization may remove an empty staging directory after MkdirAll.
 		// Recreate it and retry once to close that narrow race.
-		if mkdirErr := os.MkdirAll(filepath.Dir(temporalPath), os.ModePerm); mkdirErr != nil {
+		if mkdirErr := root.MkdirAll(filepath.Dir(stagingName), os.ModePerm); mkdirErr != nil {
 			_ = root.Close()
 			return nil, mkdirErr
 		}
@@ -779,7 +779,16 @@ func (r *RuntimeScheduler) StageProtectedUpload(ctx context.Context, worker stri
 	if stream == nil {
 		return errors.New("protected upload stream is missing")
 	}
-	return r.repo.StageProtectedUpload(ctx, worker, claim, stream.stagingName, checksum, size, stream.Commit)
+	return r.repo.StageProtectedUpload(ctx, worker, claim, stream.stagingName, checksum, size, func() error {
+		if err := stream.Commit(); err != nil {
+			return err
+		}
+		dir := filepath.Dir(stream.stagingName)
+		if err := syncProtectedDirectory(stream.root, dir); err != nil {
+			return err
+		}
+		return syncProtectedDirectory(stream.root, filepath.Dir(dir))
+	})
 }
 
 func (r *RuntimeScheduler) GetProtectedChecksum(ctx context.Context, worker string, claim model.AssignmentClaim) (string, error) {

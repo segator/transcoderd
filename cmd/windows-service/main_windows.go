@@ -431,7 +431,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 	case "stop-after-current":
 		result.Error = s.stopAfterCurrentLocked(req.ShutdownAfterCurrent)
 	case "configure":
-		s.shutdownPending = false
+		s.cancelPendingShutdownLocked()
 		s.shutdownMessage = ""
 		if req.Settings == nil {
 			result.Error = "Settings are missing"
@@ -517,7 +517,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		}
 		s.state = next
 	case "set-max-jobs":
-		s.shutdownPending = false
+		s.cancelPendingShutdownLocked()
 		s.shutdownMessage = ""
 		if s.state.Active == nil {
 			result.Error = "Configure the server first"
@@ -570,11 +570,23 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 				result.Error = "The " + target.key + " worker is reconnecting; try again shortly"
 				break
 			}
-			if _, err := control.Call(workerPipe(target.key), control.Request{Command: "set-pause-mode", PauseMode: "finish"}); err != nil {
+			status, err := s.callWorker(target.key, control.Request{Command: "status"})
+			if err != nil || status.Error != "" {
+				result.Error = "Could not inspect the " + target.key + " worker"
+				break
+			}
+			if status.Status.RestartBarrier {
+				response, err := s.callWorker(target.key, control.Request{Command: "release-restart-barrier"})
+				if err != nil || response.Error != "" || response.Status.RestartBarrier {
+					result.Error = "Could not release the " + target.key + " worker restart barrier"
+					break
+				}
+			}
+			if _, err := s.callWorker(target.key, control.Request{Command: "set-pause-mode", PauseMode: "finish"}); err != nil {
 				result.Error = "Could not change the " + target.key + " worker pause mode: " + err.Error()
 				break
 			}
-			if _, err := control.Call(workerPipe(target.key), control.Request{Command: "set-admission-limit", MaxJobs: target.jobs}); err != nil {
+			if _, err := s.callWorker(target.key, control.Request{Command: "set-admission-limit", MaxJobs: target.jobs}); err != nil {
 				result.Error = "Could not change the " + target.key + " worker limit"
 				break
 			}
@@ -619,7 +631,7 @@ func (s *supervisor) run(ctx context.Context) {
 		s.mu.Lock()
 		updatePending := s.updatePending()
 		if updatePending || s.maintenance || s.state.Pending != nil || s.state.PendingLimit {
-			s.shutdownPending = false
+			s.cancelPendingShutdownLocked()
 		}
 		s.checkShutdownLocked()
 		if updatePending {
@@ -632,7 +644,7 @@ func (s *supervisor) run(ctx context.Context) {
 						}
 					}
 					if s.children[profile.Key] != nil {
-						_, _ = control.Call(workerPipe(profile.Key), control.Request{Command: "hold-admission"})
+						_, _ = s.callWorker(profile.Key, control.Request{Command: "begin-restart-barrier"})
 					}
 				}
 			}
@@ -816,7 +828,7 @@ func (s *supervisor) run(ctx context.Context) {
 }
 
 func (s *supervisor) onChildStoppedLocked(err error) {
-	s.shutdownPending = false
+	s.cancelPendingShutdownLocked()
 	if s.state.Pending != nil && s.readyToApply && s.allChildrenStoppedLocked() {
 		next := s.state
 		next.Active = next.Pending

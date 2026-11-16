@@ -155,6 +155,18 @@ func (s *Server) handle(conn net.Conn) {
 	stop := false
 	switch req.Command {
 	case "status":
+	case "begin-restart-barrier":
+		if b, ok := s.state.(interface{ BeginRestartBarrier() }); ok && s.state.AdmissionStatus().SafeIdle != nil {
+			b.BeginRestartBarrier()
+		} else {
+			result.Error = "safe-idle capability is unavailable"
+		}
+	case "release-restart-barrier":
+		if b, ok := s.state.(interface{ ReleaseRestartBarrier() }); ok {
+			b.ReleaseRestartBarrier()
+		} else {
+			result.Error = "restart barrier is unavailable"
+		}
 	case "hold-admission":
 		if h, ok := s.state.(interface{ HoldAdmission() error }); ok {
 			if err := h.HoldAdmission(); err != nil {
@@ -257,7 +269,24 @@ func ConfiguredPath() string {
 
 func runCLI(args []string, output io.Writer, socketPath string) error {
 	if len(args) == 0 {
-		return errors.New("usage: transcoderd-worker control status|set-encoder-jobs <CPU> <GPU>|set-max-jobs <N>|set-admission-limit <N>|pause-encodes|resume-encodes|set-pause-mode <finish|ram>|pause-job|resume-job <job UUID>")
+		return errors.New("usage: transcoderd-worker control status|wait-safe-idle <duration>|release-restart-barrier|set-encoder-jobs <CPU> <GPU>|set-max-jobs <N>|set-admission-limit <N>|pause-encodes|resume-encodes|set-pause-mode <finish|ram>|pause-job|resume-job <job UUID>")
+	}
+	if args[0] == "wait-safe-idle" {
+		if len(args) != 2 {
+			return errors.New("usage: transcoderd-worker control wait-safe-idle <duration>")
+		}
+		timeout, err := time.ParseDuration(args[1])
+		if err != nil || timeout <= 0 {
+			return errors.New("safe-idle timeout must be a positive duration")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		result, err := WaitSafeIdle(ctx, socketPath)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(output, "safe_idle=true parked=%d restart_barrier=true\n", result.Status.ParkedJobs)
+		return err
 	}
 	req := Request{Command: args[0]}
 	switch req.Command {
@@ -274,7 +303,7 @@ func runCLI(args []string, output io.Writer, socketPath string) error {
 			return errors.New("GPU jobs or encoder total is invalid")
 		}
 		req.CPUJobs, req.GPUJobs = &cpu, &gpu
-	case "status", "pause-encodes", "resume-encodes":
+	case "status", "pause-encodes", "resume-encodes", "release-restart-barrier":
 		if len(args) != 1 {
 			return fmt.Errorf("usage: transcoderd-worker control %s", req.Command)
 		}
@@ -313,6 +342,13 @@ func runCLI(args []string, output io.Writer, socketPath string) error {
 		if err == nil && result.Status.RecoveryError != "" {
 			_, err = fmt.Fprintf(output, "recovery_error=%q\n", result.Status.RecoveryError)
 		}
+		if err == nil && result.Status.SafeIdle != nil {
+			_, err = fmt.Fprintf(output, "safe_idle=%t parked=%d running=%d pending=%d restart_barrier=%t\n", *result.Status.SafeIdle, result.Status.ParkedJobs, result.Status.RunningJobs, result.Status.PendingJobs, result.Status.RestartBarrier)
+		}
+		return err
+	}
+	if req.Command == "release-restart-barrier" {
+		_, err = fmt.Fprintln(output, "restart barrier released")
 		return err
 	}
 	if req.Command == "pause-encodes" || req.Command == "resume-encodes" {
@@ -332,24 +368,78 @@ func runCLI(args []string, output io.Writer, socketPath string) error {
 }
 
 func Call(socketPath string, req Request) (Response, error) {
+	return CallContext(context.Background(), socketPath, req)
+}
+
+func CallContext(ctx context.Context, socketPath string, req Request) (Response, error) {
 	if socketPath == "" {
 		socketPath = ConfiguredPath()
 	}
-	conn, err := dialControl(socketPath)
+	conn, err := dialControlContext(ctx, socketPath)
 	if err != nil {
 		return Response{}, fmt.Errorf("connect to running worker control socket: %w", err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(controlRequestTimeout))
+	deadline := time.Now().Add(controlRequestTimeout)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	_ = conn.SetDeadline(deadline)
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-finished:
+		}
+	}()
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return Response{}, fmt.Errorf("send control request: %w", err)
+		return Response{}, fmt.Errorf("send control request: %w", contextCallError(ctx, err))
 	}
 	var result Response
 	if err := json.NewDecoder(conn).Decode(&result); err != nil {
-		return Response{}, fmt.Errorf("read control response: %w", err)
+		return Response{}, fmt.Errorf("read control response: %w", contextCallError(ctx, err))
 	}
 	if result.Error != "" {
 		return result, errors.New(result.Error)
 	}
 	return result, nil
+}
+
+func contextCallError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	return err
+}
+
+// WaitSafeIdle keeps the restart barrier held after success, timeout or caller
+// cancellation. Explicit release is required when no restart follows.
+func WaitSafeIdle(ctx context.Context, socketPath string) (Response, error) {
+	if _, err := CallContext(ctx, socketPath, Request{Command: "begin-restart-barrier"}); err != nil {
+		return Response{}, err
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		response, err := CallContext(ctx, socketPath, Request{Command: "status"})
+		if err != nil {
+			return Response{}, err
+		}
+		if response.Status.SafeIdle == nil || !response.Status.RestartBarrier {
+			return Response{}, errors.New("worker cannot confirm safe idle under a restart barrier")
+		}
+		if *response.Status.SafeIdle {
+			return response, nil
+		}
+		select {
+		case <-ctx.Done():
+			return Response{}, ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }

@@ -135,11 +135,12 @@ func TestRAMWorkerPauseModeChangesAndResume(t *testing.T) {
 	}
 }
 
-func TestRAMWorkerMaintenanceResumesSuspendedEncodes(t *testing.T) {
+func TestRAMWorkerMaintenancePreservesUpdateHolds(t *testing.T) {
 	for _, tt := range []struct {
-		name  string
-		drain func(*JobExecutor) error
-	}{{"configuration", (*JobExecutor).DrainAcceptedJobs}, {"update", (*JobExecutor).HoldAdmission}} {
+		name    string
+		drain   func(*JobExecutor) error
+		resumes bool
+	}{{"configuration", (*JobExecutor).DrainAcceptedJobs, true}, {"update", (*JobExecutor).HoldAdmission, false}} {
 		t.Run(tt.name, func(t *testing.T) {
 			worker, path := runningRAMWorker(t)
 			if err := worker.SetMaxActiveJobs(0); err != nil {
@@ -149,9 +150,16 @@ func TestRAMWorkerMaintenanceResumesSuspendedEncodes(t *testing.T) {
 			if err := tt.drain(worker); err != nil {
 				t.Fatal(err)
 			}
-			awaitRAMWorker(t, func() bool { return ramProgressSize(path) > before })
-			if status := worker.AdmissionStatus(); status.Paused || status.SuspendedEncodes != 0 || status.Accepting {
-				t.Fatalf("maintenance status=%+v", status)
+			if tt.resumes {
+				awaitRAMWorker(t, func() bool { return ramProgressSize(path) > before })
+				if status := worker.AdmissionStatus(); status.Paused || status.SuspendedEncodes != 0 || status.Accepting {
+					t.Fatalf("maintenance status=%+v", status)
+				}
+			} else {
+				time.Sleep(80 * time.Millisecond)
+				if status := worker.AdmissionStatus(); ramProgressSize(path) != before || !status.Paused || status.SuspendedEncodes != 1 || status.Accepting {
+					t.Fatalf("update did not preserve suspended encode: %+v", status)
+				}
 			}
 			if worker.ReserveJobSlot() {
 				t.Fatal("maintenance reopened assignments")
@@ -279,8 +287,8 @@ func TestSeparateQueueAndRAMPauseOrders(t *testing.T) {
 	if err := worker.HoldAdmission(); err != nil {
 		t.Fatal(err)
 	}
-	if worker.AdmissionStatus().RAMPaused || worker.AdmissionStatus().SuspendedEncodes != 0 {
-		t.Fatal("maintenance retained RAM suspension")
+	if worker.AdmissionStatus().RAMPaused || worker.AdmissionStatus().SuspendedEncodes != 1 {
+		t.Fatal("maintenance did not preserve the individual encode hold")
 	}
 	if err := worker.SetRAMPaused(true); err == nil {
 		t.Fatal("RAM pause interrupted maintenance")

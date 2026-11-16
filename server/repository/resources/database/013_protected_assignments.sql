@@ -38,9 +38,20 @@ CREATE TABLE protected_publications (
     final_path text,
     completion_event_id integer,
     completion_message text,
+    completion_hash bytea CHECK (completion_hash IS NULL OR octet_length(completion_hash) = 32),
     delete_source_pending boolean NOT NULL DEFAULT false,
     cleanup_pending boolean NOT NULL DEFAULT true,
     PRIMARY KEY (job_id, generation)
+);
+
+-- Server event times are recorded independently, so the original payload hash
+-- is needed to distinguish an identical retry from a conflicting one.
+CREATE TABLE protected_events (
+    job_id varchar(255) NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    generation bigint NOT NULL CHECK (generation > 0),
+    event_id integer NOT NULL,
+    payload_hash bytea NOT NULL CHECK (octet_length(payload_hash) = 32),
+    PRIMARY KEY (job_id, generation, event_id)
 );
 
 -- Sequence numbers prevent delayed progress samples from moving a current

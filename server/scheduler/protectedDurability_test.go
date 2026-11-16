@@ -25,6 +25,9 @@ func TestProtectedDirectorySyncRejectsMissingAndNonDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
+	if err := syncProtectedDirectory(root, "."); err != nil {
+		t.Fatalf("syncProtectedDirectory(root) = %v", err)
+	}
 	if err := syncProtectedDirectory(root, "file"); err == nil {
 		t.Fatal("syncProtectedDirectory() accepted a regular file")
 	}

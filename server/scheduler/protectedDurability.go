@@ -23,7 +23,7 @@ func syncProtectedDirectory(root *os.Root, name string) error {
 	if !info.IsDir() {
 		return errors.New("protected publication path is not a directory")
 	}
-	if err := directory.Sync(); err != nil {
+	if err := syncProtectedDirectoryHandle(directory); err != nil {
 		return fmt.Errorf("sync protected publication directory: %w", err)
 	}
 	return nil

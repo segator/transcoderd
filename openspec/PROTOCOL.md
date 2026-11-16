@@ -1,6 +1,6 @@
 # HTTP and event protocol reference
 
-This reference describes the current `/api/v1` interface. The corresponding behavior contracts are in `specs/job-intake/`, `specs/job-dispatch/`, `specs/events-and-progress/`, and `specs/media-transfer/`. Examples show field spelling, not a promise that every optional field will be present.
+This reference describes the `/api/v1` interface and the opt-in protected worker protocol. The corresponding behavior contracts are in `specs/job-intake/`, `specs/job-dispatch/`, `specs/events-and-progress/`, and `specs/media-transfer/`. Examples show field spelling, not a promise that every optional field will be present.
 
 ## Routes
 
@@ -17,6 +17,35 @@ This reference describes the current `/api/v1` interface. The corresponding beha
 | `POST` or `PUT /api/v1/upload?uuid=<id>` | Receive encoded output | `workerName`, `checksum`, `Content-Length` headers and started assignment | `201` | `400` for invalid length/checksum; `403` for missing checksum, wrong worker, or wrong state |
 
 Job, event, and worker-settings routes use `Authorization: Bearer <web.token>`. Transfer routes are not covered by that middleware in the current code. This is documented as a security gap in `BASELINE.md`.
+
+## Protected worker routes
+
+When `web.protectedEnabled` is configured, all `/api/v2/worker/jobs/` routes
+require the shared `Authorization: Bearer <web.token>`, `workerName`, and the
+individual `X-Worker-Credential`. A worker configured for this protocol does
+not fall back to a legacy assignment. Credentials and capabilities are secrets;
+do not place them in URLs or logs.
+
+| Method and suffix | Purpose | Response |
+| --- | --- | --- |
+| `POST capabilities` | Negotiate protocol support | `200` with `{"version":1}` |
+| `POST assignments` | Reconcile the authenticated worker's current ownership | `200` with assignment inventory |
+| `POST request` | Resolve a durable `{"requestId":"<uuid>"}` | `200` with assignment generation and capability, or `204` if empty |
+| `POST lease` | Acquire or renew a process lease using an assignment claim | `200` with `leaseSeconds`; `409` for a conflicting or stale claim |
+| `POST park` | Confirm a recoverable pre-encode checkpoint | `204`; `409` if ownership or phase conflicts |
+| `POST event` | Publish `{"claim":...,"event":...}` | `204` after an accepted or identical replayed event; `409` on conflict |
+| `POST progress` | Publish `{"claim":...,"progress":...,"sequence":...}` | `204` or `409` for stale or conflicting progress |
+| `GET download`, `GET checksum` | Read protected source data or its checksum | `200` or `409` for a stale assignment |
+| `POST upload` | Stage protected output | `201` after validation; `409` for stale ownership |
+
+An assignment claim contains `jobId`, `generation`, `capability`, and
+`instanceId`. Transfer requests provide the job UUID in the `uuid` query
+parameter and the remaining claim values in `X-Assignment-Generation`,
+`X-Assignment-Capability`, and `X-Worker-Instance` headers. Upload also
+requires `Content-Length` and the `checksum` header. Request IDs and event
+payloads are retried unchanged after uncertain responses. Protected output is
+published only after a completion event reserves its publication intent; stale
+generations cannot use the legacy media routes to bypass these checks.
 
 Workers use the settings routes with their configured `worker.name`. A successful PUT persists that worker's desired maximum, including `0`; a later GET returns it until another PUT changes it. A `null` value means the worker has never saved a runtime limit and should use its configured startup maximum. The worker control command remains local and writes the desired value through these authenticated routes before reporting success. Running workers also poll this value before each normal admission evaluation, approximately every five seconds, including while paused. Failed synchronization skips admission for that cycle without interrupting accepted work. The authenticated dashboard can save the same desired limit for any named worker.
 

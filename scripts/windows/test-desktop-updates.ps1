@@ -79,8 +79,18 @@ try {
  Set-Feed $false
  $null=Invoke-Desktop @{command='check-update'}
  $null=Wait-Status {param($s) $s.update.phase -eq 'current'}
- $settings=@{domain=$ServerURL;token='e2e-test-token';name='update-e2e';workingDirectory=(Join-Path $EvidenceDirectory 'encoding work');cpuCodec='libsvtav1';cpuJobs=1;gpuCodec='av1_nvenc';gpuJobs=0;schedule=@()}
- $null=Invoke-Desktop @{command='configure';settings=$settings}
+ $workingDirectory=Join-Path $EvidenceDirectory 'encoding work'
+ $cpuWorkspace='7c395c98-0407-4d0b-b636-71de9c05c975'
+ $gpuWorkspace='91d3b22a-95e9-41fa-ac26-e9e84c051214'
+ foreach ($profile in @(@{name='cpu';id=$cpuWorkspace},@{name='gpu';id=$gpuWorkspace})) {
+  $path=Join-Path $workingDirectory ('worker-update-e2e-'+$profile.name)
+  New-Item -ItemType Directory -Path $path -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path $path '.workspace-id') -Value $profile.id -Encoding utf8 -NoNewline
+ }
+ $settings=@{domain=$ServerURL;token='e2e-test-token';name='update-e2e';workingDirectory=$workingDirectory;cpuCodec='libsvtav1';cpuJobs=1;gpuCodec='av1_nvenc';gpuJobs=0;cpuCredential='update-cpu-fixture-secret';cpuWorkspaceId=$cpuWorkspace;gpuCredential='update-gpu-fixture-secret';gpuWorkspaceId=$gpuWorkspace;schedule=@()}
+ $configured=Invoke-Desktop @{command='configure';settings=$settings}
+ $public=$configured | ConvertTo-Json -Depth 20
+ if (-not $configured.settings.cpuCredentialSet -or -not $configured.settings.gpuCredentialSet -or $public -match 'update-(cpu|gpu)-fixture-secret') { throw 'Protected profile credentials were not saved or were exposed in status.' }
  $null=Wait-Status {param($s) $s.worker -and $s.worker.maxActiveJobs -eq 1}
  $env:E2E_SERVER_URL=$ServerURL;$env:E2E_TOKEN='e2e-test-token';$env:E2E_SOURCE_PATH='e2e_fixture.mkv'
  $encode=Start-Process -FilePath $TestBinary -ArgumentList @('-test.v','-test.timeout=7m','-test.run=^TestE2E$') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $EvidenceDirectory 'encode.log') -RedirectStandardError (Join-Path $EvidenceDirectory 'encode.err')

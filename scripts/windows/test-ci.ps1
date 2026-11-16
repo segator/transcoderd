@@ -70,13 +70,24 @@ try {
         '--server.scheduler.sourcePath',$source,'--server.scheduler.minFileSize','100',
         '--server.scheduler.scheduleTime','5s','--server.scheduler.jobTimeout','10m')
     $previousPath = $env:PATH
+    $previousConfig = $env:TRANSCODERD_INTERNAL_CONFIG
     try {
+        if ($UpdateFixtures) {
+            # These credentials and keys belong only to the isolated CI server.
+            $cpuHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes('update-cpu-fixture-secret'))).ToLowerInvariant()
+            $gpuHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes('update-gpu-fixture-secret'))).ToLowerInvariant()
+            $fixtureKey = [Convert]::ToBase64String([byte[]](1..32))
+            $serverConfig = @{web=@{protectedEnabled=$true; protectedWorkerHashes=@{'update-e2e-cpu'=$cpuHash;'update-e2e-gpu'=$gpuHash}; assignmentSigningKeys=@{fixture=$fixtureKey}; activeAssignmentKey='fixture'}}
+            $configPath = Join-Path $run 'protected-server.json'
+            $serverConfig | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configPath -Encoding utf8
+            $env:TRANSCODERD_INTERNAL_CONFIG = $configPath
+        }
         # Server output verification also invokes the probe library via PATH.
         $env:PATH = (Join-Path $serverHome 'bin') + ';' + $previousPath
         $server = Start-Process -FilePath (Join-Path $serverHome 'server.exe') -ArgumentList (Format-Arguments $values) `
             -WorkingDirectory $run -PassThru -NoNewWindow -RedirectStandardOutput $serverLog -RedirectStandardError $serverErr
     }
-    finally { $env:PATH = $previousPath }
+    finally { $env:PATH = $previousPath; $env:TRANSCODERD_INTERNAL_CONFIG = $previousConfig }
     if ($UpdateFixtures) {
         & (Join-Path $PSScriptRoot 'test-desktop-updates.ps1') -FixtureDirectory $UpdateFixtures -ServerURL "http://127.0.0.1:$httpPort" -TestBinary $TestBinary -SourceDirectory $source -Fixture $Fixture -EvidenceDirectory $EvidenceDirectory
     } elseif ($DesktopInstaller) {

@@ -28,6 +28,11 @@ type WorkerRuntime struct {
 	SuspendedEncodes int                `json:"suspendedEncodes"`
 	Finishing        bool               `json:"finishing"`
 	Draining         bool               `json:"draining"`
+	RestartBarrier   bool               `json:"restartBarrier,omitempty"`
+	SafeIdle         *bool              `json:"safeIdle,omitempty"`
+	RunningJobs      int                `json:"runningJobs,omitempty"`
+	ParkedJobs       int                `json:"parkedJobs,omitempty"`
+	PendingJobs      int                `json:"pendingJobs,omitempty"`
 	ManagedProfile   bool               `json:"managedProfile"`
 	Jobs             []WorkerJobRuntime `json:"jobs,omitempty"`
 	CapacityVersion  int                `json:"capacityVersion,omitempty"`

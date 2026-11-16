@@ -1,6 +1,8 @@
 package worker
 
 import (
+	"context"
+	"errors"
 	"github.com/google/uuid"
 	"math"
 	"sort"
@@ -13,25 +15,30 @@ import (
 )
 
 type ReportStepProgressTracker struct {
-	notificationType   model.NotificationType
-	consoleStepTracker *console.StepTracker
-	serverClient       *serverclient.ServerClient
-	logger             console.LeveledLogger
-	jobId              uuid.UUID
-	name               string
-	codec              string
-	stepId             string
-	lastUpdate         time.Time
-	startedAt          time.Time
-	total              int64
-	value              int64
-	frames             int64
-	framesPerSecond    float64
-	encoderSpeed       string
-	registry           *progressRegistry
-	snapshotMu         sync.Mutex
-	reportMu           sync.Mutex
-	finished           bool
+	notificationType    model.NotificationType
+	consoleStepTracker  *console.StepTracker
+	serverClient        *serverclient.ServerClient
+	protectedClient     *serverclient.ProtectedClient
+	protectedClaim      *model.AssignmentClaim
+	protectedContext    context.Context
+	protectedProgressID string
+	protectedSequence   uint64
+	logger              console.LeveledLogger
+	jobId               uuid.UUID
+	name                string
+	codec               string
+	stepId              string
+	lastUpdate          time.Time
+	startedAt           time.Time
+	total               int64
+	value               int64
+	frames              int64
+	framesPerSecond     float64
+	encoderSpeed        string
+	registry            *progressRegistry
+	snapshotMu          sync.Mutex
+	reportMu            sync.Mutex
+	finished            bool
 }
 
 type progressRegistry struct {
@@ -190,17 +197,41 @@ func (e *ReportStepProgressTracker) reportTrackProgress(status model.TaskProgres
 		}
 	}
 	if time.Since(e.lastUpdate) > 15*time.Second || status != model.ProgressingTaskProgressTypeStatus {
-		err := e.serverClient.PublishTaskProgressEvent(&model.TaskProgressType{
+		percent := e.consoleStepTracker.PercentDone()
+		if math.IsNaN(percent) || math.IsInf(percent, 0) || percent < 0 {
+			percent = 0
+		} else if percent > 100 {
+			percent = 100
+		}
+		eta := e.consoleStepTracker.ETA()
+		if eta < 0 {
+			eta = 0
+		}
+		progress := &model.TaskProgressType{
 			Event: model.Event{
 				EventTime: time.Now(),
 			},
 			JobId:            e.jobId,
 			ProgressID:       e.stepId,
-			Percent:          e.consoleStepTracker.PercentDone(),
-			ETA:              e.consoleStepTracker.ETA(),
+			Percent:          percent,
+			ETA:              eta,
 			NotificationType: e.notificationType,
 			Status:           status,
-		})
+		}
+		var err error
+		if e.protectedClaim != nil {
+			if e.protectedClient == nil || e.protectedContext == nil {
+				err = errors.New("protected progress client is unavailable")
+			} else {
+				e.protectedSequence++
+				progress.ProgressID = e.protectedProgressID
+				ctx, cancel := context.WithTimeout(e.protectedContext, 3*time.Second)
+				err = e.protectedClient.PublishProgress(ctx, *e.protectedClaim, *progress, e.protectedSequence)
+				cancel()
+			}
+		} else {
+			err = e.serverClient.PublishTaskProgressEvent(progress)
+		}
 		if err != nil {
 			e.logger.Errorf("Error on publishing track progress %s", err.Error())
 		}

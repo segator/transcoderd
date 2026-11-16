@@ -32,6 +32,12 @@ func ViperConfig(opts *CommandLineConfig) {
 	if err := viper.BindEnv("worker.dashboard.token", "TR_WORKER_DASHBOARD_TOKEN"); err != nil {
 		log.Panic(err)
 	}
+	if err := viper.BindEnv("worker.protected.credential", "TR_WORKER_PROTECTED_CREDENTIAL"); err != nil {
+		log.Panic(err)
+	}
+	if err := viper.BindEnv("worker.protected.workspaceId", "TR_WORKER_PROTECTED_WORKSPACE_ID"); err != nil {
+		log.Panic(err)
+	}
 	err := viper.ReadInConfig()
 	if err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError

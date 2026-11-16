@@ -55,6 +55,12 @@ func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), 403)
 		return
 	}
+	if s.config.ProtectedEnabled {
+		if _, protected := s.config.ProtectedWorkerHashes[workerName]; protected {
+			http.Error(writer, "worker requires protected assignments", http.StatusForbidden)
+			return
+		}
+	}
 	job, err := s.scheduler.RequestJob(s.ctx, workerName)
 	if errors.Is(err, scheduler.ErrNoJobsAvailable) {
 		webError(writer, err, 204)
@@ -425,6 +431,26 @@ type Config struct {
 	ProtectedWorkerHashes map[string]string `mapstructure:"protectedWorkerHashes"`
 	AssignmentSigningKeys map[string]string `mapstructure:"assignmentSigningKeys"`
 	ActiveAssignmentKey   string            `mapstructure:"activeAssignmentKey"`
+	ProtectedEnabled      bool              `mapstructure:"protectedEnabled"`
+}
+
+// EnableProtectedAPI installs the opt-in protocol only after all credentials
+// and signing keys validate. Protected worker names cannot fall back to v1.
+func (s *Server) EnableProtectedAPI() error {
+	protected, ok := s.scheduler.(protectedScheduler)
+	if !ok {
+		return errors.New("scheduler does not support protected assignments")
+	}
+	handler, err := NewProtectedHandler(s.config, protected)
+	if err != nil {
+		return err
+	}
+	router, ok := s.srv.Handler.(*mux.Router)
+	if !ok {
+		return errors.New("protected API router is unavailable")
+	}
+	router.PathPrefix("/api/v2/worker/jobs/").Handler(s.AuthFunc(handler.ServeHTTP))
+	return nil
 }
 
 type ActiveTracker struct {

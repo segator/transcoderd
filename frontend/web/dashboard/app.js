@@ -954,7 +954,7 @@
     return `<section${profileAttributes}>
       ${heading}
       ${kind ? "" : `<p class="media-help">${esc(profileLabel)}</p>`}
-      ${kind ? "" : `<p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.managedProfile ? " · shared host resources" : ""}</p>`}
+      ${kind ? "" : `<p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.parkedJobs ? ` · ${rt.parkedJobs} prefetched and parked` : ""}${rt?.safeIdle === true ? " · safe to restart" : ""}${rt?.managedProfile ? " · shared host resources" : ""}</p>`}
       ${resources.summary(w, now, kind)}${resources.compact(w, resourceHistory, now, kind)}
       <a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">${kind ? `View ${kind.toUpperCase()} resource details ↗` : "View resource details ↗"}</a>
       <div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div>

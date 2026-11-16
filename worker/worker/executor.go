@@ -26,32 +26,47 @@ import (
 )
 
 type JobExecutor struct {
-	activeJobs      uint32
-	reservedJobs    int
-	maxActiveJobs   int
-	settingsPending bool
-	admissionHeld   bool
-	drainEncodes    bool
-	finishing       bool
-	managedLimits   bool
-	recoveryError   string
-	restartBarrier  bool
-	safeIdleEnabled bool
+	activeJobs              uint32
+	reservedJobs            int
+	maxActiveJobs           int
+	settingsPending         bool
+	admissionHeld           bool
+	drainEncodes            bool
+	finishing               bool
+	managedLimits           bool
+	recoveryError           string
+	protectedInventoryError string
+	restartBarrier          bool
+	safeIdleEnabled         bool
 
-	workerConfig    *config.Config
-	tempPath        string
-	wg              sync.WaitGroup
-	mu              sync.RWMutex
-	admissionMu     sync.Mutex
-	settingsMu      sync.Mutex
-	progress        progressRegistry
-	jobs            jobRegistry
-	client          *serverclient.ServerClient
-	encodePool      *encodeConcurrency
-	encodeProcesses *command.PauseController
-	pauseMode       string
-	ramPaused       bool
-	resources       resourceSampler
+	workerConfig             *config.Config
+	tempPath                 string
+	wg                       sync.WaitGroup
+	protectedWG              sync.WaitGroup
+	pipelineWG               sync.WaitGroup
+	protectedOpsMu           sync.Mutex
+	protectedOps             sync.WaitGroup
+	protectedClosing         bool
+	mu                       sync.RWMutex
+	admissionMu              sync.Mutex
+	settingsMu               sync.Mutex
+	protectedMu              sync.Mutex
+	progress                 progressRegistry
+	jobs                     jobRegistry
+	client                   *serverclient.ServerClient
+	protectedClient          *serverclient.ProtectedClient
+	protectedJobs            map[uuid.UUID]*protectedExecution
+	reclaimedJobs            map[uuid.UUID]bool // guarded by admissionMu until FFmpeg starts
+	protectedStarted         bool
+	protectedReconciled      bool
+	protectedRecoveryPending bool
+	protectedWorkspace       *job.WorkspaceLock
+	protectedWorkspaceID     uuid.UUID
+	encodePool               *encodeConcurrency
+	encodeProcesses          *command.PauseController
+	pauseMode                string
+	ramPaused                bool
+	resources                resourceSampler
 
 	console       *console.RenderService
 	stepExecutors map[model.NotificationType]*step.Executor
@@ -113,6 +128,10 @@ func setupStepExecutors(jobExecutor *JobExecutor) map[model.NotificationType]*st
 	client := jobExecutor.client
 
 	onErrOpt := step.WithOnErrorOpt(func(jobContext *job.Context, notificationType model.NotificationType, err error) {
+		if jobContext.Assignment != nil {
+			jobExecutor.finishProtectedFailure(jobContext, notificationType, err)
+			return
+		}
 		jobExecutor.publishTaskEvent(jobContext, model.JobNotification, model.FailedNotificationStatus, fmt.Sprintf("%s:%s", notificationType, err.Error()))
 		jobExecutor.ConsoleTrackStep(jobContext.JobId.String(), model.JobNotification).Error()
 		if err := jobExecutor.CleanJob(jobContext); err != nil {
@@ -125,6 +144,7 @@ func setupStepExecutors(jobExecutor *JobExecutor) map[model.NotificationType]*st
 	stepExecutors[model.DownloadNotification] = step.NewDownloadStepExecutor(
 		workerConfig.Name,
 		client.GetBaseDomain(),
+		step.WithProtectedTransfers(jobExecutor.protectedClient),
 		step.WithOnCompleteOpt(func(jobContext *job.Context) {
 			if jobContext.Source.FFProbeData.HaveExtractableSubtitle() {
 				stepExecutors[model.MKVExtractNotification].AddJob(jobContext)
@@ -173,7 +193,12 @@ func setupStepExecutors(jobExecutor *JobExecutor) map[model.NotificationType]*st
 	// Upload Step
 	stepExecutors[model.UploadNotification] = step.NewUploadStepExecutor(workerConfig.Name,
 		client.GetBaseDomain(),
+		step.WithProtectedTransfers(jobExecutor.protectedClient),
 		step.WithOnCompleteOpt(func(jobContext *job.Context) {
+			if jobContext.Assignment != nil {
+				jobExecutor.finishProtectedSuccess(jobContext)
+				return
+			}
 			jobExecutor.publishTaskEvent(jobContext, model.JobNotification, model.CompletedNotificationStatus, "")
 			jobExecutor.ConsoleTrackStep(jobContext.JobId.String(), model.JobNotification).Done()
 			if err := jobExecutor.CleanJob(jobContext); err != nil {
@@ -186,7 +211,9 @@ func setupStepExecutors(jobExecutor *JobExecutor) map[model.NotificationType]*st
 }
 
 func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) {
-	serviceCtx, cancelServiceCtx := context.WithCancel(context.Background())
+	// Startup recovery can wait for the server. It must also stop promptly when
+	// the process is asked to shut down before Run has finished starting.
+	serviceCtx, cancelServiceCtx := context.WithCancel(ctx)
 	log.Info("Starting Worker Client...")
 	e.start(serviceCtx)
 	log.Info("Started Worker Client...")
@@ -201,29 +228,93 @@ func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) {
 }
 
 func (e *JobExecutor) start(ctx context.Context) {
+	e.protectedMu.Lock()
+	e.protectedStarted = true
+	e.protectedMu.Unlock()
 	if e.resources != nil {
 		e.resources.Start(ctx)
 	}
-	e.resumeJobs()
-	for notificationType, stepExecutor := range e.stepExecutors {
-		if notificationType == model.FFMPEGSNotification {
-			go e.encodeQueueRoutine(ctx, stepExecutor)
-		} else {
-			go e.stepQueueRoutine(ctx, stepExecutor)
+	// Restoring more checkpoints than the channel capacity must not block
+	// startup before the encode queue has a consumer. Recovered protected jobs
+	// already have per-job holds, and production also holds reconciliation.
+	protectedEncodeQueue := e.protectedClient != nil
+	if protectedEncodeQueue {
+		if executor := e.stepExecutors[model.FFMPEGSNotification]; executor != nil {
+			e.pipelineWG.Add(1)
+			go func() { defer e.pipelineWG.Done(); e.encodeQueueRoutine(ctx, executor) }()
 		}
+	}
+	e.resumeJobsContext(ctx)
+	for notificationType, stepExecutor := range e.stepExecutors {
+		if protectedEncodeQueue && notificationType == model.FFMPEGSNotification {
+			continue
+		}
+		e.pipelineWG.Add(1)
+		if notificationType == model.FFMPEGSNotification {
+			go func(executor *step.Executor) { defer e.pipelineWG.Done(); e.encodeQueueRoutine(ctx, executor) }(stepExecutor)
+		} else {
+			go func(executor *step.Executor) { defer e.pipelineWG.Done(); e.stepQueueRoutine(ctx, executor) }(stepExecutor)
+		}
+	}
+	if e.protectedClient != nil {
+		e.protectedWG.Add(1)
+		go func() {
+			defer e.protectedWG.Done()
+			e.protectedParkingRoutine(ctx)
+		}()
 	}
 }
 
 func (e *JobExecutor) stop() {
+	e.protectedOpsMu.Lock()
+	e.protectedClosing = true
+	e.protectedOpsMu.Unlock()
+	e.protectedOps.Wait()
+	e.protectedWG.Wait()
+	if e.protectedWorkspace != nil {
+		e.pipelineWG.Wait()
+	}
 	if e.resources != nil {
 		e.resources.Stop()
 	}
 	for _, stepExecutor := range e.stepExecutors {
 		stepExecutor.Stop()
 	}
+	if e.protectedWorkspace != nil {
+		if err := e.protectedWorkspace.Close(); err != nil {
+			log.WithError(err).Error("Failed to release protected workspace lock")
+		}
+	}
+}
+
+func (e *JobExecutor) beginProtectedOperation() bool {
+	e.protectedOpsMu.Lock()
+	defer e.protectedOpsMu.Unlock()
+	if e.protectedClosing {
+		return false
+	}
+	e.protectedOps.Add(1)
+	return true
 }
 
 func (e *JobExecutor) resumeJobs() {
+	e.resumeJobsContext(context.Background())
+}
+
+func (e *JobExecutor) resumeJobsContext(ctx context.Context) {
+	var pendingRequest uuid.UUID
+	if e.protectedWorkspace != nil {
+		var pending bool
+		var err error
+		pendingRequest, pending, err = e.protectedWorkspace.ExistingPendingRequest()
+		if err != nil {
+			e.recordRecoveryError(fmt.Errorf("read pending protected request: %w", err), true)
+			return
+		}
+		if !pending {
+			pendingRequest = uuid.Nil
+		}
+	}
 	err := filepath.Walk(e.tempPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -247,11 +338,26 @@ func (e *JobExecutor) resumeJobs() {
 				e.recordRecoveryError(fmt.Errorf("persisted job context %s has a mismatched job identity", path), true)
 				return nil
 			}
-			// Protected contexts require lease and outbox reconciliation before
-			// execution. Until that path is connected, never fall back to legacy
-			// events or downloads for an already protected assignment.
 			if jobContext.Assignment != nil || jobContext.PendingProtectedEvent() != nil {
-				e.recordRecoveryError(fmt.Errorf("protected job %s requires assignment reconciliation", jobContext.JobId), true)
+				workspace, workspaceErr := filepath.Abs(jobContext.WorkingDir)
+				contextDir, contextErr := filepath.Abs(filepath.Dir(path))
+				if workspaceErr != nil || contextErr != nil || workspace != contextDir {
+					e.recordRecoveryError(fmt.Errorf("protected job %s has an invalid workspace", jobContext.JobId), true)
+					return nil
+				}
+				// The request journal owns this initial checkpoint until its
+				// response is reconciled. Starting it here as well would create
+				// duplicate local executions after a crash at that boundary.
+				if pendingRequest != uuid.Nil && jobContext.RequestID == pendingRequest && jobContext.Assignment != nil && jobContext.NextPhase == "" && jobContext.LastEvent == nil && jobContext.PendingProtectedEvent() == nil && !jobContext.Parked && !jobContext.ParkIntent {
+					return nil
+				}
+				if err := e.restoreProtectedParked(ctx, jobContext); err != nil {
+					e.recordRecoveryError(fmt.Errorf("protected job %s requires assignment reconciliation: %w", jobContext.JobId, err), true)
+				}
+				return nil
+			}
+			if e.protectedWorkspace != nil {
+				e.recordRecoveryError(fmt.Errorf("legacy job %s requires reconciliation before protected operation", jobContext.JobId), true)
 				return nil
 			}
 			if jobContext.LastEvent == nil {
@@ -374,14 +480,19 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 		mode = config.PauseFinish
 	}
 	runningJobs, parkedJobs, pendingJobs := 0, 0, 0
+	reclaiming := len(e.reclaimedJobs) != 0
 	for _, j := range jobs {
 		switch j.State {
 		case "running", "paused":
 			runningJobs++
 		case "parked":
 			parkedJobs++
+			reclaiming = true
 		default:
 			pendingJobs++
+			if j.State == "reconciling" {
+				reclaiming = true
+			}
 		}
 	}
 	activeJobs := e.ActiveJobs()
@@ -389,13 +500,22 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 		pendingJobs += int(uint64(activeJobs) - uint64(len(jobs)))
 	}
 	var safeIdle *bool
+	workspaceInvalid := false
 	if e.safeIdleEnabled {
-		safe := e.restartBarrier && !e.settingsPending && e.recoveryError == "" && e.reservedJobs == 0 && activeEncodes == 0 && suspended == 0 && uint64(len(jobs)) == uint64(activeJobs) && parkedJobs == len(jobs)
+		workspaceInvalid = e.protectedWorkspace == nil || e.protectedWorkspace.VerifyPersistentIdentity(e.protectedWorkspaceID) != nil
+		safe := !workspaceInvalid && e.protectedReconciled && e.protectedInventoryError == "" && e.restartBarrier && !e.settingsPending && e.recoveryError == "" && e.reservedJobs == 0 && activeEncodes == 0 && suspended == 0 && uint64(len(jobs)) == uint64(activeJobs) && parkedJobs == len(jobs)
 		safeIdle = &safe
 	}
+	recoveryError := e.recoveryError
+	if recoveryError == "" {
+		recoveryError = e.protectedInventoryError
+	}
+	if recoveryError == "" && workspaceInvalid {
+		recoveryError = "persistent workspace identity is unavailable"
+	}
 	return AdmissionStatus{
-		Accepting:        !e.admissionHeld && !e.finishing && !e.restartBarrier && !e.settingsPending && e.recoveryError == "" && !e.ramPaused && e.maxActiveJobs > 0 && withinSchedule,
-		RecoveryError:    e.recoveryError,
+		Accepting:        !workspaceInvalid && !e.admissionHeld && !e.finishing && !e.restartBarrier && !e.settingsPending && e.recoveryError == "" && (e.protectedClient == nil || (e.protectedReconciled && !reclaiming)) && !e.ramPaused && e.maxActiveJobs > 0 && withinSchedule,
+		RecoveryError:    recoveryError,
 		RAMPaused:        e.ramPaused || (e.maxActiveJobs == 0 && e.pauseMode == config.PauseRAM && !e.drainEncodes),
 		ActiveJobs:       activeJobs,
 		ReservedJobs:     e.reservedJobs,
@@ -641,8 +761,23 @@ func (e *JobExecutor) ReserveJobSlot() bool {
 }
 
 func (e *JobExecutor) canReserveJobSlotAt(now time.Time) bool {
-	if e.admissionHeld || e.finishing || e.restartBarrier || e.settingsPending || e.recoveryError != "" || e.ramPaused || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
+	if e.admissionHeld || e.finishing || e.restartBarrier || e.settingsPending || e.recoveryError != "" || (e.protectedClient != nil && !e.protectedReconciled) || e.ramPaused || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
 		return false
+	}
+	// Reclaim every parked assignment before requesting additional work. The
+	// scanner updates these states under admissionMu when ownership changes.
+	if e.protectedClient != nil {
+		if e.protectedWorkspace != nil && e.protectedWorkspace.VerifyPersistentIdentity(e.protectedWorkspaceID) != nil {
+			return false
+		}
+		if len(e.reclaimedJobs) != 0 {
+			return false
+		}
+		for _, current := range e.jobs.snapshot() {
+			if current.State == "parked" || current.State == "reconciling" {
+				return false
+			}
+		}
 	}
 	encodeTarget := e.maxActiveJobs
 	if e.encodePool != nil {
@@ -813,10 +948,38 @@ func (e *JobExecutor) pinAdmissionProfile(j *job.Context) error {
 }
 
 func (e *JobExecutor) processStep(ctx context.Context, stepExecutor *step.Executor, jobCtx *job.Context) {
+	if jobCtx.Assignment != nil {
+		e.admissionMu.Lock()
+		recoveryBlocked := e.recoveryError != ""
+		e.admissionMu.Unlock()
+		if recoveryBlocked {
+			e.blockProtectedJob(jobCtx, errors.New("worker recovery is unresolved"))
+			return
+		}
+		execution := e.protectedExecution(jobCtx.JobId)
+		if execution == nil {
+			e.blockProtectedJob(jobCtx, ErrProtectedLeaseLost)
+			return
+		}
+		guard := execution.currentGuard()
+		if guard == nil || guard.ctx.Err() != nil {
+			e.blockProtectedJob(jobCtx, ErrProtectedLeaseLost)
+			return
+		}
+		ctx = guard.ctx
+	}
 	stepExecutor.OnJob(jobCtx)
 	err := e.executeStepActions(ctx, stepExecutor, jobCtx)
 	if err != nil {
+		if jobCtx.Assignment != nil && (ctx.Err() != nil || errors.Is(err, ErrProtectedEventUncertain) || errors.Is(err, ErrProtectedLeaseLost)) {
+			e.blockProtectedJob(jobCtx, err)
+			return
+		}
 		stepExecutor.OnError(jobCtx, stepExecutor.NotificationType(), err)
+		return
+	}
+	if jobCtx.Assignment != nil && ctx.Err() != nil {
+		e.blockProtectedJob(jobCtx, context.Cause(ctx))
 		return
 	}
 	stepExecutor.OnComplete(jobCtx)
@@ -840,6 +1003,9 @@ func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step
 	wg := sync.WaitGroup{}
 
 	actions := stepExecutor.Actions(jobContext)
+	if err := e.publishStepEvent(ctx, jobContext, stepExecutor.NotificationType(), model.StartedNotificationStatus, ""); err != nil {
+		return err
+	}
 	actionsChan := make(chan step.Action, len(actions))
 	errs := make(chan error, len(actions))
 
@@ -861,7 +1027,6 @@ func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step
 		}()
 	}
 
-	e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.StartedNotificationStatus, "")
 	for _, action := range actions {
 		actionsChan <- action
 	}
@@ -875,13 +1040,17 @@ func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step
 		errorList = append(errorList, err)
 	}
 	err := errors.Join(errorList...)
+	if jobContext.Assignment != nil && ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
 	if err != nil {
-		e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.FailedNotificationStatus, err.Error())
+		if publishErr := e.publishStepEvent(ctx, jobContext, stepExecutor.NotificationType(), model.FailedNotificationStatus, err.Error()); publishErr != nil {
+			return publishErr
+		}
 		return err
 	}
 
-	e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.CompletedNotificationStatus, "")
-	return nil
+	return e.publishStepEvent(ctx, jobContext, stepExecutor.NotificationType(), model.CompletedNotificationStatus, "")
 }
 
 func (e *JobExecutor) CleanJob(jobContext *job.Context) error {
@@ -916,6 +1085,17 @@ func (e *JobExecutor) ReportTrackStep(jobContext *job.Context, stepId string, no
 		codec = e.workerConfig.EncodeConfig.VideoCodec
 	}
 	tracker := newReportStepProgressTracker(jobContext.JobId, stepId, notificationType, codec, e.client, consoleTracker)
+	if jobContext.Assignment != nil {
+		claim := *jobContext.Assignment
+		tracker.protectedClaim = &claim
+		tracker.protectedClient = e.protectedClient
+		tracker.protectedProgressID = uuid.NewString()
+		if execution := e.protectedExecution(jobContext.JobId); execution != nil {
+			if guard := execution.currentGuard(); guard != nil {
+				tracker.protectedContext = guard.ctx
+			}
+		}
+	}
 	if jobContext.Source != nil {
 		tracker.name = jobContext.Source.OriginalName
 	}

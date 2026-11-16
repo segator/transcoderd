@@ -39,6 +39,14 @@ func TestSubtitleIsImageTypeSubtitle(t *testing.T) {
 	}
 }
 
+func TestNormalizeFFProbeDataRejectsMissingVideo(t *testing.T) {
+	for _, data := range []*ffprobe.ProbeData{nil, {}} {
+		if _, err := NormalizeFFProbeData(data); err == nil {
+			t.Fatal("NormalizeFFProbeData() accepted a probe without video")
+		}
+	}
+}
+
 func TestPacketTimelineDuration(t *testing.T) {
 	tests := []struct {
 		name  string

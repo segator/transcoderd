@@ -135,5 +135,6 @@ func TestProtectedAssignmentsPostgres(t *testing.T) {
 	testProtectedUploadRevocation(t, repo)
 	testProtectedPublication(t, repo)
 	testProtectedLease(t, repo)
+	testWorkerAssignmentInventory(t, repo)
 	testProtectedParkTimeoutRace(t, repo)
 }

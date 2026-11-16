@@ -43,7 +43,7 @@ func TestValidatePrefetchedSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(data)
-	base := VideoData{FilePath: path, Size: int64(len(data)), Checksum: hex.EncodeToString(sum[:]), FFProbeData: &ffmpeg.NormalizedFFProbe{}}
+	base := VideoData{FilePath: path, Size: int64(len(data)), Checksum: hex.EncodeToString(sum[:]), FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{}}}
 	tests := []struct {
 		name   string
 		source *VideoData
@@ -51,6 +51,7 @@ func TestValidatePrefetchedSource(t *testing.T) {
 	}{
 		{"valid", &base, true},
 		{"missing metadata", nil, false},
+		{"missing video metadata", &VideoData{FilePath: path, Size: base.Size, Checksum: base.Checksum, FFProbeData: &ffmpeg.NormalizedFFProbe{}}, false},
 		{"wrong checksum", &VideoData{FilePath: path, Size: int64(len(data)), Checksum: "bad", FFProbeData: base.FFProbeData}, false},
 		{"wrong size", &VideoData{FilePath: path, Size: int64(len(data)) + 1, Checksum: base.Checksum, FFProbeData: base.FFProbeData}, false},
 		{"missing file", &VideoData{FilePath: filepath.Join(dir, "missing.mkv"), Size: base.Size, Checksum: base.Checksum, FFProbeData: base.FFProbeData}, false},

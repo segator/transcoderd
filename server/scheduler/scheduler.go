@@ -78,6 +78,10 @@ func (r *RuntimeScheduler) RequestProtectedJob(ctx context.Context, worker, requ
 	return r.repo.RequestProtectedJob(ctx, worker, requestID, keys)
 }
 
+func (r *RuntimeScheduler) ListWorkerAssignments(ctx context.Context, worker string) ([]model.WorkerAssignmentSnapshot, error) {
+	return r.repo.ListWorkerAssignments(ctx, worker)
+}
+
 func (r *RuntimeScheduler) ParkProtectedJob(ctx context.Context, worker string, claim model.AssignmentClaim) error {
 	return r.repo.ParkProtectedJob(ctx, worker, claim)
 }

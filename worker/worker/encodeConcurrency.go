@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 )
 
+var ErrEncodeAlreadyStarted = errors.New("encode has already started")
+
 type encodeConcurrency struct {
 	mu                       sync.Mutex
 	active                   int
@@ -25,6 +27,7 @@ type encodeConcurrency struct {
 	lastCPUJobs, lastGPUJobs int
 	paused                   bool
 	restartBarrier           bool
+	reconciliationBarrier    bool
 	heldJobs                 map[uuid.UUID]bool
 	activeJobs               map[uuid.UUID]bool
 }
@@ -134,7 +137,7 @@ func (c *encodeConcurrency) hasIndependentLimits() bool {
 func (c *encodeConcurrency) tryStartEncoder(pinned string, ids ...uuid.UUID) (string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.paused || c.restartBarrier || (!c.independent && c.active >= c.target) {
+	if c.paused || c.restartBarrier || c.reconciliationBarrier || (!c.independent && c.active >= c.target) {
 		return "", false
 	}
 	id := uuid.Nil
@@ -214,7 +217,7 @@ func (c *encodeConcurrency) holdEncoder(id uuid.UUID) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.activeJobs[id] {
-		return errors.New("encode has already started")
+		return ErrEncodeAlreadyStarted
 	}
 	if c.heldJobs == nil {
 		c.heldJobs = make(map[uuid.UUID]bool)
@@ -231,6 +234,8 @@ func (c *encodeConcurrency) releaseEncoder(id uuid.UUID) {
 }
 
 func runEncoderQueue(ctx context.Context, queue <-chan *job.Context, c *encodeConcurrency, process func(*job.Context, string)) {
+	var running sync.WaitGroup
+	defer running.Wait()
 	pending := []*job.Context{}
 	for {
 		if ctx.Err() != nil {
@@ -240,7 +245,12 @@ func runEncoderQueue(ctx context.Context, queue <-chan *job.Context, c *encodeCo
 			current := pending[i]
 			if kind, ok := c.tryStartEncoder(current.EncodeKind, current.JobId); ok {
 				pending = append(pending[:i], pending[i+1:]...)
-				go func(j *job.Context, kind string) { defer c.finishEncoder(kind, j.JobId); process(j, kind) }(current, kind)
+				running.Add(1)
+				go func(j *job.Context, kind string) {
+					defer running.Done()
+					defer c.finishEncoder(kind, j.JobId)
+					process(j, kind)
+				}(current, kind)
 				continue
 			}
 			i++
@@ -278,7 +288,16 @@ func (c *encodeConcurrency) SetPaused(paused bool) {
 func (c *encodeConcurrency) Paused() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.paused || c.restartBarrier
+	return c.paused || c.restartBarrier || c.reconciliationBarrier
+}
+
+// Reconciliation is independent of operator restart barriers: releasing one
+// must never accidentally release the other.
+func (c *encodeConcurrency) SetReconciliationBarrier(held bool) {
+	c.mu.Lock()
+	c.reconciliationBarrier = held
+	c.mu.Unlock()
+	c.notify()
 }
 
 func (c *encodeConcurrency) SetRestartBarrier(held bool) {
@@ -291,7 +310,7 @@ func (c *encodeConcurrency) SetRestartBarrier(held bool) {
 func (c *encodeConcurrency) tryStart() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.paused || c.restartBarrier || c.active >= c.target {
+	if c.paused || c.restartBarrier || c.reconciliationBarrier || c.active >= c.target {
 		return false
 	}
 	c.active++

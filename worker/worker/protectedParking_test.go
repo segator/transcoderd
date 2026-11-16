@@ -83,7 +83,7 @@ func testParkableContext(t *testing.T) *job.Context {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(data)
-	j.Source = &job.VideoData{FilePath: path, Size: int64(len(data)), Checksum: hex.EncodeToString(sum[:]), FFProbeData: &ffmpeg.NormalizedFFProbe{}}
+	j.Source = &job.VideoData{FilePath: path, Size: int64(len(data)), Checksum: hex.EncodeToString(sum[:]), FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{}}}
 	return j
 }
 

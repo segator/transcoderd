@@ -54,6 +54,7 @@ type Repository interface {
 	SetWorkerSettings(ctx context.Context, name string, settings model.WorkerSettings) error
 	RetrieveQueuedJob(ctx context.Context) (*model.Job, error)
 	RequestProtectedJob(context.Context, string, string, *assignment.Keyring) (*model.ProtectedAssignment, error)
+	ListWorkerAssignments(context.Context, string) ([]model.WorkerAssignmentSnapshot, error)
 	ParkProtectedJob(context.Context, string, model.AssignmentClaim) error
 	AcquireProtectedLease(context.Context, string, model.AssignmentClaim, uuid.UUID, time.Duration) (time.Time, error)
 	GetProtectedJob(context.Context, string, model.AssignmentClaim) (*model.Job, error)

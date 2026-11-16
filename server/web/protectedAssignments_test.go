@@ -219,3 +219,40 @@ func TestProtectedAssignmentHandlers(t *testing.T) {
 		t.Fatalf("event after cancel = %d, want 409", got)
 	}
 }
+
+func TestProtectedAPIRolloutRequiresBothCredentialsAndPreventsLegacyFallback(t *testing.T) {
+	repo := repository.NewInMemoryRepository()
+	sch, err := scheduler.NewScheduler(&scheduler.Config{SourcePath: t.TempDir()}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("worker-secret"))
+	config := &Config{Token: "fleet-secret", ProtectedEnabled: true, ProtectedWorkerHashes: map[string]string{"node": hex.EncodeToString(digest[:])}, AssignmentSigningKeys: map[string]string{"v1": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))}, ActiveAssignmentKey: "v1"}
+	server := NewWebServer(config, sch, nil, repo)
+	if err := server.EnableProtectedAPI(); err != nil {
+		t.Fatal(err)
+	}
+	request := func(method, path, fleetToken, workerToken string) int {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader("{}"))
+		r.Header.Set("Authorization", "Bearer "+fleetToken)
+		r.Header.Set("workerName", "node")
+		r.Header.Set("X-Worker-Credential", workerToken)
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, r)
+		return w.Code
+	}
+	const capability = "/api/v2/worker/jobs/capabilities"
+	if got := request(http.MethodPost, capability, "wrong", "worker-secret"); got != http.StatusUnauthorized {
+		t.Fatalf("wrong fleet token = %d", got)
+	}
+	if got := request(http.MethodPost, capability, "fleet-secret", "wrong"); got != http.StatusUnauthorized {
+		t.Fatalf("wrong worker credential = %d", got)
+	}
+	if got := request(http.MethodPost, capability, "fleet-secret", "worker-secret"); got != http.StatusOK {
+		t.Fatalf("protected capabilities = %d", got)
+	}
+	if got := request(http.MethodGet, "/api/v1/job/request", "fleet-secret", ""); got != http.StatusForbidden {
+		t.Fatalf("legacy request for protected worker = %d", got)
+	}
+}

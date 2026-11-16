@@ -112,7 +112,7 @@ func TestProtectedFlowStopsRestartsAndResumesPrefetch(t *testing.T) {
 	if err := os.WriteFile(path, downloaded, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	j.Source = &job.VideoData{FilePath: path, Size: int64(len(downloaded)), Checksum: checksum, FFProbeData: &ffmpeg.NormalizedFFProbe{}}
+	j.Source = &job.VideoData{FilePath: path, Size: int64(len(downloaded)), Checksum: checksum, FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{}}}
 	if err := publisher.Publish(guard.ctx, j, model.DownloadNotification, model.CompletedNotificationStatus, ""); err != nil {
 		t.Fatal(err)
 	}

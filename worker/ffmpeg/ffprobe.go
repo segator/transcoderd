@@ -295,6 +295,9 @@ func ffProbeFrameRate(ffprobeFrameRate string) (frameRate int, err error) {
 }
 
 func NormalizeFFProbeData(data *ffprobe.ProbeData) (container *NormalizedFFProbe, err error) {
+	if data == nil || len(data.StreamType(ffprobe.StreamVideo)) == 0 {
+		return nil, errors.New("media probe contains no video stream")
+	}
 	container = &NormalizedFFProbe{}
 
 	videoStream := data.StreamType(ffprobe.StreamVideo)[0]

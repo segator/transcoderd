@@ -50,6 +50,27 @@ func (w *WorkspaceLock) writeRequestJournal(journal requestJournal) error {
 	return writeAtomicContextFile(w.path, requestJournalName, data)
 }
 
+// ExistingPendingRequest reports an unresolved request without creating a new
+// one. Startup uses it to keep safe idle false until the response is recovered.
+func (w *WorkspaceLock) ExistingPendingRequest() (uuid.UUID, bool, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return uuid.Nil, false, errors.New("worker workspace lock is closed")
+	}
+	journal, err := w.readRequestJournal()
+	if errors.Is(err, os.ErrNotExist) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("read assignment request journal: %w", err)
+	}
+	if journal.Resolved {
+		return uuid.Nil, false, nil
+	}
+	return journal.RequestID, true, nil
+}
+
 // PendingRequest persists a request ID before network transmission and reuses
 // it after a lost response or process restart. The workspace lock must remain
 // held until the response has been reconciled and durably recorded.

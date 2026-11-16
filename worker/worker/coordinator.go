@@ -74,6 +74,10 @@ func (q *ServerCoordinator) requestTaskRoutine(ctx context.Context) {
 	if !q.loadPersistedWorkerSettings(ctx) {
 		return
 	}
+	if q.worker.protectedWorkspace != nil {
+		q.protectedRequestTaskRoutine(ctx)
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -210,7 +214,9 @@ func (e *JobExecutor) RuntimeTelemetry() *model.WorkerRuntime {
 		ActiveCPUEncodes: status.ActiveCPUEncodes, ActiveGPUEncodes: status.ActiveGPUEncodes,
 		CPUMaxEncodes: status.CPUMaxEncodes, GPUMaxEncodes: status.GPUMaxEncodes,
 		Paused: status.Paused, RAMPaused: status.RAMPaused, PauseMode: status.PauseMode, SuspendedEncodes: status.SuspendedEncodes,
-		Finishing: status.Finishing, Draining: status.Draining, ManagedProfile: e.managedLimits}
+		Finishing: status.Finishing, Draining: status.Draining, ManagedProfile: e.managedLimits,
+		RestartBarrier: status.RestartBarrier, SafeIdle: status.SafeIdle, RunningJobs: status.RunningJobs,
+		ParkedJobs: status.ParkedJobs, PendingJobs: status.PendingJobs}
 	if e.resources != nil {
 		runtime.Resources = e.resources.Snapshot()
 	}

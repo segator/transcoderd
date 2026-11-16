@@ -63,7 +63,7 @@ func (s *supervisor) drainForUpdate() (int, int, error) {
 		if r.Error != "" || r.Status.Accepting || !r.Status.RestartBarrier || r.Status.SafeIdle == nil {
 			return 0, 0, fmt.Errorf("waiting for %s worker to confirm safe idle", profile)
 		}
-		if !*r.Status.SafeIdle {
+		if !*r.Status.SafeIdle || r.Status.ActiveEncodes != 0 || r.Status.SuspendedEncodes != 0 || r.Status.RunningJobs != 0 || r.Status.PendingJobs != 0 {
 			active += max(1, r.Status.RunningJobs+r.Status.PendingJobs, r.Status.ActiveEncodes, r.Status.SuspendedEncodes)
 		}
 		reserved += r.Status.ReservedJobs

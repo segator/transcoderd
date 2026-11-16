@@ -18,6 +18,7 @@ import (
 type UploadStepExecutor struct {
 	BaseDomainURL string
 	workerName    string
+	protected     protectedTransfers
 }
 
 func NewUploadStepExecutor(workerName string, baseDomainUrl string, options ...ExecutorOption) *Executor {
@@ -25,7 +26,9 @@ func NewUploadStepExecutor(workerName string, baseDomainUrl string, options ...E
 		workerName:    workerName,
 		BaseDomainURL: baseDomainUrl,
 	}
-	return NewStepExecutor(model.UploadNotification, uploadStep.actions, options...)
+	executor := NewStepExecutor(model.UploadNotification, uploadStep.actions, options...)
+	uploadStep.protected = executor.protected
+	return executor
 }
 
 func (u *UploadStepExecutor) actions(jobContext *job.Context) []Action {
@@ -41,6 +44,9 @@ func (u *UploadStepExecutor) actions(jobContext *job.Context) []Action {
 }
 
 func (u *UploadStepExecutor) upload(ctx context.Context, tracker Tracker, jobContext *job.Context) error {
+	if jobContext.Assignment != nil {
+		return u.uploadProtected(ctx, tracker, jobContext)
+	}
 	return retry.Do(func() error {
 		tracker.UpdateValue(0)
 		encodedFile, err := os.Open(jobContext.Target.FilePath)
@@ -48,7 +54,10 @@ func (u *UploadStepExecutor) upload(ctx context.Context, tracker Tracker, jobCon
 			return err
 		}
 		defer encodedFile.Close()
-		fi, _ := encodedFile.Stat()
+		fi, err := encodedFile.Stat()
+		if err != nil {
+			return err
+		}
 		fileSize := fi.Size()
 		tracker.SetTotal(fileSize)
 
@@ -88,6 +97,34 @@ func (u *UploadStepExecutor) upload(ctx context.Context, tracker Tracker, jobCon
 		retry.OnRetry(func(n uint, err error) {
 			tracker.Logger().Errorf("Error on uploading job %v", err)
 		}))
+}
+
+func (u *UploadStepExecutor) uploadProtected(ctx context.Context, tracker Tracker, j *job.Context) error {
+	if u.protected == nil || j.Assignment == nil || j.Target == nil || j.Target.FilePath == "" || j.Target.Checksum == "" {
+		return errors.New("protected upload is not configured")
+	}
+	return retry.Do(func() error {
+		tracker.UpdateValue(0)
+		file, err := os.Open(j.Target.FilePath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() || info.Size() <= 0 {
+			return errors.New("protected output is not a regular non-empty file")
+		}
+		tracker.SetTotal(info.Size())
+		reader := NewProgressTrackStream(tracker, file)
+		if err := u.protected.Upload(ctx, *j.Assignment, reader, info.Size(), j.Target.Checksum); err != nil {
+			return err
+		}
+		tracker.UpdateValue(info.Size())
+		return nil
+	}, retry.Context(ctx), retry.Delay(5*time.Second), retry.DelayType(retry.FixedDelay), retry.Attempts(17280), retry.LastErrorOnly(true), retry.RetryIf(protectedTransferRetryable))
 }
 
 func (u *UploadStepExecutor) GetUploadURL(id uuid.UUID) string {

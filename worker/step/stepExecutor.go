@@ -2,10 +2,12 @@ package step
 
 import (
 	"context"
+	"io"
 	"transcoder/helper/command"
 	"transcoder/model"
 	"transcoder/worker/console"
 	"transcoder/worker/job"
+	"transcoder/worker/serverclient"
 )
 
 type Tracker interface {
@@ -20,6 +22,12 @@ type ActionExecuteFunc func(ctx context.Context, stepTracker Tracker) error
 type ActionJobContextFunc func(jobContext *job.Context)
 type ActionOnErrorFunc func(jobContext *job.Context, notificationType model.NotificationType, err error)
 type ExecutorOption func(stepExecutor *Executor)
+
+type protectedTransfers interface {
+	Download(context.Context, model.AssignmentClaim) (*serverclient.ProtectedDownload, error)
+	Checksum(context.Context, model.AssignmentClaim) (string, error)
+	Upload(context.Context, model.AssignmentClaim, io.Reader, int64, string) error
+}
 type Executor struct {
 	pauseController  *command.PauseController
 	stepChan         chan *job.Context
@@ -30,6 +38,15 @@ type Executor struct {
 	OnError          ActionOnErrorFunc
 	actionsFunc      ActionsFunc
 	parallelRunners  int
+	protected        protectedTransfers
+}
+
+func WithProtectedTransfers(client *serverclient.ProtectedClient) ExecutorOption {
+	return func(executor *Executor) {
+		if client != nil {
+			executor.protected = client
+		}
+	}
 }
 
 func (s *Executor) NotificationType() model.NotificationType {

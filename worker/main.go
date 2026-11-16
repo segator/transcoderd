@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"syscall"
@@ -17,9 +18,11 @@ import (
 	"transcoder/worker/console"
 	"transcoder/worker/control"
 	"transcoder/worker/dashboard"
+	"transcoder/worker/job"
 	"transcoder/worker/serverclient"
 	"transcoder/worker/worker"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	pflag "github.com/spf13/pflag"
 )
@@ -180,6 +183,25 @@ func applicationRunWithShutdown(wg *sync.WaitGroup, ctx context.Context, updater
 	}
 	if os.Getenv("TRANSCODERD_ADMISSION_HOLD") == "1" {
 		if err := encodeWorker.HoldAdmission(); err != nil {
+			return err
+		}
+	}
+	if protected := opts.Worker.Protected; protected != nil {
+		client, err := serverClient.Protected(protected.Credential)
+		if err != nil {
+			return err
+		}
+		identity, err := uuid.Parse(protected.WorkspaceID)
+		if err != nil {
+			return fmt.Errorf("invalid protected workspace identity: %w", err)
+		}
+		path := filepath.Join(opts.Worker.TemporalPath, "worker-"+opts.Worker.Name)
+		workspace, err := job.AcquireWorkspaceLock(path)
+		if err != nil {
+			return err
+		}
+		if err := encodeWorker.ConfigureProtectedMode(ctx, client, workspace, identity); err != nil {
+			_ = workspace.Close()
 			return err
 		}
 	}

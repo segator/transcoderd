@@ -18,6 +18,15 @@ type AssignmentClaim struct {
 	InstanceID uuid.UUID `json:"instanceId"`
 }
 
+// WorkerAssignmentSnapshot is an authenticated ownership inventory used to
+// detect assignments whose local context has been lost.
+type WorkerAssignmentSnapshot struct {
+	JobID      uuid.UUID `json:"jobId"`
+	Generation uint64    `json:"generation,omitempty"`
+	State      string    `json:"state"`
+	Status     string    `json:"status"`
+}
+
 type ProtectedPublication struct {
 	JobID          uuid.UUID
 	Generation     uint64

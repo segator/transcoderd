@@ -25,7 +25,7 @@ func TestParkIntentAndResumeAreDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(source)
-	j.Source = &VideoData{FilePath: path, Size: int64(len(source)), Checksum: hex.EncodeToString(sum[:]), FFProbeData: &ffmpeg.NormalizedFFProbe{}}
+	j.Source = &VideoData{FilePath: path, Size: int64(len(source)), Checksum: hex.EncodeToString(sum[:]), FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{}}}
 	if err := j.ConfirmPark(); err == nil {
 		t.Fatal("park acknowledgement without an intent succeeded")
 	}

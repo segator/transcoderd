@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"transcoder/model"
@@ -64,4 +65,39 @@ func recoverParkedJob(ctx context.Context, j *job.Context, worker string, client
 	}
 	keepGuard = true
 	return guard, nil
+}
+
+// restoreProtectedParked installs the per-job encode hold before queueing a
+// recovered checkpoint. The scanner resumes it only after settings permit it.
+func (e *JobExecutor) restoreProtectedParked(ctx context.Context, j *job.Context) error {
+	if e.protectedClient == nil || e.encodePool == nil || j == nil || j.Assignment == nil || (!j.Parked && !j.ParkIntent) {
+		return errors.New("protected parked recovery is unavailable")
+	}
+	if err := e.encodePool.holdEncoder(j.JobId); err != nil {
+		return err
+	}
+	if _, err := recoverParkedJob(ctx, j, e.workerConfig.Name, e.protectedClient, true, time.Second); err != nil {
+		return err
+	}
+	executor := e.stepExecutors[model.FFMPEGSNotification]
+	if executor == nil {
+		return errors.New("protected encode queue is unavailable")
+	}
+	execution := &protectedExecution{job: j, events: &protectedEventPublisher{client: e.protectedClient, workerName: e.workerConfig.Name}}
+	e.protectedMu.Lock()
+	if e.protectedJobs == nil || e.protectedJobs[j.JobId] != nil {
+		e.protectedMu.Unlock()
+		return errors.New("protected recovered job is already tracked")
+	}
+	e.protectedJobs[j.JobId] = execution
+	e.protectedMu.Unlock()
+	e.admissionMu.Lock()
+	atomic.AddUint32(&e.activeJobs, 1)
+	e.jobs.set(j, model.FFMPEGSNotification, "reconciling")
+	e.admissionMu.Unlock()
+	executor.AddJob(j)
+	e.admissionMu.Lock()
+	e.jobs.set(j, model.FFMPEGSNotification, "parked")
+	e.admissionMu.Unlock()
+	return nil
 }

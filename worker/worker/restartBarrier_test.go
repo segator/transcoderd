@@ -3,6 +3,8 @@ package worker
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +16,24 @@ import (
 
 	"github.com/google/uuid"
 )
+
+func enableTestSafeIdle(t *testing.T, e *JobExecutor) {
+	t.Helper()
+	path := t.TempDir()
+	workspace, err := job.AcquireWorkspaceLock(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workspace.Close() })
+	id := uuid.New()
+	if err := os.WriteFile(filepath.Join(path, ".workspace-id"), []byte(id.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.protectedWorkspace = workspace
+	e.protectedWorkspaceID = id
+	e.protectedReconciled = true
+	e.safeIdleEnabled = true
+}
 
 func TestRestartBarrierBlocksAdmissionAndEncodeStarts(t *testing.T) {
 	e := &JobExecutor{workerConfig: &config.Config{MaxActiveJobs: 2}, maxActiveJobs: 2, encodePool: newEncodeConcurrency(2)}
@@ -45,7 +65,8 @@ func TestRestartBarrierBlocksAdmissionAndEncodeStarts(t *testing.T) {
 }
 
 func TestWaitSafeIdleRequiresConfirmedParkedJobsAndHoldsBarrier(t *testing.T) {
-	e := &JobExecutor{workerConfig: &config.Config{MaxActiveJobs: 1}, maxActiveJobs: 1, encodePool: newEncodeConcurrency(1), safeIdleEnabled: true}
+	e := &JobExecutor{workerConfig: &config.Config{MaxActiveJobs: 1}, maxActiveJobs: 1, encodePool: newEncodeConcurrency(1)}
+	enableTestSafeIdle(t, e)
 	j := &job.Context{JobId: uuid.New()}
 	atomic.StoreUint32(&e.activeJobs, 1)
 	e.jobs.set(j, model.FFMPEGSNotification, "parked")
@@ -62,6 +83,16 @@ func TestWaitSafeIdleRequiresConfirmedParkedJobsAndHoldsBarrier(t *testing.T) {
 	if _, ok := e.encodePool.tryStartEncoder("", j.JobId); ok {
 		t.Fatal("queue resume bypassed the successful idle barrier")
 	}
+	workspacePath, err := e.protectedWorkspace.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(workspacePath, ".workspace-id")); err != nil {
+		t.Fatal(err)
+	}
+	if status := e.AdmissionStatus(); status.SafeIdle == nil || *status.SafeIdle || status.RecoveryError == "" {
+		t.Fatalf("lost workspace identity was treated as idle: %+v", status)
+	}
 	e.ReleaseRestartBarrier()
 	if status := e.AdmissionStatus(); status.SafeIdle == nil || *status.SafeIdle {
 		t.Fatalf("idle after barrier release = %+v", status)
@@ -74,7 +105,7 @@ func TestWaitSafeIdleFailsClosedOnUnknownAndTimeout(t *testing.T) {
 		t.Fatalf("unknown safe idle = %v, status = %+v", err, e.AdmissionStatus())
 	}
 	e.ReleaseRestartBarrier()
-	e.safeIdleEnabled = true
+	enableTestSafeIdle(t, e)
 	atomic.StoreUint32(&e.activeJobs, 1) // No confirmed parked record.
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
@@ -84,7 +115,8 @@ func TestWaitSafeIdleFailsClosedOnUnknownAndTimeout(t *testing.T) {
 }
 
 func TestSafeIdleCountsEncodeAlreadyStarting(t *testing.T) {
-	e := &JobExecutor{workerConfig: &config.Config{MaxActiveJobs: 1}, maxActiveJobs: 1, encodePool: newEncodeConcurrency(1), safeIdleEnabled: true}
+	e := &JobExecutor{workerConfig: &config.Config{MaxActiveJobs: 1}, maxActiveJobs: 1, encodePool: newEncodeConcurrency(1)}
+	enableTestSafeIdle(t, e)
 	j := &job.Context{JobId: uuid.New()}
 	atomic.StoreUint32(&e.activeJobs, 1)
 	e.jobs.set(j, model.FFMPEGSNotification, "parked")

@@ -16,12 +16,40 @@ import (
 )
 
 const (
-	protectedRequestPath  = "/api/v2/worker/jobs/request"
-	protectedLeasePath    = "/api/v2/worker/jobs/lease"
-	protectedParkPath     = "/api/v2/worker/jobs/park"
-	protectedEventPath    = "/api/v2/worker/jobs/event"
-	protectedProgressPath = "/api/v2/worker/jobs/progress"
+	protectedCapabilitiesPath = "/api/v2/worker/jobs/capabilities"
+	protectedAssignmentsPath  = "/api/v2/worker/jobs/assignments"
+	protectedRequestPath      = "/api/v2/worker/jobs/request"
+	protectedLeasePath        = "/api/v2/worker/jobs/lease"
+	protectedParkPath         = "/api/v2/worker/jobs/park"
+	protectedEventPath        = "/api/v2/worker/jobs/event"
+	protectedProgressPath     = "/api/v2/worker/jobs/progress"
 )
+
+func (p *ProtectedClient) Negotiate(ctx context.Context) error {
+	var response struct {
+		Version int `json:"version"`
+	}
+	status, err := p.post(ctx, protectedCapabilitiesPath, struct{}{}, &response)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK || response.Version != 1 {
+		return ErrProtectedUnavailable
+	}
+	return nil
+}
+
+func (p *ProtectedClient) Assignments(ctx context.Context) ([]model.WorkerAssignmentSnapshot, error) {
+	var assignments []model.WorkerAssignmentSnapshot
+	status, err := p.post(ctx, protectedAssignmentsPath, struct{}{}, &assignments)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK || assignments == nil {
+		return nil, errors.New("server returned an invalid worker assignment inventory")
+	}
+	return assignments, nil
+}
 
 var (
 	ErrProtectedUnavailable = errors.New("protected worker protocol is unavailable")
@@ -70,7 +98,7 @@ func (p *ProtectedClient) post(ctx context.Context, path string, input any, outp
 		return resp.StatusCode, fmt.Errorf("protected worker request failed: HTTP %d", resp.StatusCode)
 	}
 	if output != nil && resp.StatusCode == http.StatusOK {
-		if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<10)).Decode(output); err != nil {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(output); err != nil {
 			return resp.StatusCode, fmt.Errorf("decode protected worker response: %w", err)
 		}
 	}

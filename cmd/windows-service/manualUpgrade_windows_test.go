@@ -110,6 +110,20 @@ func TestManualUpgradeAllowsConfirmedParkedJobs(t *testing.T) {
 	}
 }
 
+func TestManualUpgradeDoesNotTrustContradictoryIdleStatus(t *testing.T) {
+	ready := true
+	active, reserved, err := holdProfilesForManualUpgrade(manualUpgradeStatus(), func(profile string, _ control.Request) (control.Response, error) {
+		status := control.AdmissionStatus{SafeIdle: &ready, RestartBarrier: true}
+		if profile == "cpu" {
+			status.ActiveEncodes = 1
+		}
+		return control.Response{Status: status}, nil
+	})
+	if err != nil || active == 0 || reserved != 0 {
+		t.Fatalf("contradictory idle state = %d,%d,%v", active, reserved, err)
+	}
+}
+
 func TestManualUpgradeWaitsThroughWorkAndReportsProgress(t *testing.T) {
 	var output bytes.Buffer
 	calls := 0

@@ -83,3 +83,39 @@ func TestProtectedAdmissionPreservesExistingCheckpoint(t *testing.T) {
 		t.Fatalf("reconciled checkpoint = %+v, %v; requests = %v", got, err, client.requests)
 	}
 }
+
+func TestStartupLeavesPendingRequestCheckpointForJournalReconciliation(t *testing.T) {
+	root := t.TempDir()
+	workspace, err := job.AcquireWorkspaceLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = workspace.Close() }()
+	requestID, err := workspace.PendingRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.New()
+	checkpoint := job.NewContext(id, 1, filepath.Join(root, id.String()))
+	checkpoint.RequestID = requestID
+	checkpoint.Assignment = &model.AssignmentClaim{JobID: id, Generation: 1, Capability: "secret"}
+	if err := checkpoint.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkpoint.PersistJobContext(); err != nil {
+		t.Fatal(err)
+	}
+	e := &JobExecutor{tempPath: root, protectedWorkspace: workspace, protectedRecoveryPending: true, reservedJobs: 1}
+	e.resumeJobsContext(t.Context())
+	if e.recoveryError != "" || e.ActiveJobs() != 0 || e.reservedJobs != 1 {
+		t.Fatalf("pending checkpoint was treated as a second job: error=%q active=%d reserved=%d", e.recoveryError, e.ActiveJobs(), e.reservedJobs)
+	}
+	client := &fakeProtectedRequestClient{assignment: &model.ProtectedAssignment{RequestJobResponse: model.RequestJobResponse{Id: id, EventID: 1}, Generation: 1, KeyID: "v1", Capability: "secret"}}
+	recovered, err := requestProtectedJob(t.Context(), workspace, client, func(*job.Context) error {
+		t.Fatal("recovery must retain the existing assignment checkpoint")
+		return nil
+	})
+	if err != nil || recovered == nil || recovered.RequestID != requestID || recovered.JobId != id {
+		t.Fatalf("recovered assignment = %+v, %v", recovered, err)
+	}
+}

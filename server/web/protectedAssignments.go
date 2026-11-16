@@ -22,6 +22,7 @@ import (
 
 type protectedScheduler interface {
 	RequestProtectedJob(context.Context, string, string, *assignment.Keyring) (*model.ProtectedAssignment, error)
+	ListWorkerAssignments(context.Context, string) ([]model.WorkerAssignmentSnapshot, error)
 	ParkProtectedJob(context.Context, string, model.AssignmentClaim) error
 	AcquireProtectedLease(context.Context, string, model.AssignmentClaim, time.Duration) (time.Time, error)
 	ApplyProtectedEvent(context.Context, string, model.AssignmentClaim, model.TaskEventType) error
@@ -31,6 +32,30 @@ type protectedScheduler interface {
 	GetProtectedUpload(context.Context, string, model.AssignmentClaim) (*scheduler.UploadJobStream, error)
 	StageProtectedUpload(context.Context, string, model.AssignmentClaim, *scheduler.UploadJobStream, string, int64) error
 	GetProtectedChecksum(context.Context, string, model.AssignmentClaim) (string, error)
+}
+
+func (p *protectedAccess) assignments(w http.ResponseWriter, r *http.Request) {
+	worker, ok := p.authenticate(w, r)
+	if !ok {
+		return
+	}
+	assignments, err := p.scheduler.ListWorkerAssignments(r.Context(), worker)
+	if err != nil {
+		http.Error(w, "could not inspect worker assignments", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(assignments)
+}
+
+func (p *protectedAccess) capabilities(w http.ResponseWriter, r *http.Request) {
+	if _, ok := p.authenticate(w, r); !ok {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		Version int `json:"version"`
+	}{Version: 1})
 }
 
 func (p *protectedAccess) progress(w http.ResponseWriter, r *http.Request) {
@@ -150,15 +175,16 @@ func newProtectedAccess(config *Config, scheduler protectedScheduler) (*protecte
 	return &protectedAccess{credentials: credentials, keys: keyring, scheduler: scheduler}, nil
 }
 
-// NewProtectedHandler constructs the complete protected route set without
-// attaching it to the production server. Rollout remains disabled until the
-// worker and supervisor use the protected protocol end to end.
+// NewProtectedHandler constructs the protected route set. Production enables
+// it explicitly after validating its credentials and signing keys.
 func NewProtectedHandler(config *Config, scheduler protectedScheduler) (http.Handler, error) {
 	access, err := newProtectedAccess(config, scheduler)
 	if err != nil {
 		return nil, err
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v2/worker/jobs/capabilities", access.capabilities)
+	mux.HandleFunc("POST /api/v2/worker/jobs/assignments", access.assignments)
 	mux.HandleFunc("POST /api/v2/worker/jobs/request", access.requestJob)
 	mux.HandleFunc("POST /api/v2/worker/jobs/lease", access.lease)
 	mux.HandleFunc("POST /api/v2/worker/jobs/park", access.parkJob)

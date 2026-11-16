@@ -70,7 +70,7 @@ func holdProfilesForManualUpgrade(status desktop.Status, call func(string, contr
 			problems = append(problems, fmt.Errorf("%s worker cannot confirm safe idle", profile))
 			continue
 		}
-		if !*response.Status.SafeIdle {
+		if !*response.Status.SafeIdle || response.Status.ActiveEncodes != 0 || response.Status.SuspendedEncodes != 0 || response.Status.RunningJobs != 0 || response.Status.PendingJobs != 0 {
 			active += max(1, response.Status.RunningJobs+response.Status.PendingJobs, response.Status.ActiveEncodes, response.Status.SuspendedEncodes)
 		}
 		reserved += response.Status.ReservedJobs

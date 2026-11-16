@@ -156,7 +156,7 @@ function render(status) {
   $('stat-encoding-caption').textContent = worker?.suspendedEncodes > 0 ? `${worker.suspendedEncodes} paused in RAM · ${Math.max(0,worker.activeEncodes-worker.suspendedEncodes)} running` : worker ? `of ${worker.maxEncodes} concurrent encodes` : 'Active encodes';
   const ramPause = Boolean(worker?.ramPaused);
   $('pause-description').textContent = 'Stop after current holds the queue. Pause encodes suspends active work in RAM. Individual pauses remain independent.';
-  $('stat-ready').textContent = worker ? jobs.filter(j => j.downloaded && j.state === 'queued' && j.phase === 'FFMPEG').length : '—';
+  $('stat-ready').textContent = worker ? jobs.filter(j => j.downloaded && ['queued', 'parked'].includes(j.state) && j.phase === 'FFMPEG').length : '—';
   $('stat-downloading').textContent = worker ? jobs.filter(j => j.phase === 'Download' && j.state === 'running').length : '—';
   const visibleJobs = TranscoderDashboard.filterJobs(jobs, selectedFilters);
   $('local-count').textContent = selectedFilters.size ? `${visibleJobs.length}/${jobs.length}` : jobs.length;

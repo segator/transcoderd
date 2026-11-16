@@ -18,6 +18,9 @@ func TestPendingRequestSurvivesRestartUntilResolved(t *testing.T) {
 	if err != nil || id == uuid.Nil {
 		t.Fatalf("PendingRequest() = %v, %v", id, err)
 	}
+	if pending, exists, err := lock.ExistingPendingRequest(); err != nil || !exists || pending != id {
+		t.Fatalf("existing pending request = %s, %t, %v", pending, exists, err)
+	}
 	if err := lock.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +37,9 @@ func TestPendingRequestSurvivesRestartUntilResolved(t *testing.T) {
 	}
 	if err := lock.ResolveRequest(id); err != nil {
 		t.Fatal(err)
+	}
+	if _, exists, err := lock.ExistingPendingRequest(); err != nil || exists {
+		t.Fatalf("resolved pending request exists=%t, error=%v", exists, err)
 	}
 	if got, err := lock.PendingRequest(); err != nil || got == id || got == uuid.Nil {
 		t.Fatalf("PendingRequest() after resolution = %v, %v", got, err)

@@ -9,6 +9,8 @@ import (
 	"transcoder/model"
 	"transcoder/worker/job"
 	"transcoder/worker/serverclient"
+
+	"github.com/google/uuid"
 )
 
 type protectedParkClient interface {
@@ -89,9 +91,16 @@ func (e *JobExecutor) releaseParkedEncode(j *job.Context, guard *leaseGuard) err
 	if j == nil || guard == nil || guard.ctx.Err() != nil || !j.ReadyForProtectedEncode(guard.instance) || e.encodePool == nil {
 		return errors.New("protected parked encode is not ready")
 	}
+	if e.protectedWorkspace != nil && e.protectedWorkspace.VerifyPersistentIdentity(e.protectedWorkspaceID) != nil {
+		return errors.New("persistent workspace identity is unavailable")
+	}
 	if e.restartBarrier || e.admissionHeld || e.finishing || e.settingsPending || e.recoveryError != "" || e.ramPaused || e.maxActiveJobs <= 0 {
 		return errors.New("worker queue is not ready to resume parked work")
 	}
+	if e.reclaimedJobs == nil {
+		e.reclaimedJobs = make(map[uuid.UUID]bool)
+	}
+	e.reclaimedJobs[j.JobId] = true
 	e.jobs.set(j, model.FFMPEGSNotification, "queued")
 	e.encodePool.releaseEncoder(j.JobId)
 	return nil

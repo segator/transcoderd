@@ -116,7 +116,7 @@ func TestResumeJobsUsesPersistedNextPhase(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(data)
-	jobContext.Source = &job.VideoData{FilePath: path, Size: int64(len(data)), Checksum: hex.EncodeToString(sum[:]), FFProbeData: &ffmpeg.NormalizedFFProbe{}}
+	jobContext.Source = &job.VideoData{FilePath: path, Size: int64(len(data)), Checksum: hex.EncodeToString(sum[:]), FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{}}}
 	executor.trackPipeline(executor.stepExecutors)
 	encodeExecutor.AddJob(jobContext)
 	<-encodeExecutor.GetJobChan() // Simulate process loss before the encode starts.

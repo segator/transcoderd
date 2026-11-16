@@ -52,6 +52,12 @@ func (r *jobRegistry) set(jobContext *job.Context, phase model.NotificationType,
 }
 
 func (r *jobRegistry) remove(id string) { r.mu.Lock(); defer r.mu.Unlock(); delete(r.items, id) }
+func (r *jobRegistry) get(id string) (control.JobState, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	return item, ok
+}
 func (r *jobRegistry) snapshot() []control.JobState {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -80,6 +86,9 @@ func (e *JobExecutor) trackPipeline(executors map[model.NotificationType]*step.E
 		}
 		executor.OnJob = func(j *job.Context) {
 			e.admissionMu.Lock()
+			if phase == model.FFMPEGSNotification {
+				delete(e.reclaimedJobs, j.JobId)
+			}
 			e.jobs.set(j, phase, "running")
 			e.admissionMu.Unlock()
 			oldJob(j)

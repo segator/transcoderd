@@ -134,7 +134,7 @@ func writeAtomicContextFile(dir, name string, b []byte) error {
 // ValidatePrefetchedSource verifies the downloaded data before it is treated as
 // recoverable. The path must stay inside the saved job workspace.
 func (e *Context) ValidatePrefetchedSource() error {
-	if e.WorkingDir == "" || e.Source == nil || e.Source.FilePath == "" || e.Source.Size <= 0 || e.Source.Checksum == "" || e.Source.FFProbeData == nil {
+	if e.WorkingDir == "" || e.Source == nil || e.Source.FilePath == "" || e.Source.Size <= 0 || e.Source.Checksum == "" || e.Source.FFProbeData == nil || e.Source.FFProbeData.Video == nil {
 		return fmt.Errorf("%w: incomplete source metadata", ErrInvalidPrefetchedSource)
 	}
 	rootPath, err := filepath.Abs(e.WorkingDir)

@@ -48,6 +48,17 @@ It leaves the barrier held on success or timeout; use
 marker, unresolved request or recovery error cannot establish safe idle. Inspect
 `control status` and resolve ownership before restarting in those cases.
 
+If status reports an unreconciled assignment, retain its workspace and inspect
+the job through `GET /api/v1/job/{id}`. An operator may cancel an assigned or
+started job through the authenticated `DELETE /api/v1/job/{id}` route; the
+server revokes the protected generation before recording cancellation. A
+publication already in progress must finish or be reconciled first. Only after
+the server confirms cancellation and all old worker processes are stopped may
+the local job workspace be moved aside and the worker restarted. Resubmitting a
+canceled source with `forceCanceled` creates work to process again; it does not
+preserve the old prefetch. Do not discard an unresolved request journal without
+first resolving its server-side result.
+
 ## NVIDIA GeForce RTX 50-series on Linux
 
 1. Install a distribution-supported NVIDIA driver that recognizes the GPU.

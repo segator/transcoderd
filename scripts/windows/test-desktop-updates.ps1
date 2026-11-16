@@ -183,7 +183,10 @@ try {
  foreach ($key in @('domain','name','workingDirectory','cpuCodec','cpuJobs','gpuCodec','gpuJobs')) { if ($status.settings.$key -ne $settings[$key]) { throw "Upgrade changed the saved setting: $key" } }
  if (-not $status.settings.tokenSet) { throw 'Upgrade lost the saved token.' }
  $null=Invoke-Desktop @{command='set-max-jobs';cpuJobs=0;gpuJobs=0}
- $null=Wait-Status {param($s) $s.worker -and $s.worker.activeJobs -eq 0 -and $s.worker.reservedJobs -eq 0} 180
+ # A job queued during maintenance may be assigned as workers reconnect. Once
+ # the queue is stopped, an assigned prefetch may remain parked rather than
+ # reaching activeJobs=0; running work and reservations must still finish.
+ $null=Wait-Status {param($s) $s.worker -and $s.worker.activeJobs -eq [int]$s.worker.parkedJobs -and $s.worker.reservedJobs -eq 0 -and $s.worker.activeEncodes -eq 0 -and $s.worker.suspendedEncodes -eq 0 -and [int]$s.worker.runningJobs -eq 0 -and [int]$s.worker.pendingJobs -eq 0} 180
  Write-Output 'Mandatory Windows update: signed release, immediate admission barrier, completed upload, locked WebView/IPC, rollback, recovery task and automatic retry passed.'
 } finally {
  & schtasks.exe /End /TN TranscoderDUpdateRecovery 2>$null | Out-Null

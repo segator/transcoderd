@@ -16,6 +16,8 @@ and pause/resume are locked in both the UI and service, including across page
 reloads or service disconnects. Job progress stays visible. No client can choose
 an arbitrary update URL or executable through the local control API.
 
+The release notes button beside the version and update check shows the installed release when no update is pending. During an update it shows available stable release notes from after the installed version through the pending target, including intermediate releases. Open or refresh the panel to retrieve public GitHub metadata; missing or incomplete notes are labeled. Notes are informational and never delay the update.
+
 The public `update` status contains `pending`, `phase`, `installedVersion`,
 `targetVersion`, `downloaded`, `total`, `lastCheck`, `nextRetry`, `attempts` and an
 English `message`; it contains no credentials. The restricted `check-update`

@@ -131,6 +131,8 @@ function render(status) {
   renderUpdate(status.update || null);
   lockConfiguration(Boolean(status.update?.pending));
   $('check-update').hidden = !window.chrome?.webview || !status.update;
+  $('release-notes-toggle').hidden = !window.chrome?.webview || !status.update;
+  updateReleaseNotes(status);
   document.body.classList.toggle('browser-host', !window.chrome?.webview);
   $('app-version').textContent = `VERSION ${status.version || '—'}`;
   if (!window.chrome?.webview) {
@@ -197,6 +199,45 @@ async function refresh() {
   catch (error) { window.__lastServiceError = String(error?.message || error); $('connection').className = 'connection error'; $('connection').innerHTML = '<i></i> Service disconnected'; $('notice').classList.remove('hidden'); $('notice-text').textContent = window.chrome?.webview ? 'The Windows service is unavailable.' : (error?.message || 'The worker dashboard is unavailable.'); $('notice-start').classList.toggle('hidden', !window.chrome?.webview); $('notice-settings').classList.add('hidden'); $('toggle-pause').disabled = true; $('toggle-encodes').disabled = true; }
   finally { if (window.__lastServiceError) lockConfiguration(true); polling = false; }
 }
+let notesKey = '', notesGeneration = 0;
+function updateReleaseNotes(status) {
+  const installed = status.update?.installedVersion || status.version || '';
+  const target = status.update?.pending ? status.update.targetVersion || '' : '';
+  const key = JSON.stringify([installed, target, Boolean(status.update?.pending)]);
+  if (key === notesKey) return;
+  notesKey = key;
+  if (!$('release-notes').hidden) loadReleaseNotes();
+}
+async function loadReleaseNotes() {
+  const generation = ++notesGeneration;
+  const update = current?.update;
+  const installed = update?.installedVersion || current?.version || '';
+  const target = update?.pending ? update.targetVersion || '' : '';
+  const scope = $('release-notes-scope'), content = $('release-notes-content');
+  scope.textContent = update?.pending ? `Installed ${installed || 'unknown'} → pending ${target || 'unknown'}` : `Installed version ${installed || 'unknown'}`;
+  content.textContent = 'Loading release notes…';
+  try {
+    const result = await TranscoderReleaseNotes.load(installed, target, Boolean(update?.pending));
+    if (generation !== notesGeneration || $('release-notes').hidden) return;
+    content.replaceChildren();
+    if (result.warning) { const notice = document.createElement('p'); notice.className = 'release-notes-warning'; notice.textContent = result.warning; content.append(notice); }
+    for (const release of result.releases) {
+      const article = document.createElement('article'), heading = document.createElement('h3'), body = document.createElement('pre');
+      heading.textContent = release.tag_name;
+      body.textContent = (typeof release.body === 'string' && release.body.trim()) || 'No release notes were published for this version.';
+      article.append(heading, body); content.append(article);
+    }
+    if (!result.releases.length && !result.warning) content.textContent = 'No release notes are available for this version.';
+  } catch {
+    if (generation === notesGeneration && !$('release-notes').hidden) content.textContent = 'Release notes are unavailable. Check your connection and try again.';
+  }
+}
+$('release-notes-toggle').addEventListener('click', () => {
+  const panel = $('release-notes'); panel.hidden = !panel.hidden;
+  $('release-notes-toggle').setAttribute('aria-expanded', String(!panel.hidden));
+  if (!panel.hidden) loadReleaseNotes(); else notesGeneration++;
+});
+$('release-notes-retry').addEventListener('click', loadReleaseNotes);
 $('check-update').addEventListener('click', async () => { $('check-update').disabled = true; try { await request('check-update'); toast('Checking for updates…'); } catch (err) { toast(err.message); } finally { $('check-update').disabled = false; } });
 $('refresh').addEventListener('click', () => { if (!window.chrome?.webview) dashboardPromptAllowed = true; refresh(); });
 $('notice-start').addEventListener('click', async () => { try { await request('start-service'); toast('Starting service…'); setTimeout(refresh, 2000); } catch (err) { toast(err.message); } });

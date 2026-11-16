@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com; base-uri 'none'; form-action 'none'">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f4f6fa" data-light="#f4f6fa" data-dark="#121827">
   <title>TranscoderD</title>
@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="updates.css">
   <link rel="stylesheet" href="theme.css">
   <script src="activity.js" defer></script>
+  <script src="release-notes.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -28,7 +29,11 @@
     <div class="sidebar-foot">TRANSCODERD <span>●</span> WORKER</div>
   </aside>
   <main class="main">
-    <header class="topbar"><div class="breadcrumbs">WORKER <span>/</span> <b id="crumb">DASHBOARD</b></div><div class="top-actions"><span class="version-label" id="app-version">VERSION —</span><button class="icon-button" id="check-update" title="Check for updates" aria-label="Check for updates" hidden>⇧</button><span class="connection" id="connection"><i></i> Connecting</span><button class="icon-button" id="refresh" title="Refresh" aria-label="Refresh">↻</button></div></header>
+    <header class="topbar"><div class="breadcrumbs">WORKER <span>/</span> <b id="crumb">DASHBOARD</b></div><div class="top-actions"><span class="version-label" id="app-version">VERSION —</span><button class="icon-button" id="release-notes-toggle" title="Release notes" aria-label="Release notes" aria-expanded="false" aria-controls="release-notes" hidden>☰</button><button class="icon-button" id="check-update" title="Check for updates" aria-label="Check for updates" hidden>⇧</button><span class="connection" id="connection"><i></i> Connecting</span><button class="icon-button" id="refresh" title="Refresh" aria-label="Refresh">↻</button></div></header>
+    <section id="release-notes" class="release-notes" aria-labelledby="release-notes-title" hidden>
+      <div class="release-notes-heading"><div><div class="update-eyebrow">RELEASE NOTES</div><h2 id="release-notes-title">Changes</h2><p id="release-notes-scope"></p></div><button type="button" class="button secondary" id="release-notes-retry">Refresh notes</button></div>
+      <div id="release-notes-content" aria-live="polite"></div>
+    </section>
     <section id="update-alert" class="update-alert" role="status" aria-live="polite" hidden>
       <div class="update-symbol" aria-hidden="true">↻</div><div class="update-content"><div class="update-eyebrow">MANDATORY UPDATE · CONFIGURATION LOCKED</div><h2 id="update-title">An update is pending</h2><p id="update-message">New jobs are blocked. Accepted jobs will finish before installation.</p><div class="update-track"><div id="update-progress"></div></div><div id="update-detail" class="update-detail"></div></div><span class="update-lock" aria-hidden="true">▣</span>
     </section>

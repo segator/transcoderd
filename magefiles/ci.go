@@ -11,7 +11,7 @@ import (
 	"dagger.io/dagger"
 )
 
-// Web runs frontend PWA/resource and worker activity tests in native Node 24.
+// Web runs frontend PWA/resource and worker dashboard tests in native Node 24.
 func (Test) Web(ctx context.Context) error {
 	client, err := daggerClient(ctx)
 	if err != nil {
@@ -23,7 +23,7 @@ func (Test) Web(ctx context.Context) error {
 	})
 	_, err = client.Container().From("node:24-trixie-slim").
 		WithDirectory("/src", source).WithWorkdir("/src").
-		WithExec([]string{"node", "--test", "frontend/web/dashboardPWA_test.cjs", "frontend/web/resources_test.cjs", "worker/dashboard/activity_test.js"}).Sync(ctx)
+		WithExec([]string{"node", "--test", "frontend/web/dashboardPWA_test.cjs", "frontend/web/resources_test.cjs", "worker/dashboard/activity_test.js", "worker/dashboard/release_notes_test.js"}).Sync(ctx)
 	return err
 }
 

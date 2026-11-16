@@ -278,10 +278,13 @@ func (r *InMemoryRepository) AcquireProtectedLease(ctx context.Context, worker s
 	state, ok := r.protectedJobs[id]
 	provided := sha256.Sum256([]byte(claim.Capability))
 	last := model.TaskEvents(r.events[id]).GetLatestPerNotificationType(model.JobNotification)
-	if !ok || state.worker != worker || state.generation != claim.Generation || subtle.ConstantTimeCompare(state.capabilityHash[:], provided[:]) != 1 || (state.state != "assigned" && state.state != "running" && state.state != "parked") || last == nil || last.WorkerName != worker || (last.Status != model.AssignedNotificationStatus && last.Status != model.StartedNotificationStatus) {
+	if !ok || state.worker != worker || state.generation != claim.Generation || subtle.ConstantTimeCompare(state.capabilityHash[:], provided[:]) != 1 || (state.state != "assigned" && state.state != "running" && state.state != "parked" && state.state != "publishing") || last == nil || last.WorkerName != worker || (last.Status != model.AssignedNotificationStatus && last.Status != model.StartedNotificationStatus) {
 		return time.Time{}, ErrStaleAssignment
 	}
 	now := time.Now()
+	if state.state == "publishing" && (state.leaseInstance != instance || !state.leaseExpiry.After(now)) {
+		return time.Time{}, ErrLeaseHeld
+	}
 	if state.state != "parked" && state.leaseInstance != uuid.Nil && state.leaseInstance != instance && state.leaseExpiry.After(now) {
 		return time.Time{}, ErrLeaseHeld
 	}

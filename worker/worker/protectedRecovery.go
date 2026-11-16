@@ -18,6 +18,21 @@ type protectedRecoveryClient interface {
 	AcquireLease(context.Context, model.AssignmentClaim) (time.Time, error)
 }
 
+// Only checkpoints before Download starts are replayed here. Other interrupted
+// phases require their own recovery policy and continue to fail closed.
+func recoverableInitialAssignment(j *job.Context) bool {
+	if j == nil || j.Assignment == nil || j.Assignment.JobID != j.JobId || j.Assignment.Generation == 0 || j.Assignment.Capability == "" || j.RequestID == uuid.Nil || j.Parked || j.ParkIntent || (j.NextPhase != "" && j.NextPhase != model.DownloadNotification) {
+		return false
+	}
+	if j.LastEvent != nil && (j.LastEvent.NotificationType != model.JobNotification || j.LastEvent.Status != model.StartedNotificationStatus) {
+		return false
+	}
+	if pending := j.PendingProtectedEvent(); pending != nil && (pending.NotificationType != model.JobNotification || pending.Status != model.StartedNotificationStatus || j.LastEvent != nil) {
+		return false
+	}
+	return true
+}
+
 // recoverParkedJob reconciles only a validated pre-encode checkpoint. The
 // caller must serialize the queue-stop decision with resume and admission.
 // Running jobs and other unresolved contexts need their own recovery path.

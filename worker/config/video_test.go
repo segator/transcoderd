@@ -99,6 +99,8 @@ func TestWorkerConfigValidation(t *testing.T) {
 		{"unsupported codec", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2, VideoCodec: "unknown"}}},
 		{"excess threads", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2, Threads: 256}}},
 		{"dashboard address requires token", Config{MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2}, Dashboard: &DashboardConfig{ListenAddress: "127.0.0.1:8090"}}},
+		{"protected worker path traversal", Config{Name: "node/../../other", MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2}, Protected: &ProtectedConfig{Credential: "secret", WorkspaceID: "e91a05bc-4269-489f-ac4d-23e4877344af"}}},
+		{"protected worker backslash", Config{Name: `node\other`, MaxActiveJobs: 2, EncodeConfig: &FFMPEGConfig{ParallelJobs: 2}, Protected: &ProtectedConfig{Credential: "secret", WorkspaceID: "e91a05bc-4269-489f-ac4d-23e4877344af"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

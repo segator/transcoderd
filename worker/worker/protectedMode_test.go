@@ -126,3 +126,63 @@ func TestProtectedAdmissionWaitsForParkedAssignments(t *testing.T) {
 	}
 	e.ReleaseJobSlot()
 }
+
+func TestProtectedStartupRecoversAcceptedAssignmentBeforeDownload(t *testing.T) {
+	repo := repository.NewInMemoryRepository()
+	video := &model.Job{Id: uuid.New(), SourcePath: "movie.mkv"}
+	if err := repo.AddJob(t.Context(), video); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddNewTaskEvent(t.Context(), video.AddEvent(model.JobNotification, model.QueuedNotificationStatus)); err != nil {
+		t.Fatal(err)
+	}
+	sch, err := scheduler.NewScheduler(&scheduler.Config{SourcePath: t.TempDir()}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "node-secret"
+	digest := sha256.Sum256([]byte(secret))
+	handler, err := web.NewProtectedHandler(&web.Config{ProtectedWorkerHashes: map[string]string{"node": hex.EncodeToString(digest[:])}, AssignmentSigningKeys: map[string]string{"v1": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}, ActiveAssignmentKey: "v1"}, sch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	base := serverclient.NewServerClient(&web.Config{Domain: server.URL}, "node")
+	client, err := base.Protected(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Name: "node", TemporalPath: t.TempDir(), MaxActiveJobs: 1, EncodeConfig: &config.FFMPEGConfig{VideoCodec: config.HEVCX265}, PGSConfig: &config.PGSConfig{ParallelJobs: 1}}
+	e := NewEncodeWorker(cfg, base, console.NewRenderService())
+	workspace, err := job.AcquireWorkspaceLock(e.tempPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = workspace.Close() }()
+	identity := uuid.New()
+	if err := os.WriteFile(filepath.Join(e.tempPath, ".workspace-id"), []byte(identity.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	assigned, err := requestProtectedJob(t.Context(), workspace, client, e.pinAdmissionProfile)
+	if err != nil || assigned == nil {
+		t.Fatalf("request assignment = %+v, %v", assigned, err)
+	}
+	if err := e.ConfigureProtectedMode(t.Context(), client, workspace, identity); err != nil {
+		t.Fatal(err)
+	}
+	e.resumeJobsContext(t.Context())
+	if e.recoveryError != "" || len(e.initialRecoveries) != 1 || e.reservedJobs != 1 {
+		t.Fatalf("initial recovery = %d reserved=%d error=%q", len(e.initialRecoveries), e.reservedJobs, e.recoveryError)
+	}
+	if err := e.startProtectedReservedJob(t.Context(), e.initialRecoveries[0]); err != nil {
+		t.Fatal(err)
+	}
+	defer e.protectedExecution(assigned.JobId).currentGuard().Close()
+	if err := e.reconcileProtectedInventory(t.Context()); err != nil {
+		t.Fatalf("reconcile recovered assignment: %v", err)
+	}
+	if e.ActiveJobs() != 1 || e.reservedJobs != 0 {
+		t.Fatalf("recovered job count = %d reserved=%d", e.ActiveJobs(), e.reservedJobs)
+	}
+}

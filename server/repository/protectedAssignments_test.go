@@ -377,6 +377,12 @@ func testProtectedPublication(t *testing.T, repo Repository) {
 	if err != nil || publication == nil || publication.State != "publishing" {
 		t.Fatalf("BeginProtectedPublication() = %+v, %v", publication, err)
 	}
+	if _, err := repo.AcquireProtectedLease(ctx, "worker", claim, claim.InstanceID, time.Minute); err != nil {
+		t.Fatalf("renew publication lease = %v", err)
+	}
+	if _, err := repo.AcquireProtectedLease(ctx, "worker", claim, uuid.New(), time.Minute); !errors.Is(err, ErrLeaseHeld) {
+		t.Fatalf("different process renewed publication lease = %v", err)
+	}
 	if err := repo.CancelJobAssignment(ctx, job.Id.String()); !errors.Is(err, ErrJobPublishing) {
 		t.Fatalf("CancelJobAssignment(publishing) = %v, want ErrJobPublishing", err)
 	}

@@ -90,8 +90,10 @@ func (e *JobExecutor) startProtectedReservedJob(ctx context.Context, j *job.Cont
 		return err
 	}
 	publisher := &protectedEventPublisher{client: e.protectedClient, workerName: e.workerConfig.Name}
-	if err := publisher.Publish(guard.ctx, j, model.JobNotification, model.StartedNotificationStatus, ""); err != nil {
-		return err
+	if j.LastEvent == nil || j.LastEvent.NotificationType != model.JobNotification || j.LastEvent.Status != model.StartedNotificationStatus {
+		if err := publisher.Publish(guard.ctx, j, model.JobNotification, model.StartedNotificationStatus, ""); err != nil {
+			return err
+		}
 	}
 	if err := guard.ctx.Err(); err != nil {
 		return ErrProtectedLeaseLost
@@ -149,8 +151,21 @@ func (e *JobExecutor) finishProtectedSuccess(j *job.Context) {
 		return
 	}
 	if err := execution.events.Publish(guard.ctx, j, model.JobNotification, model.CompletedNotificationStatus, ""); err != nil {
-		e.blockProtectedJob(j, err)
-		return
+		// Publication may have completed while the response or lease renewal
+		// was lost. The exact durable event can be retried independently: the
+		// server accepts it without a lease only after committing that intent.
+		pending := j.PendingProtectedEvent()
+		if pending == nil || pending.NotificationType != model.JobNotification || pending.Status != model.CompletedNotificationStatus || e.serviceCtx == nil || e.serviceCtx.Err() != nil {
+			e.blockProtectedJob(j, err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(e.serviceCtx, 10*time.Second)
+		reconcileErr := execution.events.Reconcile(ctx, j)
+		cancel()
+		if reconcileErr != nil {
+			e.blockProtectedJob(j, errors.Join(err, reconcileErr))
+			return
+		}
 	}
 	e.finishProtectedJob(j, execution)
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,5 +66,37 @@ func TestProtectedPublisherReconcilesPendingEventAfterRestart(t *testing.T) {
 	}
 	if len(client.events) != 2 || !reflect.DeepEqual(client.events[0], client.events[1]) || reloaded.LastEvent.EventId != 6 || reloaded.PendingProtectedEvent() != nil {
 		t.Fatalf("reconciled events = %+v, context = %+v", client.events, reloaded.LastEvent)
+	}
+}
+
+func TestCompletionReconcilesExactEventAfterLostLeaseResponse(t *testing.T) {
+	for _, accepted := range []bool{true, false} {
+		t.Run(map[bool]string{true: "committed", false: "rejected"}[accepted], func(t *testing.T) {
+			j := job.NewContext(uuid.New(), 3, t.TempDir())
+			j.Assignment = &model.AssignmentClaim{JobID: j.JobId, Generation: 1, Capability: "secret", InstanceID: uuid.New()}
+			guard, err := startLeaseGuard(t.Context(), func(context.Context) (time.Time, error) { return time.Now().Add(time.Minute), nil }, time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer guard.Close()
+			responses := []error{serverclient.ErrProtectedConflict, nil}
+			if !accepted {
+				responses[1] = serverclient.ErrProtectedConflict
+			}
+			client := &fakeProtectedEventClient{errors: responses}
+			execution := &protectedExecution{job: j, guard: guard, events: &protectedEventPublisher{client: client, workerName: "node"}}
+			e := &JobExecutor{serviceCtx: t.Context(), protectedJobs: map[uuid.UUID]*protectedExecution{j.JobId: execution}}
+			atomic.StoreUint32(&e.activeJobs, 1)
+			e.finishProtectedSuccess(j)
+			if len(client.events) != 2 || !reflect.DeepEqual(client.events[0], client.events[1]) {
+				t.Fatalf("completion replay = %+v", client.events)
+			}
+			if accepted && (e.ActiveJobs() != 0 || e.recoveryError != "") {
+				t.Fatalf("acknowledged completion remains blocked: active=%d error=%q", e.ActiveJobs(), e.recoveryError)
+			}
+			if !accepted && (e.ActiveJobs() != 1 || e.recoveryError == "") {
+				t.Fatalf("rejected completion was treated as successful: active=%d error=%q", e.ActiveJobs(), e.recoveryError)
+			}
+		})
 	}
 }

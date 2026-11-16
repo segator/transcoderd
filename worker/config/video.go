@@ -136,6 +136,9 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Protected.Credential) == "" || err != nil || id == uuid.Nil {
 			return fmt.Errorf("worker.protected requires a credential and nonzero persistent workspace ID")
 		}
+		if strings.TrimSpace(c.Name) == "" || strings.ContainsAny(c.Name, `/\`) {
+			return fmt.Errorf("worker.name must be a single path component in protected mode")
+		}
 	}
 	if c.EncodeConfig == nil {
 		return fmt.Errorf("worker.ffmpegConfig is required")

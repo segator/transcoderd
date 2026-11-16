@@ -41,6 +41,7 @@ type JobExecutor struct {
 
 	workerConfig             *config.Config
 	tempPath                 string
+	serviceCtx               context.Context
 	wg                       sync.WaitGroup
 	protectedWG              sync.WaitGroup
 	pipelineWG               sync.WaitGroup
@@ -57,6 +58,7 @@ type JobExecutor struct {
 	protectedClient          *serverclient.ProtectedClient
 	protectedJobs            map[uuid.UUID]*protectedExecution
 	reclaimedJobs            map[uuid.UUID]bool // guarded by admissionMu until FFmpeg starts
+	initialRecoveries        []*job.Context     // populated during startup before coordinator starts
 	protectedStarted         bool
 	protectedReconciled      bool
 	protectedRecoveryPending bool
@@ -228,6 +230,7 @@ func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) {
 }
 
 func (e *JobExecutor) start(ctx context.Context) {
+	e.serviceCtx = ctx
 	e.protectedMu.Lock()
 	e.protectedStarted = true
 	e.protectedMu.Unlock()
@@ -341,7 +344,8 @@ func (e *JobExecutor) resumeJobsContext(ctx context.Context) {
 			if jobContext.Assignment != nil || jobContext.PendingProtectedEvent() != nil {
 				workspace, workspaceErr := filepath.Abs(jobContext.WorkingDir)
 				contextDir, contextErr := filepath.Abs(filepath.Dir(path))
-				if workspaceErr != nil || contextErr != nil || workspace != contextDir {
+				expectedDir, expectedErr := filepath.Abs(filepath.Join(e.tempPath, jobContext.JobId.String()))
+				if workspaceErr != nil || contextErr != nil || expectedErr != nil || workspace != contextDir || contextDir != expectedDir {
 					e.recordRecoveryError(fmt.Errorf("protected job %s has an invalid workspace", jobContext.JobId), true)
 					return nil
 				}
@@ -349,6 +353,13 @@ func (e *JobExecutor) resumeJobsContext(ctx context.Context) {
 				// response is reconciled. Starting it here as well would create
 				// duplicate local executions after a crash at that boundary.
 				if pendingRequest != uuid.Nil && jobContext.RequestID == pendingRequest && jobContext.Assignment != nil && jobContext.NextPhase == "" && jobContext.LastEvent == nil && jobContext.PendingProtectedEvent() == nil && !jobContext.Parked && !jobContext.ParkIntent {
+					return nil
+				}
+				if e.protectedWorkspace != nil && recoverableInitialAssignment(jobContext) {
+					e.initialRecoveries = append(e.initialRecoveries, jobContext)
+					e.admissionMu.Lock()
+					e.reservedJobs++
+					e.admissionMu.Unlock()
 					return nil
 				}
 				if err := e.restoreProtectedParked(ctx, jobContext); err != nil {

@@ -174,14 +174,22 @@ Section "Uninstall"
   Pop $0
   Pop $1
   ${If} $0 != 0
+    DetailPrint "Cannot uninstall yet. $1"
+    IfSilent uninstall_prepare_failed
     MessageBox MB_ICONEXCLAMATION "Cannot uninstall yet. $1"
+uninstall_prepare_failed:
+    SetErrorLevel 1
     Abort
   ${EndIf}
   nsExec::ExecToStack '"$INSTDIR\transcoderd-desktop-service.exe" --uninstall'
   Pop $0
   Pop $1
   ${If} $0 != 0
+    DetailPrint "Could not remove the service: $1"
+    IfSilent uninstall_remove_failed
     MessageBox MB_ICONSTOP "Could not remove the service: $1"
+uninstall_remove_failed:
+    SetErrorLevel 1
     Abort
   ${EndIf}
   IfFileExists "$INSTDIR\transcoderd-tray.exe" 0 +3

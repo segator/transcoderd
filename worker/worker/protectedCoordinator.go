@@ -17,6 +17,12 @@ func (q *ServerCoordinator) protectedRequestTaskRoutine(ctx context.Context) {
 	if pending && !q.resolveProtectedReservation(ctx) {
 		return
 	}
+	for _, j := range q.worker.initialRecoveries {
+		if !q.resolveInitialProtectedAssignment(ctx, j) {
+			return
+		}
+	}
+	q.worker.initialRecoveries = nil
 	for ctx.Err() == nil {
 		checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		err := q.worker.reconcileProtectedInventory(checkCtx)
@@ -67,6 +73,24 @@ func (q *ServerCoordinator) protectedRequestTaskRoutine(ctx context.Context) {
 			return
 		}
 	}
+}
+
+func (q *ServerCoordinator) resolveInitialProtectedAssignment(ctx context.Context, j *job.Context) bool {
+	if !q.worker.beginProtectedOperation() {
+		return false
+	}
+	defer q.worker.protectedOps.Done()
+	for ctx.Err() == nil {
+		if err := q.worker.startProtectedReservedJob(ctx, j); err == nil {
+			return true
+		} else {
+			q.logger.Errorf("Protected initial assignment remains unresolved: %v", err)
+		}
+		if !waitProtectedRetry(ctx, 5*time.Second) {
+			return false
+		}
+	}
+	return false
 }
 
 // resolveProtectedReservation keeps the slot while a request or its returned

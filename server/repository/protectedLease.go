@@ -50,8 +50,13 @@ func (s *SQLRepository) AcquireProtectedLease(ctx context.Context, worker string
 		}
 		provided := sha256.Sum256([]byte(claim.Capability))
 		last := job.Events.GetLatestPerNotificationType(model.JobNotification)
-		if owner != worker || generation < 1 || uint64(generation) != claim.Generation || subtle.ConstantTimeCompare(expected, provided[:]) != 1 || (state != "assigned" && state != "running" && state != "parked") || last == nil || last.WorkerName != worker || (last.Status != model.AssignedNotificationStatus && last.Status != model.StartedNotificationStatus) {
+		if owner != worker || generation < 1 || uint64(generation) != claim.Generation || subtle.ConstantTimeCompare(expected, provided[:]) != 1 || (state != "assigned" && state != "running" && state != "parked" && state != "publishing") || last == nil || last.WorkerName != worker || (last.Status != model.AssignedNotificationStatus && last.Status != model.StartedNotificationStatus) {
 			return ErrStaleAssignment
+		}
+		// Publication owns its generation. Only the process that entered it may
+		// renew a still-live lease; no new process may take over publication.
+		if state == "publishing" && (!leaseInstance.Valid || leaseInstance.String != instance.String() || !leaseExpiry.Valid || !leaseExpiry.Time.After(now)) {
+			return ErrLeaseHeld
 		}
 		if state != "parked" && leaseInstance.Valid && leaseExpiry.Valid && leaseExpiry.Time.After(now) && leaseInstance.String != instance.String() {
 			return ErrLeaseHeld

@@ -176,6 +176,10 @@ func TestProtectedWorkerParksPrefetchAcrossRestart(t *testing.T) {
 	var wg2 sync.WaitGroup
 	second.Run(&wg2, ctx2)
 	defer func() { cancel2(); wg2.Wait() }()
+	coordinator := NewServerCoordinator(base, second, nil, console.NewRenderService().Logger())
+	if len(second.parkedRecoveries) != 1 || !coordinator.resolveParkedProtectedAssignment(ctx2, second.parkedRecoveries[0]) {
+		t.Fatal("parked assignment was not reconciled after restart")
+	}
 	waitProtectedState(t, second, j2.JobId, "parked")
 	if err := second.reconcileProtectedInventory(ctx2); err != nil {
 		t.Fatalf("reconcile recovered assignment: %v", err)

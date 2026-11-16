@@ -8,6 +8,7 @@ import (
 
 	"transcoder/model"
 	"transcoder/worker/job"
+	"transcoder/worker/serverclient"
 
 	"github.com/google/uuid"
 )
@@ -16,6 +17,48 @@ type protectedRecoveryClient interface {
 	protectedEventClient
 	protectedParkClient
 	AcquireLease(context.Context, model.AssignmentClaim) (time.Time, error)
+}
+
+// A terminal completion can be replayed without a live lease if the server
+// has already recorded the exact publication intent. Otherwise it must first
+// grant a new process lease before accepting that event.
+func recoverableTerminalAssignment(j *job.Context) bool {
+	if j == nil || j.Assignment == nil || j.Assignment.JobID != j.JobId || j.Assignment.Generation == 0 || j.Assignment.Capability == "" || j.Assignment.InstanceID == uuid.Nil || j.RequestID == uuid.Nil || j.Parked || j.ParkIntent {
+		return false
+	}
+	if pending := j.PendingProtectedEvent(); pending != nil {
+		return pending.NotificationType == model.JobNotification && pending.Status == model.CompletedNotificationStatus
+	}
+	return j.LastEvent != nil && j.LastEvent.NotificationType == model.JobNotification && j.LastEvent.Status == model.CompletedNotificationStatus
+}
+
+func recoverProtectedTerminal(ctx context.Context, j *job.Context, worker string, client protectedRecoveryClient) error {
+	if !recoverableTerminalAssignment(j) || worker == "" || client == nil {
+		return errors.New("protected terminal checkpoint cannot be reconciled")
+	}
+	publisher := &protectedEventPublisher{client: client, workerName: worker, retryDelay: time.Second}
+	if j.PendingProtectedEvent() != nil {
+		err := publisher.Reconcile(ctx, j)
+		if errors.Is(err, serverclient.ErrProtectedConflict) {
+			claim := *j.Assignment
+			claim.InstanceID = uuid.New()
+			guard, leaseErr := startLeaseGuard(ctx, func(ctx context.Context) (time.Time, error) {
+				return client.AcquireLease(ctx, claim)
+			}, 5*time.Second)
+			if leaseErr != nil {
+				return leaseErr
+			}
+			defer guard.Close()
+			if err := j.RecordAcquiredLease(claim.InstanceID); err != nil {
+				return err
+			}
+			err = publisher.Reconcile(guard.ctx, j)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return j.Clean()
 }
 
 // Only checkpoints before Download starts are replayed here. Other interrupted
@@ -33,11 +76,23 @@ func recoverableInitialAssignment(j *job.Context) bool {
 	return true
 }
 
+func recoverablePreEncodeCheckpoint(j *job.Context) bool {
+	if j == nil || j.Assignment == nil || j.Assignment.JobID != j.JobId || j.Assignment.Generation == 0 || j.Assignment.Capability == "" || j.NextPhase != model.FFMPEGSNotification || j.PendingProtectedEvent() != nil || j.LastEvent == nil || j.LastEvent.Status != model.CompletedNotificationStatus {
+		return false
+	}
+	switch j.LastEvent.NotificationType {
+	case model.DownloadNotification, model.MKVExtractNotification, model.PGSNotification:
+		return true
+	default:
+		return false
+	}
+}
+
 // recoverParkedJob reconciles only a validated pre-encode checkpoint. The
 // caller must serialize the queue-stop decision with resume and admission.
 // Running jobs and other unresolved contexts need their own recovery path.
 func recoverParkedJob(ctx context.Context, j *job.Context, worker string, client protectedRecoveryClient, queueStopped bool, retryDelay time.Duration) (*leaseGuard, error) {
-	if j == nil || j.Assignment == nil || j.Assignment.JobID != j.JobId || (!j.Parked && !j.ParkIntent) || j.NextPhase != model.FFMPEGSNotification || client == nil || worker == "" {
+	if !recoverablePreEncodeCheckpoint(j) || client == nil || worker == "" {
 		return nil, errors.New("protected parked checkpoint cannot be reconciled")
 	}
 	if err := j.ValidatePrefetchedSource(); err != nil {
@@ -85,7 +140,7 @@ func recoverParkedJob(ctx context.Context, j *job.Context, worker string, client
 // restoreProtectedParked installs the per-job encode hold before queueing a
 // recovered checkpoint. The scanner resumes it only after settings permit it.
 func (e *JobExecutor) restoreProtectedParked(ctx context.Context, j *job.Context) error {
-	if e.protectedClient == nil || e.encodePool == nil || j == nil || j.Assignment == nil || (!j.Parked && !j.ParkIntent) {
+	if e.protectedClient == nil || e.encodePool == nil || !recoverablePreEncodeCheckpoint(j) {
 		return errors.New("protected parked recovery is unavailable")
 	}
 	if err := e.encodePool.holdEncoder(j.JobId); err != nil {

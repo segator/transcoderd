@@ -59,6 +59,8 @@ type JobExecutor struct {
 	protectedJobs            map[uuid.UUID]*protectedExecution
 	reclaimedJobs            map[uuid.UUID]bool // guarded by admissionMu until FFmpeg starts
 	initialRecoveries        []*job.Context     // populated during startup before coordinator starts
+	terminalRecoveries       []*job.Context     // confirmed or uncertain completion checkpoints
+	parkedRecoveries         []*job.Context     // pre-encode checkpoints awaiting server reconciliation
 	protectedStarted         bool
 	protectedReconciled      bool
 	protectedRecoveryPending bool
@@ -357,6 +359,20 @@ func (e *JobExecutor) resumeJobsContext(ctx context.Context) {
 				}
 				if e.protectedWorkspace != nil && recoverableInitialAssignment(jobContext) {
 					e.initialRecoveries = append(e.initialRecoveries, jobContext)
+					e.admissionMu.Lock()
+					e.reservedJobs++
+					e.admissionMu.Unlock()
+					return nil
+				}
+				if e.protectedWorkspace != nil && recoverableTerminalAssignment(jobContext) {
+					e.terminalRecoveries = append(e.terminalRecoveries, jobContext)
+					e.admissionMu.Lock()
+					e.reservedJobs++
+					e.admissionMu.Unlock()
+					return nil
+				}
+				if e.protectedWorkspace != nil && recoverablePreEncodeCheckpoint(jobContext) {
+					e.parkedRecoveries = append(e.parkedRecoveries, jobContext)
 					e.admissionMu.Lock()
 					e.reservedJobs++
 					e.admissionMu.Unlock()

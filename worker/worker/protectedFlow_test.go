@@ -167,7 +167,24 @@ func TestProtectedFlowStopsRestartsAndResumesPrefetch(t *testing.T) {
 	if err := publisher.Publish(guard.ctx, j, model.UploadNotification, model.CompletedNotificationStatus, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := publisher.Publish(guard.ctx, j, model.JobNotification, model.CompletedNotificationStatus, ""); err != nil {
+	// Simulate a crash after the server commits completion but before the
+	// worker records its acknowledgement. Recovery must replay the exact event.
+	completion, err := j.NewProtectedEvent("node", model.JobNotification, model.CompletedNotificationStatus, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.StageProtectedEvent(completion); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.PublishEvent(guard.ctx, *j.Assignment, completion); err != nil {
+		t.Fatal(err)
+	}
+	guard.Close()
+	j, err = job.ReadContextFromDiskByPath(filepath.Join(j.WorkingDir, j.JobId.String()+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverProtectedTerminal(ctx, j, "node", client); err != nil {
 		t.Fatal(err)
 	}
 	current, err = repo.GetJob(ctx, video.Id.String())

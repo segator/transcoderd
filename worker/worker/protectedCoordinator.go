@@ -17,6 +17,18 @@ func (q *ServerCoordinator) protectedRequestTaskRoutine(ctx context.Context) {
 	if pending && !q.resolveProtectedReservation(ctx) {
 		return
 	}
+	for _, j := range q.worker.terminalRecoveries {
+		if !q.resolveTerminalProtectedAssignment(ctx, j) {
+			return
+		}
+	}
+	q.worker.terminalRecoveries = nil
+	for _, j := range q.worker.parkedRecoveries {
+		if !q.resolveParkedProtectedAssignment(ctx, j) {
+			return
+		}
+	}
+	q.worker.parkedRecoveries = nil
 	for _, j := range q.worker.initialRecoveries {
 		if !q.resolveInitialProtectedAssignment(ctx, j) {
 			return
@@ -73,6 +85,54 @@ func (q *ServerCoordinator) protectedRequestTaskRoutine(ctx context.Context) {
 			return
 		}
 	}
+}
+
+func (q *ServerCoordinator) resolveTerminalProtectedAssignment(ctx context.Context, j *job.Context) bool {
+	if !q.worker.beginProtectedOperation() {
+		return false
+	}
+	defer q.worker.protectedOps.Done()
+	for ctx.Err() == nil {
+		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := recoverProtectedTerminal(attemptCtx, j, q.worker.workerConfig.Name, q.worker.protectedClient)
+		cancel()
+		if err == nil {
+			q.worker.ReleaseJobSlot()
+			return true
+		}
+		q.logger.Errorf("Protected completion remains unresolved: %v", err)
+		q.worker.admissionMu.Lock()
+		q.worker.protectedInventoryError = fmt.Sprintf("completion for %s requires reconciliation: %v", j.JobId, err)
+		q.worker.admissionMu.Unlock()
+		if !waitProtectedRetry(ctx, 5*time.Second) {
+			return false
+		}
+	}
+	return false
+}
+
+func (q *ServerCoordinator) resolveParkedProtectedAssignment(ctx context.Context, j *job.Context) bool {
+	if !q.worker.beginProtectedOperation() {
+		return false
+	}
+	defer q.worker.protectedOps.Done()
+	for ctx.Err() == nil {
+		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := q.worker.restoreProtectedParked(attemptCtx, j)
+		cancel()
+		if err == nil {
+			q.worker.ReleaseJobSlot()
+			return true
+		}
+		q.logger.Errorf("Protected prefetch remains unresolved: %v", err)
+		q.worker.admissionMu.Lock()
+		q.worker.protectedInventoryError = fmt.Sprintf("prefetch for %s requires reconciliation: %v", j.JobId, err)
+		q.worker.admissionMu.Unlock()
+		if !waitProtectedRetry(ctx, 5*time.Second) {
+			return false
+		}
+	}
+	return false
 }
 
 func (q *ServerCoordinator) resolveInitialProtectedAssignment(ctx context.Context, j *job.Context) bool {

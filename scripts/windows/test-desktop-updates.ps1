@@ -95,7 +95,9 @@ try {
  $env:E2E_SERVER_URL=$ServerURL;$env:E2E_TOKEN='e2e-test-token';$env:E2E_SOURCE_PATH='e2e_fixture.mkv'
  $encode=Start-Process -FilePath $TestBinary -ArgumentList @('-test.v','-test.timeout=7m','-test.run=^TestE2E$') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $EvidenceDirectory 'encode.log') -RedirectStandardError (Join-Path $EvidenceDirectory 'encode.err')
  $null=$encode.Handle
- $null=Wait-Status {param($s) $s.worker.activeJobs -gt 0}
+ # The restart barrier parks pre-encode work. To verify that an already
+ # running encode finishes through upload, wait for FFmpeg itself to start.
+ $null=Wait-Status {param($s) @($s.worker.jobs | Where-Object { $_.phase -eq 'FFMPEG' -and $_.state -eq 'running' }).Count -gt 0}
  New-Item -ItemType File -Path (Join-Path $FixtureDirectory 'hold-download') -Force | Out-Null
  Set-Feed $true
  $null=Invoke-Desktop @{command='check-update'}

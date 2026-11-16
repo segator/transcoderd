@@ -176,7 +176,7 @@ try {
  $journal | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $journalPath -Encoding utf8
  & schtasks.exe /Run /TN TranscoderDUpdateRecovery
  if ($LASTEXITCODE -ne 0) { throw 'Post-restart recovery task could not run.' }
- $status=Wait-Status {param($s) $s.version -eq 'v99.1.0' -and -not $s.update.pending} 180
+ $status=Wait-Status {param($s) $s.version -eq 'v99.1.0' -and -not $s.update.pending -and -not $s.updateHandoff -and -not $s.pending -and $s.profiles.cpu -and $s.profiles.gpu -and -not $s.profiles.cpu.draining -and -not $s.profiles.gpu.draining} 180
  Write-PhaseDuration 'restart and post-boot verification'
  Write-Output 'Restart-required state retained the lock; post-boot verification completed through the recovery task.'
  Assert-Owner

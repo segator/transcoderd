@@ -20,6 +20,12 @@ func TestCombinedProfileSafeIdleRequiresBothConsistentProfiles(t *testing.T) {
 		t.Fatal("active encode was reported safely idle")
 	}
 	broken = ready
+	broken.ParkedJobs = 0
+	profiles["gpu"] = broken
+	if safe, _ := combinedProfileSafeIdle(profiles); safe == nil || *safe {
+		t.Fatal("an unaccounted assignment was reported safely idle")
+	}
+	broken = ready
 	broken.SafeIdle = nil
 	profiles["gpu"] = broken
 	if safe, _ := combinedProfileSafeIdle(profiles); safe != nil {

@@ -35,6 +35,12 @@ Both settings can also be supplied through `TR_WORKER_PROTECTED_CREDENTIAL` and
 `TR_WORKER_PROTECTED_WORKSPACE_ID`. A host-local volume only supports recovery on
 the same host; a pod scheduled elsewhere needs the same persistent storage.
 
+An existing legacy assignment is not automatically adopted into protected
+ownership. Reconcile legacy assignments before enabling protected mode for that
+worker; otherwise admission remains closed and status reports a recovery error.
+Do not roll the server back to a version without fencing while protected
+assignments or publication intents remain: an older server cannot enforce them.
+
 The local `control wait-safe-idle <duration>` closes a restart barrier and waits
 for active work and transfers to finish and prefetched work to be durably parked.
 It leaves the barrier held on success or timeout; use

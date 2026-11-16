@@ -77,6 +77,10 @@ func TestWaitSafeIdleRequiresConfirmedParkedJobsAndHoldsBarrier(t *testing.T) {
 	if status.SafeIdle == nil || !*status.SafeIdle || status.ParkedJobs != 1 || !status.RestartBarrier || e.ReserveJobSlot() {
 		t.Fatalf("safe idle status = %+v", status)
 	}
+	runtime := e.RuntimeTelemetry()
+	if runtime.SafeIdle == nil || !*runtime.SafeIdle || runtime.ParkedJobs != 1 || !runtime.RestartBarrier || len(runtime.Jobs) != 1 || runtime.Jobs[0].State != "parked" {
+		t.Fatalf("parked runtime telemetry = %+v", runtime)
+	}
 	if err := e.SetMaxActiveJobs(2); err != nil {
 		t.Fatal(err)
 	}

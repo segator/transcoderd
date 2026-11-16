@@ -296,7 +296,7 @@ type supervisor struct {
 }
 
 func (s *supervisor) snapshotLocked() desktop.Status {
-	status := desktop.Status{ShutdownPending: s.shutdownPending, Configured: s.state.Active != nil, Running: len(s.children) > 0, Version: version.Version, Pending: s.state.Pending != nil || s.state.PendingLimit, CanCancelConfiguration: s.state.Pending != nil, Message: s.message, Queue: s.queue, QueueError: s.queueError, Profiles: make(map[string]control.AdmissionStatus)}
+	status := desktop.Status{ShutdownPending: s.shutdownPending, Configured: s.state.Active != nil, Running: len(s.children) > 0, Version: version.Version, Pending: s.state.Pending != nil || s.state.PendingLimit || s.updateHeld, UpdateHandoff: s.updateHeld, CanCancelConfiguration: s.state.Pending != nil, Message: s.message, Queue: s.queue, QueueError: s.queueError, Profiles: make(map[string]control.AdmissionStatus)}
 	if s.shutdownMessage != "" {
 		status.Message = s.shutdownMessage
 	}
@@ -411,7 +411,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := desktop.Response{}
-	if (s.maintenance || s.updatePending()) && (req.Command == "stop-after-current" || req.Command == "configure" || req.Command == "cancel-pending-configuration" || req.Command == "set-max-jobs" || req.Command == "pause-job" || req.Command == "resume-job" || req.Command == "pause-encodes" || req.Command == "resume-encodes") {
+	if (s.maintenance || s.updatePending() || s.updateHeld) && (req.Command == "stop-after-current" || req.Command == "configure" || req.Command == "cancel-pending-configuration" || req.Command == "set-max-jobs" || req.Command == "pause-job" || req.Command == "resume-job" || req.Command == "pause-encodes" || req.Command == "resume-encodes") {
 		result.Error = managed.LockedMessage
 		result.Status = s.snapshotLocked()
 		return result

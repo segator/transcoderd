@@ -61,30 +61,44 @@ func (q *ServerCoordinator) protectedRequestTaskRoutine(ctx context.Context) {
 			q.logger.Errorf("Error synchronizing protected worker capacity: %v", err)
 			continue
 		}
-		if !q.worker.ReserveJobSlot() {
+		var checkUpdate func() (bool, error)
+		if q.updater != nil {
+			checkUpdate = func() (bool, error) {
+				_, needed, err := q.updater.CheckForUpdate()
+				return needed, err
+			}
+		}
+		updateRequired, reserved, err := protectedPollDecision(checkUpdate, q.worker.ReserveJobSlot)
+		if err != nil {
+			q.logger.Errorf("Error checking for update: %v", err)
 			continue
 		}
-		if q.updater != nil {
-			_, updateRequired, err := q.updater.CheckForUpdate()
-			if err != nil {
-				q.worker.ReleaseJobSlot()
-				q.logger.Errorf("Error checking for update: %v", err)
-				continue
+		if updateRequired {
+			q.worker.BeginRestartBarrier()
+			q.logger.Logf("Worker update is waiting for protected safe idle")
+			if err := q.worker.WaitSafeIdle(ctx); err == nil {
+				os.Exit(update.ExitCode)
 			}
-			if updateRequired {
-				q.worker.ReleaseJobSlot()
-				q.worker.BeginRestartBarrier()
-				q.logger.Logf("Worker update is waiting for protected safe idle")
-				if err := q.worker.WaitSafeIdle(ctx); err == nil {
-					os.Exit(update.ExitCode)
-				}
-				return
-			}
+			return
+		}
+		if !reserved {
+			continue
 		}
 		if !q.resolveProtectedReservation(ctx) {
 			return
 		}
 	}
+}
+
+// Check updates independently of admission: a stopped queue can still be
+// safely updated while its prefetched work remains parked.
+func protectedPollDecision(checkUpdate func() (bool, error), reserve func() bool) (updateRequired, reserved bool, err error) {
+	if checkUpdate != nil {
+		if required, err := checkUpdate(); err != nil || required {
+			return required, false, err
+		}
+	}
+	return false, reserve(), nil
 }
 
 func (q *ServerCoordinator) resolveTerminalProtectedAssignment(ctx context.Context, j *job.Context) bool {

@@ -51,6 +51,12 @@ context.render({configured:true,worker:{maxActiveJobs:0,paused:true,maxEncodes:5
 assert.match(element('notice-text').textContent,/Running encodes and uploads can finish/);
 assert.match(element('job-list').innerHTML,/Waiting for Resume/);
 assert.equal(element('stat-ready').textContent,1);
+context.render({configured:true,worker:{maxActiveJobs:0,paused:true,maxEncodes:1,activeEncodes:0,jobs:[{jobId:'parked',name:'parked.mkv',downloaded:true,phase:'FFMPEG',state:'parked'}],progress:[]}});
+assert.match(element('job-list').innerHTML,/Prefetched and parked/);
+assert.doesNotMatch(element('job-list').innerHTML,/>Encoding</);
+assert.equal(element('stat-ready').textContent,1);
+context.render({configured:true,worker:{maxActiveJobs:0,paused:true,safeIdle:true,parkedJobs:1,maxEncodes:1,activeEncodes:0,jobs:[{jobId:'parked',name:'parked.mkv',downloaded:true,phase:'FFMPEG',state:'parked'}],progress:[]}});
+assert.match(element('notice-text').textContent,/Safe to restart.*1 prefetched/);
 context.render({configured:true,pending:true,worker:{maxActiveJobs:0,paused:false,jobs:[],progress:[]}});
 assert.match(element('connection').innerHTML,/Finishing accepted work/);
 assert.equal(element('toggle-pause').disabled,true,'maintenance drain cannot be bypassed with Resume');
@@ -129,6 +135,11 @@ assert.ok(saved.has('transcoderd.pending-update'),'update lock must survive a pa
   context.render({configured:true,version:'99.1.0',update:{pending:false,phase:'updated'},worker:{jobs:[],progress:[]}});
   assert.equal(element('settings-controls').disabled,false,'verified service status releases the lock');
   assert.equal(saved.has('transcoderd.pending-update'),false);
+  context.render({configured:true,updateHandoff:true,pending:true,update:{pending:false,phase:'updated'},worker:{jobs:[],progress:[]}});
+  assert.equal(element('settings-controls').disabled,true,'worker handoff keeps settings locked');
+  assert.match(element('notice-text').textContent,/reconnecting worker profiles/);
+  await assert.rejects(context.request('set-max-jobs',{maxJobs:0}),/locked/);
+  context.render({configured:true,version:'99.1.0',update:{pending:false,phase:'updated'},worker:{jobs:[],progress:[]}});
   const state={configured:true,pending:false,worker:{maxActiveJobs:2,maxEncodes:2,activeEncodes:2,pauseMode:'ram',paused:false,jobs:[{jobId:'individual',name:'one.mkv',phase:'FFMPEG',state:'running',canPause:true},{jobId:'other',phase:'FFMPEG',state:'running',canPause:true}],progress:[]}};
   state.pending=true;state.canCancelConfiguration=true;
   context.render(state);

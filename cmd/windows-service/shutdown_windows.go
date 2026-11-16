@@ -103,7 +103,7 @@ func (s *supervisor) checkShutdownLocked() {
 			s.cancelPendingShutdownLocked()
 			return
 		}
-		if !*status.SafeIdle || status.ReservedJobs != 0 || status.ActiveEncodes != 0 || status.SuspendedEncodes != 0 {
+		if !profileIsSafeIdle(status) {
 			idle = false
 		}
 	}

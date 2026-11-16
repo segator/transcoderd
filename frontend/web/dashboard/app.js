@@ -578,9 +578,8 @@
     return {
       ...local,
       queueHeld:
-        local.state === "queued" &&
-        local.phase === "FFMPEG" &&
-        worker.runtime.paused,
+        local.state === "parked" ||
+        (local.state === "queued" && local.phase === "FFMPEG" && worker.runtime.paused),
     };
   }
   function jobBadge(job) {
@@ -590,12 +589,18 @@
           "queued",
           local.individuallyPaused ? "Individually paused" : "RAM pause",
         )
+      : local?.state === "parked"
+        ? badge("queued", "Prefetched")
+      : local?.state === "reconciling"
+        ? badge("queued", "Recovering")
       : local?.queueHeld
         ? badge("queued", "Queue stopped")
         : badge(job.state);
   }
   function observedProgress(job) {
     const local = observedJob(job);
+    if (local?.state === "parked") return '<span class="muted">Prefetched and parked</span>';
+    if (local?.state === "reconciling") return '<span class="muted">Reconciling prefetched work</span>';
     if (local?.state === "paused")
       return `<span class="muted">${job.progress?.length ? number.format(job.progress[0].percent) + "% · " : ""}Paused in RAM</span>`;
     if (local?.queueHeld) return '<span class="muted">Queue held</span>';
@@ -954,7 +959,7 @@
     return `<section${profileAttributes}>
       ${heading}
       ${kind ? "" : `<p class="media-help">${esc(profileLabel)}</p>`}
-      ${kind ? "" : `<p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.parkedJobs ? ` · ${rt.parkedJobs} prefetched and parked` : ""}${rt?.safeIdle === true ? " · safe to restart" : ""}${rt?.managedProfile ? " · shared host resources" : ""}</p>`}
+      ${kind ? (rt?.parkedJobs ? `<p class="media-help">${rt.parkedJobs} prefetched and parked${rt.safeIdle === true ? " · safe to restart" : ""}</p>` : "") : `<p class="media-help">${rt ? rt.activeJobs : w.activeJobs} accepted jobs${rt?.parkedJobs ? ` · ${rt.parkedJobs} prefetched and parked` : ""}${rt?.safeIdle === true ? " · safe to restart" : ""}${rt?.managedProfile ? " · shared host resources" : ""}</p>`}
       ${resources.summary(w, now, kind)}${resources.compact(w, resourceHistory, now, kind)}
       <a class="text-link worker-resource-link" href="${esc(resources.link(w.name))}">${kind ? `View ${kind.toUpperCase()} resource details ↗` : "View resource details ↗"}</a>
       <div class="encoder-lanes">${profile.cpu ? lane("cpu") : ""}${profile.gpu ? lane("gpu") : ""}</div>
@@ -979,8 +984,8 @@
           ? task.progress
           : job?.progress || [];
         const paused = task.state === "paused";
-        const held =
-          task.state === "queued" && (rt.paused || rt.maxActiveJobs === 0);
+        const held = task.state === "parked" || task.state === "reconciling" ||
+          (task.state === "queued" && (rt.paused || rt.maxActiveJobs === 0));
         const control =
           rt.controlVersion >= 2 &&
           task.canPause &&
@@ -997,12 +1002,16 @@
           ? "Paused individually"
           : task.pausedByWorker
             ? "Worker RAM hold"
+            : task.state === "parked"
+              ? "Prefetched and parked"
+            : task.state === "reconciling"
+              ? "Reconciling prefetched work"
             : held
               ? "Queue held"
               : task.state === "queued"
                 ? "Waiting"
                 : "";
-        return `<article class="worker-task" data-task-id="${esc(task.id)}"><div class="task-heading"><strong title="${esc(name)}">${esc(name)}</strong>${control ? `<button type="button" class="button subtle" data-worker-control="${task.individuallyPaused ? "resume-job" : "pause-job"}" data-worker-name="${esc(worker.name)}" data-job-id="${esc(task.id)}" ${unavailable ? "disabled" : ""} aria-label="${task.individuallyPaused ? "Resume" : "Pause"} ${esc(name)}">${task.individuallyPaused ? "Resume" : "Pause"}</button>` : ""}</div>${state ? `<p class="task-phase">${esc(state)}${task.individuallyPaused && task.pausedByWorker ? " · Worker RAM hold" : ""}</p>` : ""}<div class="job-progress">${jobProgress({ state: "active", held: paused || held, phase: task.phase, progress: progress.map((p) => ({ ...p, etaSeconds: paused || held ? 0 : p.etaSeconds })) })}</div></article>`;
+        return `<article class="worker-task" data-task-id="${esc(task.id)}"><div class="task-heading"><strong title="${esc(name)}">${esc(name)}</strong>${control ? `<button type="button" class="button subtle" data-worker-control="${task.individuallyPaused ? "resume-job" : "pause-job"}" data-worker-name="${esc(worker.name)}" data-job-id="${esc(task.id)}" ${unavailable ? "disabled" : ""} aria-label="${task.individuallyPaused ? "Resume" : "Pause"} ${esc(name)}">${task.individuallyPaused ? "Resume" : "Pause"}</button>` : ""}</div>${state ? `<p class="task-phase">${esc(state)}${task.individuallyPaused && task.pausedByWorker ? " · Worker RAM hold" : ""}</p>` : ""}${task.state === "parked" || task.state === "reconciling" ? "" : `<div class="job-progress">${jobProgress({ state: "active", held: paused || held, phase: task.phase, progress: progress.map((p) => ({ ...p, etaSeconds: paused || held ? 0 : p.etaSeconds })) })}</div>`}</article>`;
       })
       .join(
         "",

@@ -11,6 +11,10 @@ After authenticating a complete eligible release, the service SHALL persist the 
 - **WHEN** the service starts with a persisted pending update
 - **THEN** admission remains blocked before either worker profile can request new work and updating resumes automatically
 
+#### Scenario: Verified update hands off to normal workers
+- **WHEN** the installed release is verified but its maintenance-held workers have not yet restarted
+- **THEN** configuration controls remain locked until the handoff finishes and the service reports that workers are reconnecting
+
 ### Requirement: Drain all accepted Windows work
 Before replacing installation files, the service SHALL stop new assignments locally for both profiles and wait for safe idle. Active downloads, subtitle work, encodes, verification and uploads SHALL complete normally. When the queue was already stopped, recoverable prefetched jobs SHALL stay parked. An unreachable profile SHALL not be treated as idle. Maintenance SHALL preserve persisted server limits and user pause and schedule settings.
 

@@ -114,6 +114,8 @@ function phaseDescription(phase) {
 }
 function jobLabel(job) {
   if (job.state === 'paused') return ['Paused in RAM','ready'];
+	if (job.state === 'parked') return ['Prefetched','ready'];
+	if (job.state === 'reconciling') return ['Recovering','ready'];
   if (job.state === 'queued') return job.downloaded && job.phase === 'FFMPEG' ? ['Ready to encode','ready'] : ['Queued',job.downloaded ? 'ready' : ''];
   return ({FFMPEG:['Encoding',''], Download:['Downloading','download'], PGS:['Subtitle OCR',''], MKVExtract:['Extracting subtitles',''], Upload:['Uploading','download'], JobVerify:['Verifying','']})[job.phase] || ['Working',''];
 }
@@ -129,7 +131,7 @@ function encoderLabel(job, progress) {
 function render(status) {
   current = status;
   renderUpdate(status.update || null);
-  lockConfiguration(Boolean(status.update?.pending));
+  lockConfiguration(Boolean(status.update?.pending || status.updateHandoff));
   $('check-update').hidden = !window.chrome?.webview || !status.update;
   document.body.classList.toggle('browser-host', !window.chrome?.webview);
   $('app-version').textContent = `VERSION ${status.version || '—'}`;
@@ -167,7 +169,7 @@ function render(status) {
     const [label, badge] = jobLabel(j); const name = j.name || p?.name || `Job ${j.jobId.slice(0,8)}`;
     const heldByWorker = Boolean(j.pausedByWorker || generalRAMHold);
     const pct = p ? Math.min(100, Math.max(0, Number(p.percent) || 0)) : 0;
-    let details = j.state === 'paused' ? `${j.individuallyPaused ? (heldByWorker ? 'Paused individually and by worker' : 'Paused individually') : heldByWorker ? 'Paused by worker profile' : 'Encoding suspended'} · progress preserved · RAM/VRAM retained` : p ? jobProgressText(p) : '';
+    let details = j.state === 'parked' ? 'Prefetched and parked · waiting to encode' : j.state === 'reconciling' ? 'Reconciling prefetched work' : j.state === 'paused' ? `${j.individuallyPaused ? (heldByWorker ? 'Paused individually and by worker' : 'Paused individually') : heldByWorker ? 'Paused by worker profile' : 'Encoding suspended'} · progress preserved · RAM/VRAM retained` : p ? jobProgressText(p) : '';
     if (!details && j.state === 'queued') details = j.downloaded && j.phase === 'FFMPEG' ? (ramPause && isPaused ? 'Waiting for Resume queue and Resume encodes' : ramPause ? 'Waiting for Resume encodes · downloaded' : isPaused && worker.paused !== false ? 'Waiting for Resume queue · downloaded' : 'Downloaded and ready to encode') : !j.downloaded && j.phase === 'Download' ? 'Waiting to download' : phaseDescription(j.phase);
     if (!details) details = phaseDescription(j.phase);
     const jobAction = j.canPause && j.phase === 'FFMPEG' ? `<button type="button" class="job-toggle" data-job-pause="${escapeHTML(j.jobId)}" aria-label="${j.individuallyPaused || heldByWorker ? 'Resume' : 'Pause'} encoding ${escapeHTML(name)}" title="${heldByWorker ? 'Resume or enable this worker profile first. Individual pauses are preserved by general Resume.' : j.individuallyPaused ? 'Resume only this encode.' : 'Pause only this encode in RAM; other encodes continue. RAM and VRAM remain allocated.'}" ${configurationLocked || status.pending || heldByWorker || jobPausePending.has(j.jobId) ? 'disabled' : ''}>${jobPausePending.has(j.jobId) ? 'Working…' : j.individuallyPaused || heldByWorker ? '▶ Resume' : 'Ⅱ Pause'}</button>` : '';
@@ -178,7 +180,7 @@ function render(status) {
   $('stat-queue').textContent = queue ? queue.total : '—'; $('queue-count').textContent = queue ? queue.total : '—';
   $('stat-queue-caption').textContent = queue ? 'Awaiting assignment' : 'Unavailable';
   $('server-queue').innerHTML = queue ? (queue.jobs?.length ? queue.jobs.map((j, i) => `<div class="queue-item"><span class="queue-num">${String(i+1).padStart(2,'0')}</span><div class="queue-info"><div class="queue-name" title="${escapeHTML(j.name)}">${escapeHTML(j.name)}</div><div class="queue-meta">${escapeHTML(fileSize(j.size) ? `Awaiting assignment · ${fileSize(j.size)}` : 'Awaiting assignment')}</div></div><span class="badge ready">Queued</span></div>`).join('') : empty('Queue empty','There are no jobs waiting to be assigned.',true)) : empty('Queue unavailable',status.queueError === 'unsupported' ? 'Update the server to view its queue.' : 'The queue will appear when the server is available.',true);
-  const notice = !status.configured ? 'Configure the connection to start your worker.' : status.pending ? 'Changes are pending until accepted work finishes. Stopped queues and paused encodes remain paused.' : worker?.recoveryError ? `Recovery needs attention: ${worker.recoveryError}` : status.message || (ramPause ? `Encoding is paused in RAM; RAM and VRAM remain allocated. ${isPaused ? 'The queue is also stopped.' : 'The queue will reopen when encoding resumes.'} Worker exit or PC restart loses live encoder state.` : isPaused ? 'The queue is stopped. Running encodes and uploads can finish; queued encodes wait for Resume queue.' : worker?.suspendedEncodes > 0 ? `${worker.suspendedEncodes} encoding(s) paused individually in RAM. Other work can continue.` : worker?.withinSchedule === false ? 'Outside the work schedule. New assignments resume during the next window.' : '');
+  const notice = !status.configured ? 'Configure the connection to start your worker.' : status.updateHandoff ? 'Finishing the update and reconnecting worker profiles.' : status.pending ? 'Changes are pending until accepted work finishes. Stopped queues and paused encodes remain paused.' : worker?.recoveryError ? `Recovery needs attention: ${worker.recoveryError}` : status.message || (worker?.safeIdle === true ? `Safe to restart. ${worker.parkedJobs || 0} prefetched job(s) remain parked.` : ramPause ? `Encoding is paused in RAM; RAM and VRAM remain allocated. ${isPaused ? 'The queue is also stopped.' : 'The queue will reopen when encoding resumes.'} Worker exit or PC restart loses live encoder state.` : isPaused ? 'The queue is stopped. Running encodes and uploads can finish; queued encodes wait for Resume queue.' : worker?.suspendedEncodes > 0 ? `${worker.suspendedEncodes} encoding(s) paused individually in RAM. Other work can continue.` : worker?.withinSchedule === false ? 'Outside the work schedule. New assignments resume during the next window.' : '');
   $('notice').classList.toggle('hidden', !notice); $('notice-text').textContent = notice; $('notice-start').classList.add('hidden'); $('notice-settings').classList.remove('hidden');
   $('cancel-pending-configuration').classList.toggle('hidden', !status.canCancelConfiguration || !window.chrome?.webview || configurationLocked);
   $('shutdown-pending').hidden = !status.shutdownPending;

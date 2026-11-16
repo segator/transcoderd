@@ -23,6 +23,7 @@ type Status struct {
 	Running                bool                               `json:"running"`
 	Version                string                             `json:"version"`
 	Pending                bool                               `json:"pending"`
+	UpdateHandoff          bool                               `json:"updateHandoff,omitempty"`
 	CanCancelConfiguration bool                               `json:"canCancelConfiguration,omitempty"`
 	Settings               *PublicSettings                    `json:"settings,omitempty"`
 	Worker                 *control.AdmissionStatus           `json:"worker,omitempty"`

@@ -35,6 +35,16 @@ func TestPendingUpdateRejectsDirectConfigurationRequests(t *testing.T) {
 	}
 }
 
+func TestUpdateHandoffRejectsConfigurationUntilWorkersRestart(t *testing.T) {
+	s := &supervisor{updateHeld: true, state: desktop.Persisted{Active: &desktop.Settings{CPUJobs: 1}}}
+	for _, req := range []desktop.Request{{Command: "configure", Settings: &desktop.Settings{CPUJobs: 4}}, {Command: "set-max-jobs", MaxJobs: 0}, {Command: "cancel-pending-configuration"}} {
+		response := s.handle(req)
+		if response.Error != managed.LockedMessage || !response.Status.UpdateHandoff || !response.Status.Pending {
+			t.Fatalf("handoff response = %+v", response)
+		}
+	}
+}
+
 type updateProfileState struct {
 	mu     sync.Mutex
 	status control.AdmissionStatus

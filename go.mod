@@ -20,7 +20,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	golang.org/x/oauth2 v0.38.0
 	golang.org/x/sys v0.50.0
-	gopkg.in/ini.v1 v1.67.3
+	gopkg.in/ini.v1 v1.68.0
 	gopkg.in/vansante/go-ffprobe.v2 v2.3.1
 )
 

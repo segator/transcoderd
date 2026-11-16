@@ -276,6 +276,19 @@ func validateUploadMetadata(path, checksum string, size int64, stage func() erro
 	return nil
 }
 
+func isProtectedParkBoundary(events model.TaskEvents) bool {
+	last := events.GetLatest()
+	if last == nil || last.Status != model.CompletedNotificationStatus {
+		return false
+	}
+	switch last.NotificationType {
+	case model.DownloadNotification, model.MKVExtractNotification, model.PGSNotification:
+		return true
+	default:
+		return false
+	}
+}
+
 // StageProtectedUpload rechecks ownership under the same row lock as
 // cancellation, then publishes only an isolated generation-specific staging
 // file. A crash before the database commit can leave an orphan, never a final
@@ -358,6 +371,16 @@ func (s *SQLRepository) ParkProtectedJob(ctx context.Context, worker string, cla
 		}
 		if err := protectedLeaseValid(ctx, conn, claim, true); err != nil {
 			return err
+		}
+		if !isProtectedParkBoundary(job.Events) {
+			return ErrEventConflict
+		}
+		var staged bool
+		if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM protected_publications WHERE job_id=$1 AND generation=$2 AND state='staged')`, claim.JobID.String(), generation).Scan(&staged); err != nil {
+			return err
+		}
+		if staged {
+			return ErrEventConflict
 		}
 		_, err = conn.ExecContext(ctx, `UPDATE protected_assignments SET state='parked',updated_at=CURRENT_TIMESTAMP WHERE job_id=$1`, claim.JobID.String())
 		return err

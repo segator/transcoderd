@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"transcoder/worker/serverclient"
+
+	"github.com/google/uuid"
 )
 
 var ErrProtectedLeaseLost = errors.New("protected assignment lease was lost")
@@ -17,9 +19,10 @@ type leaseRenewal func(context.Context) (time.Time, error)
 // an assignment. Its deadline is conservative and local; on renewal failure it
 // cancels the context before the last confirmed server lease can expire.
 type leaseGuard struct {
-	ctx    context.Context
-	cancel context.CancelCauseFunc
-	done   chan struct{}
+	ctx      context.Context
+	cancel   context.CancelCauseFunc
+	done     chan struct{}
+	instance uuid.UUID
 }
 
 func startLeaseGuard(parent context.Context, renew leaseRenewal, margin time.Duration) (*leaseGuard, error) {

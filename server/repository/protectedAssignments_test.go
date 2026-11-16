@@ -128,6 +128,10 @@ func testProtectedParking(t *testing.T, repo Repository) {
 	if err := repo.ParkProtectedJob(ctx, "other", claim); !errors.Is(err, ErrStaleAssignment) {
 		t.Fatalf("ParkProtectedJob(other) = %v, want stale assignment", err)
 	}
+	if err := repo.ParkProtectedJob(ctx, "worker", claim); !errors.Is(err, ErrEventConflict) {
+		t.Fatalf("ParkProtectedJob(before prefetch) = %v, want conflict", err)
+	}
+	addTestCompletedPrefetch(t, repo, "worker", claim)
 	for i := 0; i < 2; i++ {
 		if err := repo.ParkProtectedJob(ctx, "worker", claim); err != nil {
 			t.Fatalf("ParkProtectedJob() attempt %d = %v", i, err)
@@ -180,6 +184,22 @@ func acquireTestLease(t *testing.T, repo Repository, worker string, claim *model
 	}
 }
 
+func addTestCompletedPrefetch(t *testing.T, repo Repository, worker string, claim model.AssignmentClaim) {
+	t.Helper()
+	ctx := context.Background()
+	current, err := repo.GetJob(ctx, claim.JobID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []model.NotificationStatus{model.StartedNotificationStatus, model.CompletedNotificationStatus} {
+		event := current.AddEvent(model.DownloadNotification, status)
+		event.WorkerName = worker
+		if err := repo.ApplyProtectedEvent(ctx, worker, claim, *event); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestProtectedParking(t *testing.T) { testProtectedParking(t, NewInMemoryRepository()) }
 
 func testProtectedParkTimeoutRace(t *testing.T, repo Repository) {
@@ -211,6 +231,7 @@ func testProtectedParkTimeoutRace(t *testing.T, repo Repository) {
 	}
 	claim := model.AssignmentClaim{JobID: job.Id, Generation: assigned.Generation, Capability: assigned.Capability}
 	acquireTestLease(t, repo, "worker", &claim)
+	addTestCompletedPrefetch(t, repo, "worker", claim)
 	start := make(chan struct{})
 	var parkErr, timeoutErr error
 	var requeued bool

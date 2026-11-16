@@ -56,3 +56,12 @@ func (w *WorkspaceLock) Close() error {
 	w.file = nil
 	return err
 }
+
+func (w *WorkspaceLock) Path() (string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return "", errors.New("worker workspace lock is closed")
+	}
+	return w.path, nil
+}

@@ -140,7 +140,8 @@ func (r *InMemoryRepository) ListPendingProtectedPublications(ctx context.Contex
 	var result []model.ProtectedPublication
 	for key, upload := range r.protectedUploads {
 		state := r.protectedJobs[key.jobID]
-		if state.generation != key.generation || (upload.state != "publishing" && !((upload.state == "completed" || upload.state == "abandoned") && (upload.deleteSource || upload.cleanupPending))) {
+		cleanupPending := (upload.state == "completed" || upload.state == "abandoned") && (upload.deleteSource || upload.cleanupPending)
+		if state.generation != key.generation || (upload.state != "publishing" && !cleanupPending) {
 			continue
 		}
 		id, err := uuid.Parse(key.jobID)
@@ -446,6 +447,12 @@ func (r *InMemoryRepository) ParkProtectedJob(ctx context.Context, worker string
 	}
 	if !memoryProtectedLeaseValid(state, claim, true) {
 		return ErrStaleAssignment
+	}
+	if !isProtectedParkBoundary(model.TaskEvents(r.events[id])) {
+		return ErrEventConflict
+	}
+	if upload, exists := r.protectedUploads[protectedUploadKey{id, claim.Generation}]; exists && upload.state == "staged" {
+		return ErrEventConflict
 	}
 	state.state = "parked"
 	r.protectedJobs[id] = state

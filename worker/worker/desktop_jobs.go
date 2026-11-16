@@ -73,9 +73,16 @@ func (e *JobExecutor) trackPipeline(executors map[model.NotificationType]*step.E
 				log.WithError(err).WithField("job_id", j.JobId.String()).Error("Failed to persist next job phase")
 				e.recordRecoveryError(fmt.Errorf("persist next phase for job %s: %w", j.JobId, err), false)
 			}
+			e.admissionMu.Lock()
 			e.jobs.set(j, phase, "queued")
+			e.admissionMu.Unlock()
 			oldAdd(j)
 		}
-		executor.OnJob = func(j *job.Context) { e.jobs.set(j, phase, "running"); oldJob(j) }
+		executor.OnJob = func(j *job.Context) {
+			e.admissionMu.Lock()
+			e.jobs.set(j, phase, "running")
+			e.admissionMu.Unlock()
+			oldJob(j)
+		}
 	}
 }

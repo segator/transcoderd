@@ -5,9 +5,32 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"transcoder/model"
 )
+
+// NewProtectedEvent allocates the next sequence from the last acknowledged
+// snapshot. The caller must still stage it before transmission.
+func (e *Context) NewProtectedEvent(worker string, phase model.NotificationType, status model.NotificationStatus, message string) (model.TaskEventType, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.PendingEvent != nil {
+		return model.TaskEventType{}, ErrPendingEvent
+	}
+	if e.Assignment == nil || e.Assignment.JobID != e.JobId || worker == "" {
+		return model.TaskEventType{}, errors.New("protected assignment or worker is missing")
+	}
+	id := e.EventId + 1
+	if e.LastEvent != nil {
+		id = e.LastEvent.EventId + 1
+	}
+	event := model.TaskEventType{Event: model.Event{WorkerName: worker, EventTime: time.Now().UTC()}, JobId: e.JobId, EventID: id, NotificationType: phase, Status: status, Message: message}
+	if phase == model.JobNotification && status == model.CompletedNotificationStatus {
+		event.TargetProbe = e.TargetMediaProbe
+	}
+	return cloneProtectedEvent(event), nil
+}
 
 var ErrPendingEvent = errors.New("another protected event awaits acknowledgement")
 

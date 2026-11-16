@@ -156,7 +156,7 @@ func TestProtectedUploadCannotCommitAfterCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Clean()
+	defer func() { _ = stream.Clean() }()
 	data := []byte("encoded")
 	if _, err := stream.Write(data); err != nil {
 		t.Fatal(err)
@@ -220,7 +220,7 @@ func TestRecoverAbandonedUploadPreservesSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Clean()
+	defer func() { _ = stream.Clean() }()
 	data := []byte("encoded")
 	if _, err := stream.Write(data); err != nil {
 		t.Fatal(err)

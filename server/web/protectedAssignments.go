@@ -150,9 +150,26 @@ func newProtectedAccess(config *Config, scheduler protectedScheduler) (*protecte
 	return &protectedAccess{credentials: credentials, keys: keyring, scheduler: scheduler}, nil
 }
 
-// These handlers are deliberately not registered until protected events and
-// transfers are implemented. A partially protected protocol must not issue a
-// job that can only be completed through an unsafe legacy route.
+// NewProtectedHandler constructs the complete protected route set without
+// attaching it to the production server. Rollout remains disabled until the
+// worker and supervisor use the protected protocol end to end.
+func NewProtectedHandler(config *Config, scheduler protectedScheduler) (http.Handler, error) {
+	access, err := newProtectedAccess(config, scheduler)
+	if err != nil {
+		return nil, err
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v2/worker/jobs/request", access.requestJob)
+	mux.HandleFunc("POST /api/v2/worker/jobs/lease", access.lease)
+	mux.HandleFunc("POST /api/v2/worker/jobs/park", access.parkJob)
+	mux.HandleFunc("POST /api/v2/worker/jobs/event", access.notify)
+	mux.HandleFunc("POST /api/v2/worker/jobs/progress", access.progress)
+	mux.HandleFunc("GET /api/v2/worker/jobs/download", access.download)
+	mux.HandleFunc("GET /api/v2/worker/jobs/checksum", access.checksum)
+	mux.HandleFunc("POST /api/v2/worker/jobs/upload", access.upload)
+	return mux, nil
+}
+
 func (p *protectedAccess) authenticate(w http.ResponseWriter, r *http.Request) (string, bool) {
 	worker := workerNameFromRequest(r)
 	if err := p.credentials.Authenticate(worker, r.Header.Get("X-Worker-Credential")); err != nil {
@@ -207,7 +224,7 @@ func (p *protectedAccess) parkJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := p.scheduler.ParkProtectedJob(r.Context(), worker, claim); err != nil {
-		if errors.Is(err, repository.ErrStaleAssignment) {
+		if errors.Is(err, repository.ErrStaleAssignment) || errors.Is(err, repository.ErrEventConflict) {
 			http.Error(w, "assignment is no longer current", http.StatusConflict)
 			return
 		}

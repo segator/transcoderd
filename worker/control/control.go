@@ -18,15 +18,20 @@ var ErrJobNotPausable = errors.New("job has no active controllable encoding")
 const controlRequestTimeout = 15 * time.Second
 
 type AdmissionStatus struct {
-	CPUJobs             int  `json:"cpuJobs"`
-	GPUJobs             int  `json:"gpuJobs"`
-	ActiveCPUEncodes    int  `json:"activeCPUEncodes"`
-	ActiveGPUEncodes    int  `json:"activeGPUEncodes"`
-	CPUMaxEncodes       int  `json:"cpuMaxEncodes"`
-	GPUMaxEncodes       int  `json:"gpuMaxEncodes"`
-	IndependentEncoders bool `json:"independentEncoders"`
-	Finishing           bool `json:"finishing"`
-	Draining            bool `json:"draining"`
+	CPUJobs             int   `json:"cpuJobs"`
+	GPUJobs             int   `json:"gpuJobs"`
+	ActiveCPUEncodes    int   `json:"activeCPUEncodes"`
+	ActiveGPUEncodes    int   `json:"activeGPUEncodes"`
+	CPUMaxEncodes       int   `json:"cpuMaxEncodes"`
+	GPUMaxEncodes       int   `json:"gpuMaxEncodes"`
+	IndependentEncoders bool  `json:"independentEncoders"`
+	Finishing           bool  `json:"finishing"`
+	Draining            bool  `json:"draining"`
+	RestartBarrier      bool  `json:"restartBarrier"`
+	SafeIdle            *bool `json:"safeIdle,omitempty"`
+	RunningJobs         int   `json:"runningJobs,omitempty"`
+	ParkedJobs          int   `json:"parkedJobs,omitempty"`
+	PendingJobs         int   `json:"pendingJobs,omitempty"`
 
 	RAMPaused        bool           `json:"ramPaused"`
 	PauseMode        string         `json:"pauseMode"`

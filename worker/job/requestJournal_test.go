@@ -25,7 +25,7 @@ func TestPendingRequestSurvivesRestartUntilResolved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if got, err := lock.PendingRequest(); err != nil || got != id {
 		t.Fatalf("PendingRequest() after restart = %v, %v; want %v", got, err, id)
 	}
@@ -49,7 +49,7 @@ func TestPendingRequestRejectsCorruptJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if _, err := lock.PendingRequest(); err == nil {
 		t.Fatal("PendingRequest() accepted a corrupt journal")
 	}

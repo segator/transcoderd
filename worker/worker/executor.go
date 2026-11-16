@@ -34,6 +34,8 @@ type JobExecutor struct {
 	finishing       bool
 	managedLimits   bool
 	recoveryError   string
+	restartBarrier  bool
+	safeIdleEnabled bool
 
 	workerConfig    *config.Config
 	tempPath        string
@@ -300,7 +302,10 @@ func (e *JobExecutor) resumeJobs() {
 				return nil
 			}
 
+			e.admissionMu.Lock()
 			atomic.AddUint32(&e.activeJobs, 1)
+			e.jobs.set(jobContext, notificationType, "queued")
+			e.admissionMu.Unlock()
 			stepExecutor.AddJob(jobContext)
 		}
 
@@ -367,11 +372,31 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 	if mode == "" {
 		mode = config.PauseFinish
 	}
+	runningJobs, parkedJobs, pendingJobs := 0, 0, 0
+	for _, j := range jobs {
+		switch j.State {
+		case "running", "paused":
+			runningJobs++
+		case "parked":
+			parkedJobs++
+		default:
+			pendingJobs++
+		}
+	}
+	activeJobs := e.ActiveJobs()
+	if uint64(activeJobs) > uint64(len(jobs)) {
+		pendingJobs += int(uint64(activeJobs) - uint64(len(jobs)))
+	}
+	var safeIdle *bool
+	if e.safeIdleEnabled {
+		safe := e.restartBarrier && !e.settingsPending && e.recoveryError == "" && e.reservedJobs == 0 && activeEncodes == 0 && suspended == 0 && uint64(len(jobs)) == uint64(activeJobs) && parkedJobs == len(jobs)
+		safeIdle = &safe
+	}
 	return AdmissionStatus{
-		Accepting:        !e.admissionHeld && !e.finishing && !e.settingsPending && e.recoveryError == "" && !e.ramPaused && e.maxActiveJobs > 0 && withinSchedule,
+		Accepting:        !e.admissionHeld && !e.finishing && !e.restartBarrier && !e.settingsPending && e.recoveryError == "" && !e.ramPaused && e.maxActiveJobs > 0 && withinSchedule,
 		RecoveryError:    e.recoveryError,
 		RAMPaused:        !e.admissionHeld && (e.ramPaused || (e.maxActiveJobs == 0 && e.pauseMode == config.PauseRAM)),
-		ActiveJobs:       e.ActiveJobs(),
+		ActiveJobs:       activeJobs,
 		ReservedJobs:     e.reservedJobs,
 		MaxActiveJobs:    e.maxActiveJobs,
 		MaxAcceptedJobs:  maxAccepted,
@@ -385,7 +410,8 @@ func (e *JobExecutor) AdmissionStatus() AdmissionStatus {
 		SuspendedEncodes: suspended,
 		CPUJobs:          cpuJobs, GPUJobs: gpuJobs, ActiveCPUEncodes: cpuActive, ActiveGPUEncodes: gpuActive,
 		CPUMaxEncodes: cpuTarget, GPUMaxEncodes: gpuTarget, IndependentEncoders: independent,
-		Finishing: e.finishing, Draining: e.admissionHeld,
+		Finishing: e.finishing, Draining: e.admissionHeld, RestartBarrier: e.restartBarrier, SafeIdle: safeIdle,
+		RunningJobs: runningJobs, ParkedJobs: parkedJobs, PendingJobs: pendingJobs,
 	}
 }
 
@@ -618,7 +644,7 @@ func (e *JobExecutor) ReserveJobSlot() bool {
 }
 
 func (e *JobExecutor) canReserveJobSlotAt(now time.Time) bool {
-	if e.admissionHeld || e.finishing || e.settingsPending || e.recoveryError != "" || e.ramPaused || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
+	if e.admissionHeld || e.finishing || e.restartBarrier || e.settingsPending || e.recoveryError != "" || e.ramPaused || e.maxActiveJobs <= 0 || !e.workerConfig.AdmissionAllowedAt(now) {
 		return false
 	}
 	encodeTarget := e.maxActiveJobs
@@ -680,6 +706,7 @@ func (e *JobExecutor) ExecuteReservedJob(jobId uuid.UUID, lastEvent int, origina
 		e.reservedJobs--
 	}
 	atomic.AddUint32(&e.activeJobs, 1)
+	e.jobs.set(jobContext, model.DownloadNotification, "queued")
 	e.admissionMu.Unlock()
 	e.stepExecutors[model.DownloadNotification].AddJob(jobContext)
 	return nil
@@ -861,14 +888,21 @@ func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step
 }
 
 func (e *JobExecutor) CleanJob(jobContext *job.Context) error {
-	err := e.cleanJob(jobContext.Clean)
-	e.jobs.remove(jobContext.JobId.String())
-	return err
+	return e.cleanTrackedJob(jobContext.Clean, jobContext.JobId.String())
 }
 
 func (e *JobExecutor) cleanJob(cleanup func() error) error {
+	return e.cleanTrackedJob(cleanup, "")
+}
+
+func (e *JobExecutor) cleanTrackedJob(cleanup func() error, id string) error {
 	err := cleanup()
+	e.admissionMu.Lock()
 	atomic.AddUint32(&e.activeJobs, ^uint32(0))
+	if id != "" {
+		e.jobs.remove(id)
+	}
+	e.admissionMu.Unlock()
 	return err
 }
 

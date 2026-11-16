@@ -35,6 +35,8 @@ type Context struct {
 	Assignment       *model.AssignmentClaim `json:"assignment,omitempty"`
 	RequestID        uuid.UUID              `json:"request_id,omitempty"`
 	PendingEvent     *model.TaskEventType   `json:"pending_event,omitempty"`
+	ParkIntent       bool                   `json:"park_intent,omitempty"`
+	Parked           bool                   `json:"parked,omitempty"`
 	mu               sync.Mutex
 }
 
@@ -176,9 +178,22 @@ func (e *Context) ValidatePrefetchedSource() error {
 }
 
 func ReadContextFromDiskByPath(path string) (*Context, error) {
-	b, err := os.ReadFile(path)
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, fmt.Errorf("open job context directory %q: %w", path, err)
+	}
+	defer root.Close()
+	file, err := root.Open(filepath.Base(path))
 	if err != nil {
 		return nil, fmt.Errorf("read job context %q: %w", path, err)
+	}
+	defer file.Close()
+	b, err := io.ReadAll(io.LimitReader(file, 16<<20+1))
+	if err != nil {
+		return nil, fmt.Errorf("read job context %q: %w", path, err)
+	}
+	if len(b) > 16<<20 {
+		return nil, fmt.Errorf("read job context %q: file is too large", path)
 	}
 	jobContext := new(Context)
 	if err := json.Unmarshal(b, jobContext); err != nil {

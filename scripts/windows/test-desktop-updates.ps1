@@ -79,13 +79,25 @@ try {
  Set-Feed $false
  $null=Invoke-Desktop @{command='check-update'}
  $null=Wait-Status {param($s) $s.update.phase -eq 'current'}
- $settings=@{domain=$ServerURL;token='e2e-test-token';name='update-e2e';workingDirectory=(Join-Path $EvidenceDirectory 'encoding work');cpuCodec='libsvtav1';cpuJobs=1;gpuCodec='av1_nvenc';gpuJobs=0;schedule=@()}
- $null=Invoke-Desktop @{command='configure';settings=$settings}
+ $workingDirectory=Join-Path $EvidenceDirectory 'encoding work'
+ $cpuWorkspace='7c395c98-0407-4d0b-b636-71de9c05c975'
+ $gpuWorkspace='91d3b22a-95e9-41fa-ac26-e9e84c051214'
+ foreach ($profile in @(@{name='cpu';id=$cpuWorkspace},@{name='gpu';id=$gpuWorkspace})) {
+  $path=Join-Path $workingDirectory ('worker-update-e2e-'+$profile.name)
+  New-Item -ItemType Directory -Path $path -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path $path '.workspace-id') -Value $profile.id -Encoding utf8 -NoNewline
+ }
+ $settings=@{domain=$ServerURL;token='e2e-test-token';name='update-e2e';workingDirectory=$workingDirectory;cpuCodec='libsvtav1';cpuJobs=1;gpuCodec='av1_nvenc';gpuJobs=0;cpuCredential='update-cpu-fixture-secret';cpuWorkspaceId=$cpuWorkspace;gpuCredential='update-gpu-fixture-secret';gpuWorkspaceId=$gpuWorkspace;schedule=@()}
+ $configured=Invoke-Desktop @{command='configure';settings=$settings}
+ $public=$configured | ConvertTo-Json -Depth 20
+ if (-not $configured.settings.cpuCredentialSet -or -not $configured.settings.gpuCredentialSet -or $public -match 'update-(cpu|gpu)-fixture-secret') { throw 'Protected profile credentials were not saved or were exposed in status.' }
  $null=Wait-Status {param($s) $s.worker -and $s.worker.maxActiveJobs -eq 1}
  $env:E2E_SERVER_URL=$ServerURL;$env:E2E_TOKEN='e2e-test-token';$env:E2E_SOURCE_PATH='e2e_fixture.mkv'
  $encode=Start-Process -FilePath $TestBinary -ArgumentList @('-test.v','-test.timeout=7m','-test.run=^TestE2E$') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $EvidenceDirectory 'encode.log') -RedirectStandardError (Join-Path $EvidenceDirectory 'encode.err')
  $null=$encode.Handle
- $null=Wait-Status {param($s) $s.worker.activeJobs -gt 0}
+ # The restart barrier parks pre-encode work. To verify that an already
+ # running encode finishes through upload, wait for FFmpeg itself to start.
+ $null=Wait-Status {param($s) @($s.worker.jobs | Where-Object { $_.phase -eq 'FFMPEG' -and $_.state -eq 'running' }).Count -gt 0}
  New-Item -ItemType File -Path (Join-Path $FixtureDirectory 'hold-download') -Force | Out-Null
  Set-Feed $true
  $null=Invoke-Desktop @{command='check-update'}
@@ -164,14 +176,17 @@ try {
  $journal | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $journalPath -Encoding utf8
  & schtasks.exe /Run /TN TranscoderDUpdateRecovery
  if ($LASTEXITCODE -ne 0) { throw 'Post-restart recovery task could not run.' }
- $status=Wait-Status {param($s) $s.version -eq 'v99.1.0' -and -not $s.update.pending} 180
+ $status=Wait-Status {param($s) $s.version -eq 'v99.1.0' -and -not $s.update.pending -and -not $s.updateHandoff -and -not $s.pending -and $s.profiles.cpu -and $s.profiles.gpu -and -not $s.profiles.cpu.draining -and -not $s.profiles.gpu.draining} 180
  Write-PhaseDuration 'restart and post-boot verification'
  Write-Output 'Restart-required state retained the lock; post-boot verification completed through the recovery task.'
  Assert-Owner
  foreach ($key in @('domain','name','workingDirectory','cpuCodec','cpuJobs','gpuCodec','gpuJobs')) { if ($status.settings.$key -ne $settings[$key]) { throw "Upgrade changed the saved setting: $key" } }
  if (-not $status.settings.tokenSet) { throw 'Upgrade lost the saved token.' }
  $null=Invoke-Desktop @{command='set-max-jobs';cpuJobs=0;gpuJobs=0}
- $null=Wait-Status {param($s) $s.worker -and $s.worker.activeJobs -eq 0 -and $s.worker.reservedJobs -eq 0} 180
+ # A job queued during maintenance may be assigned as workers reconnect. Once
+ # the queue is stopped, an assigned prefetch may remain parked rather than
+ # reaching activeJobs=0; running work and reservations must still finish.
+ $null=Wait-Status {param($s) $s.worker -and $s.worker.activeJobs -eq [int]$s.worker.parkedJobs -and $s.worker.reservedJobs -eq 0 -and $s.worker.activeEncodes -eq 0 -and $s.worker.suspendedEncodes -eq 0 -and [int]$s.worker.runningJobs -eq 0 -and [int]$s.worker.pendingJobs -eq 0} 180
  Write-Output 'Mandatory Windows update: signed release, immediate admission barrier, completed upload, locked WebView/IPC, rollback, recovery task and automatic retry passed.'
 } finally {
  & schtasks.exe /End /TN TranscoderDUpdateRecovery 2>$null | Out-Null

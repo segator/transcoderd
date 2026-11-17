@@ -47,7 +47,7 @@ func (s *supervisor) drainForUpdate() (int, int, error) {
 	if s.maintenance {
 		return 0, 0, errors.New("manual Setup is running; automatic update is waiting")
 	}
-	s.shutdownPending = false
+	s.cancelPendingShutdownLocked()
 	active, reserved := 0, 0
 	for _, profile := range []string{"cpu", "gpu"} {
 		if s.children[profile] == nil {
@@ -56,11 +56,16 @@ func (s *supervisor) drainForUpdate() (int, int, error) {
 			}
 			continue
 		}
-		r, err := control.Call(workerPipe(profile), control.Request{Command: "hold-admission"})
+		r, err := s.callWorker(profile, control.Request{Command: "begin-restart-barrier"})
 		if err != nil {
 			return 0, 0, fmt.Errorf("waiting for %s worker control: %w", profile, err)
 		}
-		active += int(r.Status.ActiveJobs)
+		if r.Error != "" || r.Status.Accepting || !r.Status.RestartBarrier || r.Status.SafeIdle == nil {
+			return 0, 0, fmt.Errorf("waiting for %s worker to confirm safe idle", profile)
+		}
+		if !profileIsSafeIdle(r.Status) {
+			active += max(1, r.Status.RunningJobs+r.Status.PendingJobs, r.Status.ActiveEncodes, r.Status.SuspendedEncodes)
+		}
 		reserved += r.Status.ReservedJobs
 	}
 	return active, reserved, nil

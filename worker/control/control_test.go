@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -62,6 +63,87 @@ func (f *fakeController) DrainAcceptedJobs() error {
 	f.status.MaxActiveJobs = max
 	f.status.Accepting = max > 0
 	return nil
+}
+
+type barrierController struct{ fakeController }
+
+func (f *barrierController) BeginRestartBarrier() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status.RestartBarrier = true
+	f.status.Accepting = false
+}
+
+func (f *barrierController) ReleaseRestartBarrier() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status.RestartBarrier = false
+}
+
+func TestWaitSafeIdleHoldsBarrierAfterSuccessAndTimeout(t *testing.T) {
+	for _, ready := range []bool{true, false} {
+		t.Run(map[bool]string{true: "ready", false: "timeout"}[ready], func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "worker.sock")
+			state := &barrierController{fakeController: fakeController{status: AdmissionStatus{SafeIdle: &ready, ParkedJobs: 1}}}
+			server, err := Start(path, state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+			defer cancel()
+			response, err := WaitSafeIdle(ctx, path)
+			if ready && (err != nil || response.Status.SafeIdle == nil || !*response.Status.SafeIdle) {
+				t.Fatalf("ready wait = %+v, %v", response, err)
+			}
+			if !ready && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("timed out wait = %v", err)
+			}
+			if !state.AdmissionStatus().RestartBarrier {
+				t.Fatal("wait released the restart barrier")
+			}
+			if _, err := Call(path, Request{Command: "release-restart-barrier"}); err != nil || state.AdmissionStatus().RestartBarrier {
+				t.Fatalf("release barrier = %v", err)
+			}
+		})
+	}
+}
+
+func TestWaitSafeIdleRejectsUnknownCapability(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker.sock")
+	state := &barrierController{}
+	server, err := Start(path, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	if _, err := WaitSafeIdle(t.Context(), path); err == nil || state.AdmissionStatus().RestartBarrier {
+		t.Fatalf("unknown capability = %v, barrier=%t", err, state.AdmissionStatus().RestartBarrier)
+	}
+}
+
+func TestCallContextStopsWaitingOnDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker.sock")
+	listener, err := listenControl(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = closeControl(listener) }()
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		<-finished
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	if _, err := CallContext(ctx, path, Request{Command: "status"}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CallContext() = %v, want deadline exceeded", err)
+	}
 }
 
 func TestTransientDrainAndShutdown(t *testing.T) {
@@ -188,6 +270,12 @@ func (f *fakeController) HoldAdmission() error {
 	return nil
 }
 
+func (f *fakeController) ReleaseAdmission() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status.Accepting = true
+}
+
 func TestMandatoryHoldPreservesLimitsAndAcceptedWork(t *testing.T) {
 	state := &fakeController{status: AdmissionStatus{Accepting: true, MaxActiveJobs: 4, MaxEncodes: 4, ActiveJobs: 3, ReservedJobs: 1}}
 	path := filepath.Join(t.TempDir(), "worker.sock")
@@ -202,6 +290,10 @@ func TestMandatoryHoldPreservesLimitsAndAcceptedWork(t *testing.T) {
 	}
 	if got.Status.Accepting || got.Status.MaxActiveJobs != 4 || got.Status.ActiveJobs != 3 || got.Status.ReservedJobs != 1 || state.persisted != 0 {
 		t.Fatalf("mandatory hold changed accepted work/limits: %+v", got.Status)
+	}
+	got, err = Call(path, Request{Command: "release-admission"})
+	if err != nil || !got.Status.Accepting || got.Status.MaxActiveJobs != 4 {
+		t.Fatalf("admission hold release = %+v, %v", got.Status, err)
 	}
 }
 

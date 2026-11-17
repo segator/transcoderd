@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 
@@ -9,6 +10,8 @@ import (
 	"transcoder/worker/control"
 	"transcoder/worker/job"
 	"transcoder/worker/step"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type jobRegistry struct {
@@ -49,6 +52,12 @@ func (r *jobRegistry) set(jobContext *job.Context, phase model.NotificationType,
 }
 
 func (r *jobRegistry) remove(id string) { r.mu.Lock(); defer r.mu.Unlock(); delete(r.items, id) }
+func (r *jobRegistry) get(id string) (control.JobState, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[id]
+	return item, ok
+}
 func (r *jobRegistry) snapshot() []control.JobState {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -64,7 +73,25 @@ func (r *jobRegistry) snapshot() []control.JobState {
 func (e *JobExecutor) trackPipeline(executors map[model.NotificationType]*step.Executor) {
 	for phase, executor := range executors {
 		oldAdd, oldJob := executor.OnAdd, executor.OnJob
-		executor.OnAdd = func(j *job.Context) { e.jobs.set(j, phase, "queued"); oldAdd(j) }
-		executor.OnJob = func(j *job.Context) { e.jobs.set(j, phase, "running"); oldJob(j) }
+		executor.OnAdd = func(j *job.Context) {
+			j.NextPhase = phase
+			if err := j.PersistJobContext(); err != nil {
+				log.WithError(err).WithField("job_id", j.JobId.String()).Error("Failed to persist next job phase")
+				e.recordRecoveryError(fmt.Errorf("persist next phase for job %s: %w", j.JobId, err), false)
+			}
+			e.admissionMu.Lock()
+			e.jobs.set(j, phase, "queued")
+			e.admissionMu.Unlock()
+			oldAdd(j)
+		}
+		executor.OnJob = func(j *job.Context) {
+			e.admissionMu.Lock()
+			if phase == model.FFMPEGSNotification {
+				delete(e.reclaimedJobs, j.JobId)
+			}
+			e.jobs.set(j, phase, "running")
+			e.admissionMu.Unlock()
+			oldJob(j)
+		}
 	}
 }

@@ -47,6 +47,12 @@ type Config struct {
 	EncodeConfig    *FFMPEGConfig    `mapstructure:"ffmpegConfig"`
 	Dashboard       *DashboardConfig `mapstructure:"dashboard"`
 	VerifyDeltaTime float64          `mapstructure:"verifyDeltaTime" envconfig:"WORKER_VERIFY_DELTA_TIME"`
+	Protected       *ProtectedConfig `mapstructure:"protected"`
+}
+
+type ProtectedConfig struct {
+	Credential  string `mapstructure:"credential"`
+	WorkspaceID string `mapstructure:"workspaceId"`
 }
 
 type DashboardConfig struct {

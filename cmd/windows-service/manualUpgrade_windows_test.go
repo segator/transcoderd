@@ -24,13 +24,14 @@ func TestManualUpgradeHoldsBothProfilesBeforeWaiting(t *testing.T) {
 	status := manualUpgradeStatus()
 	active, reserved, err := holdProfilesForManualUpgrade(status, func(profile string, request control.Request) (control.Response, error) {
 		called = append(called, profile)
-		if request.Command != "hold-admission" {
+		if request.Command != "begin-restart-barrier" {
 			t.Fatalf("unexpected mutation %q", request.Command)
 		}
+		ready := false
 		if profile == "cpu" {
-			return control.Response{Status: control.AdmissionStatus{ActiveJobs: 1}}, nil
+			return control.Response{Status: control.AdmissionStatus{ActiveJobs: 1, RunningJobs: 1, RestartBarrier: true, SafeIdle: &ready}}, nil
 		}
-		return control.Response{Status: control.AdmissionStatus{ActiveJobs: 4, ReservedJobs: 1}}, nil
+		return control.Response{Status: control.AdmissionStatus{ActiveJobs: 4, RunningJobs: 4, ReservedJobs: 1, RestartBarrier: true, SafeIdle: &ready}}, nil
 	})
 	if err != nil || active != 5 || reserved != 1 || strings.Join(called, ",") != "cpu,gpu" {
 		t.Fatalf("drain=%d,%d,%v calls=%v", active, reserved, err, called)
@@ -81,10 +82,11 @@ func TestManualUpgradeUnknownActivityAndCompetingMaintenanceFailSafely(t *testin
 
 func TestManualUpgradeIncludesQueuedEncodesAndReservations(t *testing.T) {
 	active, reserved, err := holdProfilesForManualUpgrade(manualUpgradeStatus(), func(profile string, _ control.Request) (control.Response, error) {
+		ready := false
 		if profile == "cpu" {
-			return control.Response{Status: control.AdmissionStatus{Jobs: []control.JobState{{State: "queued"}, {State: "queued"}}}}, nil
+			return control.Response{Status: control.AdmissionStatus{PendingJobs: 2, RestartBarrier: true, SafeIdle: &ready}}, nil
 		}
-		return control.Response{Status: control.AdmissionStatus{ActiveEncodes: 1, ReservedJobs: 1}}, nil
+		return control.Response{Status: control.AdmissionStatus{ActiveEncodes: 1, ReservedJobs: 1, RestartBarrier: true, SafeIdle: &ready}}, nil
 	})
 	if err != nil || active != 3 || reserved != 1 {
 		t.Fatalf("remaining=%d,%d,%v", active, reserved, err)
@@ -95,6 +97,30 @@ func TestManualUpgradeIncludesQueuedEncodesAndReservations(t *testing.T) {
 	})
 	if err != nil || active != 0 || reserved != 0 {
 		t.Fatal("unconfigured service could not upgrade")
+	}
+}
+
+func TestManualUpgradeAllowsConfirmedParkedJobs(t *testing.T) {
+	active, reserved, err := holdProfilesForManualUpgrade(manualUpgradeStatus(), func(string, control.Request) (control.Response, error) {
+		ready := true
+		return control.Response{Status: control.AdmissionStatus{SafeIdle: &ready, RestartBarrier: true, ActiveJobs: 2, ParkedJobs: 2}}, nil
+	})
+	if err != nil || active != 0 || reserved != 0 {
+		t.Fatalf("parked upgrade state = %d,%d,%v", active, reserved, err)
+	}
+}
+
+func TestManualUpgradeDoesNotTrustContradictoryIdleStatus(t *testing.T) {
+	ready := true
+	active, reserved, err := holdProfilesForManualUpgrade(manualUpgradeStatus(), func(profile string, _ control.Request) (control.Response, error) {
+		status := control.AdmissionStatus{SafeIdle: &ready, RestartBarrier: true}
+		if profile == "cpu" {
+			status.ActiveEncodes = 1
+		}
+		return control.Response{Status: status}, nil
+	})
+	if err != nil || active == 0 || reserved != 0 {
+		t.Fatalf("contradictory idle state = %d,%d,%v", active, reserved, err)
 	}
 }
 
@@ -115,7 +141,7 @@ func TestManualUpgradeWaitsThroughWorkAndReportsProgress(t *testing.T) {
 	if err != nil || calls != 3 {
 		t.Fatalf("wait=%v calls=%d", err, calls)
 	}
-	if !strings.Contains(output.String(), "3 accepted jobs") || !strings.Contains(output.String(), "All accepted work has finished") {
+	if !strings.Contains(output.String(), "3 running or pending jobs") || !strings.Contains(output.String(), "All running work has finished") {
 		t.Fatalf("progress=%s", output.String())
 	}
 }
@@ -157,13 +183,19 @@ func TestServicePreparationDrainsGPUWhileCPUBusy(t *testing.T) {
 	busy := true
 	var called []string
 	service.workerControl = func(profile string, request control.Request) (control.Response, error) {
+		if request.Command == "release-restart-barrier" {
+			return control.Response{}, nil
+		}
 		called = append(called, profile)
-		if request.Command != "drain" {
+		if request.Command != "begin-restart-barrier" {
 			t.Fatal(request.Command)
 		}
-		status := control.AdmissionStatus{}
+		ready := true
+		status := control.AdmissionStatus{RestartBarrier: true, SafeIdle: &ready}
 		if busy && profile == "cpu" {
 			status.ActiveJobs = 1
+			status.RunningJobs = 1
+			ready = false
 		}
 		return control.Response{Status: status}, nil
 	}

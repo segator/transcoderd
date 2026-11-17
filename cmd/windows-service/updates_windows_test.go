@@ -35,6 +35,16 @@ func TestPendingUpdateRejectsDirectConfigurationRequests(t *testing.T) {
 	}
 }
 
+func TestUpdateHandoffRejectsConfigurationUntilWorkersRestart(t *testing.T) {
+	s := &supervisor{updateHeld: true, state: desktop.Persisted{Active: &desktop.Settings{CPUJobs: 1}}}
+	for _, req := range []desktop.Request{{Command: "configure", Settings: &desktop.Settings{CPUJobs: 4}}, {Command: "set-max-jobs", MaxJobs: 0}, {Command: "cancel-pending-configuration"}} {
+		response := s.handle(req)
+		if response.Error != managed.LockedMessage || !response.Status.UpdateHandoff || !response.Status.Pending {
+			t.Fatalf("handoff response = %+v", response)
+		}
+	}
+}
+
 type updateProfileState struct {
 	mu     sync.Mutex
 	status control.AdmissionStatus
@@ -48,19 +58,20 @@ func (p *updateProfileState) AdmissionStatus() control.AdmissionStatus {
 func (p *updateProfileState) PersistMaxActiveJobs(int) error {
 	return errors.New("update must not persist job limits")
 }
-func (p *updateProfileState) HoldAdmission() error {
+func (p *updateProfileState) BeginRestartBarrier() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.status.Accepting = false
-	return nil
+	p.status.RestartBarrier = true
 }
 
 func TestUpdateDrainsBothProfilesAndRejectsUnreachableProfile(t *testing.T) {
 	if os.Getenv("GITHUB_ACTIONS") != "true" {
 		t.Skip("machine worker pipes require an isolated runner")
 	}
-	cpu := &updateProfileState{status: control.AdmissionStatus{Accepting: true, ActiveJobs: 1, MaxActiveJobs: 1}}
-	gpu := &updateProfileState{status: control.AdmissionStatus{Accepting: true, ActiveJobs: 4, ReservedJobs: 1, MaxActiveJobs: 4}}
+	ready := false
+	cpu := &updateProfileState{status: control.AdmissionStatus{Accepting: true, ActiveJobs: 1, RunningJobs: 1, MaxActiveJobs: 1, SafeIdle: &ready}}
+	gpu := &updateProfileState{status: control.AdmissionStatus{Accepting: true, ActiveJobs: 4, RunningJobs: 4, ReservedJobs: 1, MaxActiveJobs: 4, SafeIdle: &ready}}
 	cpuPipe, err := control.Start(workerPipe("cpu"), cpu)
 	if err != nil {
 		t.Fatal(err)

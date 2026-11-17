@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"net"
@@ -34,13 +35,14 @@ func listenControl(path string) (net.Listener, error) {
 	return winio.ListenPipe(name, &winio.PipeConfig{SecurityDescriptor: security})
 }
 
-func dialControl(path string) (net.Conn, error) {
+func dialControlContext(ctx context.Context, path string) (net.Conn, error) {
 	name, _, err := pipeIdentity(path)
 	if err != nil {
 		return nil, err
 	}
-	timeout := 2 * time.Second
-	return winio.DialPipe(name, &timeout)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return winio.DialPipeContext(ctx, name)
 }
 
 func closeControl(listener net.Listener) error { return listener.Close() }

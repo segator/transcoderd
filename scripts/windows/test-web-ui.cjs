@@ -24,7 +24,7 @@ const context = {
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(`${assetRoot}/activity.js`, 'utf8'), context);
 vm.runInContext(fs.readFileSync(`${assetRoot}/app.js`, 'utf8'), context);
-const originalQueueClick=element('toggle-pause').handlers.click,originalRAMClick=element('toggle-encodes').handlers.click;
+const originalQueueClick=element('toggle-pause').handlers.click,originalRAMClick=element('toggle-encodes').handlers.click,originalCancelClick=element('cancel-pending-configuration').handlers.click;
 
 context.render({version:'2.8.2-test',configured:true,worker:{maxActiveJobs:0,maxEncodes:1,activeEncodes:1,jobs:[
   {jobId:'1',name:'<img src=x onerror=alert(1)>',phase:'FFMPEG',state:'running',downloaded:true,profile:'gpu',codec:'av1_nvenc'},
@@ -51,6 +51,12 @@ context.render({configured:true,worker:{maxActiveJobs:0,paused:true,maxEncodes:5
 assert.match(element('notice-text').textContent,/Running encodes and uploads can finish/);
 assert.match(element('job-list').innerHTML,/Waiting for Resume/);
 assert.equal(element('stat-ready').textContent,1);
+context.render({configured:true,worker:{maxActiveJobs:0,paused:true,maxEncodes:1,activeEncodes:0,jobs:[{jobId:'parked',name:'parked.mkv',downloaded:true,phase:'FFMPEG',state:'parked'}],progress:[]}});
+assert.match(element('job-list').innerHTML,/Prefetched and parked/);
+assert.doesNotMatch(element('job-list').innerHTML,/>Encoding</);
+assert.equal(element('stat-ready').textContent,1);
+context.render({configured:true,worker:{maxActiveJobs:0,paused:true,safeIdle:true,parkedJobs:1,maxEncodes:1,activeEncodes:0,jobs:[{jobId:'parked',name:'parked.mkv',downloaded:true,phase:'FFMPEG',state:'parked'}],progress:[]}});
+assert.match(element('notice-text').textContent,/Safe to restart.*1 prefetched/);
 context.render({configured:true,pending:true,worker:{maxActiveJobs:0,paused:false,jobs:[],progress:[]}});
 assert.match(element('connection').innerHTML,/Finishing accepted work/);
 assert.equal(element('toggle-pause').disabled,true,'maintenance drain cannot be bypassed with Resume');
@@ -129,7 +135,19 @@ assert.ok(saved.has('transcoderd.pending-update'),'update lock must survive a pa
   context.render({configured:true,version:'99.1.0',update:{pending:false,phase:'updated'},worker:{jobs:[],progress:[]}});
   assert.equal(element('settings-controls').disabled,false,'verified service status releases the lock');
   assert.equal(saved.has('transcoderd.pending-update'),false);
+  context.render({configured:true,updateHandoff:true,pending:true,update:{pending:false,phase:'updated'},worker:{jobs:[],progress:[]}});
+  assert.equal(element('settings-controls').disabled,true,'worker handoff keeps settings locked');
+  assert.match(element('notice-text').textContent,/reconnecting worker profiles/);
+  await assert.rejects(context.request('set-max-jobs',{maxJobs:0}),/locked/);
+  context.render({configured:true,version:'99.1.0',update:{pending:false,phase:'updated'},worker:{jobs:[],progress:[]}});
   const state={configured:true,pending:false,worker:{maxActiveJobs:2,maxEncodes:2,activeEncodes:2,pauseMode:'ram',paused:false,jobs:[{jobId:'individual',name:'one.mkv',phase:'FFMPEG',state:'running',canPause:true},{jobId:'other',phase:'FFMPEG',state:'running',canPause:true}],progress:[]}};
+  state.pending=true;state.canCancelConfiguration=true;
+  context.render(state);
+  let canceled='';const savedRequest=context.request;
+  context.request=async command=>{canceled=command;state.pending=false;state.canCancelConfiguration=false;return state;};
+  await originalCancelClick();
+  assert.equal(canceled,'cancel-pending-configuration','pending configuration can be canceled without resuming work');
+  context.request=savedRequest;
   context.render(state);
   let complete;
   const sent=[],originalRequest=context.request;

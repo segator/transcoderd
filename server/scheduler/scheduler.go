@@ -2,9 +2,12 @@ package scheduler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +17,7 @@ import (
 	"time"
 	"transcoder/helper"
 	"transcoder/model"
+	"transcoder/server/assignment"
 	"transcoder/server/repository"
 	"transcoder/worker/ffmpeg"
 
@@ -70,10 +74,44 @@ func (r *RuntimeScheduler) ListQueuedJobs(ctx context.Context) (model.QueueSnaps
 	return r.repo.ListQueuedJobs(ctx)
 }
 
+func (r *RuntimeScheduler) RequestProtectedJob(ctx context.Context, worker, requestID string, keys *assignment.Keyring) (*model.ProtectedAssignment, error) {
+	return r.repo.RequestProtectedJob(ctx, worker, requestID, keys)
+}
+
+func (r *RuntimeScheduler) ListWorkerAssignments(ctx context.Context, worker string) ([]model.WorkerAssignmentSnapshot, error) {
+	return r.repo.ListWorkerAssignments(ctx, worker)
+}
+
+func (r *RuntimeScheduler) ParkProtectedJob(ctx context.Context, worker string, claim model.AssignmentClaim) error {
+	return r.repo.ParkProtectedJob(ctx, worker, claim)
+}
+
+func (r *RuntimeScheduler) AcquireProtectedLease(ctx context.Context, worker string, claim model.AssignmentClaim, duration time.Duration) (time.Time, error) {
+	return r.repo.AcquireProtectedLease(ctx, worker, claim, claim.InstanceID, duration)
+}
+
+func (r *RuntimeScheduler) ApplyProtectedEvent(ctx context.Context, worker string, claim model.AssignmentClaim, event model.TaskEventType) error {
+	return r.repo.ApplyProtectedEvent(ctx, worker, claim, event)
+}
+
+func (r *RuntimeScheduler) ApplyProtectedProgress(ctx context.Context, worker string, claim model.AssignmentClaim, progress model.TaskProgressType, sequence uint64) error {
+	return r.repo.ApplyProtectedProgress(ctx, worker, claim, progress, sequence)
+}
+
 func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*model.RequestJobResponse, error) {
 	r.jobRequestMu.Lock()
 	defer r.jobRequestMu.Unlock()
-	video, err := r.repo.RetrieveQueuedJob(ctx)
+	var video *model.Job
+	err := r.repo.WithTransaction(ctx, func(ctx context.Context, tx repository.Repository) error {
+		var err error
+		video, err = tx.RetrieveQueuedJob(ctx)
+		if err != nil || video == nil {
+			return err
+		}
+		newEvent := video.AddEvent(model.JobNotification, model.AssignedNotificationStatus)
+		newEvent.WorkerName = workerName
+		return tx.AddNewTaskEvent(ctx, newEvent)
+	})
 	if err != nil {
 		if errors.Is(err, repository.ErrElementNotFound) {
 			return nil, ErrNoJobsAvailable
@@ -83,12 +121,6 @@ func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 	if video == nil {
 		return nil, nil
 	}
-	newEvent := video.AddEvent(model.JobNotification, model.AssignedNotificationStatus)
-	newEvent.WorkerName = workerName
-	if err = r.repo.AddNewTaskEvent(ctx, newEvent); err != nil {
-		return nil, err
-	}
-
 	task := &model.RequestJobResponse{
 		Id:      video.Id,
 		EventID: video.Events.GetLatest().EventID,
@@ -112,27 +144,7 @@ func (r *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, envelopedEvent
 }
 
 func (r *RuntimeScheduler) CancelJob(ctx context.Context, id string) error {
-	job, err := r.repo.GetJob(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	status := job.Events.GetStatus()
-	switch status {
-	case model.CompletedNotificationStatus:
-		return fmt.Errorf("job already completed")
-	case model.FailedNotificationStatus:
-		return fmt.Errorf("job is failed")
-	case model.CanceledNotificationStatus:
-		return fmt.Errorf("job already canceled")
-	case model.AssignedNotificationStatus, model.StartedNotificationStatus:
-		newEvent := job.AddEventComplete(model.JobNotification, model.CanceledNotificationStatus, "Job canceled by user")
-		err = r.repo.AddNewTaskEvent(ctx, newEvent)
-		if err != nil {
-			return err
-		}
-	}
-	return fmt.Errorf("job %s is in unknown state", id)
+	return r.repo.CancelJobAssignment(ctx, id)
 }
 
 func (r *RuntimeScheduler) GetJob(ctx context.Context, id string) (*model.Job, error) {
@@ -196,36 +208,35 @@ func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.Envelo
 		if err = json.Unmarshal(event.EventData, &taskEvent); err != nil {
 			return err
 		}
-		if taskEvent.IsCompleted() {
-			if err = r.completeJob(ctx, &taskEvent); err != nil {
-				return err
-			}
-		}
-		alreadyRecorded := false
-		if taskEvent.IsCompleted() {
-			video, getErr := r.repo.GetJob(ctx, taskEvent.JobId.String())
-			if getErr != nil {
-				return getErr
-			}
+		err = r.repo.WithLegacyJob(ctx, taskEvent.JobId.String(), func(tx repository.Repository, video *model.Job) error {
 			for _, storedEvent := range video.Events {
-				if storedEvent.EventID == taskEvent.EventID && storedEvent.IsCompleted() {
-					alreadyRecorded = true
-					break
+				if storedEvent.EventID == taskEvent.EventID {
+					if taskEvent.IsCompleted() && storedEvent.IsCompleted() {
+						return nil
+					}
+					return repository.ErrEventConflict
 				}
 			}
+			latestID := -1
+			if last := video.Events.GetLatest(); last != nil {
+				latestID = last.EventID
+			}
+			if taskEvent.EventID != latestID+1 {
+				return repository.ErrEventConflict
+			}
+			if taskEvent.IsCompleted() {
+				if err := r.completeJob(ctx, tx, &taskEvent); err != nil {
+					return err
+				}
+			}
+			return tx.AddNewTaskEvent(ctx, &taskEvent)
+		})
+		if err != nil {
+			return err
 		}
-		if !alreadyRecorded {
-			if err = r.repo.AddNewTaskEvent(ctx, &taskEvent); err != nil {
+		if taskEvent.IsCompleted() {
+			if err := r.cleanupLegacyCompletion(ctx, taskEvent.JobId.String()); err != nil {
 				return err
-			}
-		}
-		if taskEvent.IsCompleted() && r.config.DeleteSourceOnComplete {
-			video, getErr := r.repo.GetJob(ctx, taskEvent.JobId.String())
-			if getErr != nil {
-				return getErr
-			}
-			if removeErr := os.Remove(filepath.Join(r.config.SourcePath, video.SourcePath)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-				return fmt.Errorf("remove source after successful output finalization: %w", removeErr)
 			}
 		}
 	case model.ProgressEvent:
@@ -233,15 +244,12 @@ func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.Envelo
 		if err = json.Unmarshal(event.EventData, &taskProgress); err != nil {
 			return err
 		}
-		if taskProgress.Status != model.ProgressingTaskProgressTypeStatus {
-			if err = r.repo.DeleteProgressJob(ctx, taskProgress.ProgressID, taskProgress.NotificationType); err != nil {
-				return err
+		return r.repo.WithLegacyJob(ctx, taskProgress.JobId.String(), func(tx repository.Repository, _ *model.Job) error {
+			if taskProgress.Status != model.ProgressingTaskProgressTypeStatus {
+				return tx.DeleteProgressJob(ctx, taskProgress.ProgressID, taskProgress.NotificationType)
 			}
-			return nil
-		}
-		if err = r.repo.ProgressJob(ctx, &taskProgress); err != nil {
-			return err
-		}
+			return tx.ProgressJob(ctx, &taskProgress)
+		})
 
 	default:
 		return fmt.Errorf("unknown event type %s", event.EventType)
@@ -249,8 +257,8 @@ func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.Envelo
 	return nil
 }
 
-func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.TaskEventType) error {
-	video, err := r.repo.GetJob(ctx, jobEvent.JobId.String())
+func (r *RuntimeScheduler) completeJob(ctx context.Context, tx repository.Repository, jobEvent *model.TaskEventType) error {
+	video, err := tx.GetJob(ctx, jobEvent.JobId.String())
 	if err != nil {
 		return err
 	}
@@ -329,7 +337,7 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 	video.TargetSize = targetStat.Size()
 	video.TargetProbe = mediaProbe
 
-	err = r.repo.UpdateJob(ctx, video)
+	err = tx.UpdateJob(ctx, video)
 	if err != nil {
 		if !samePath(finalPath, probePath) {
 			_ = os.Remove(target)
@@ -337,23 +345,34 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 		l.Warnf("target job can not be updated because %v", err)
 		return err
 	}
-	for _, stagingFile := range []struct {
-		path string
-		name string
-	}{
-		{path: stagingPath, name: "uploaded"},
-		{path: legacyStagingPath, name: "legacy upload"},
-	} {
-		if samePath(stagingFile.path, finalPath) {
-			continue
-		}
-		if removeErr := removeUploadStagingFile(stagingFile.path); removeErr != nil {
-			l.Warnf("final output saved but %s staging cleanup failed: %v", stagingFile.name, removeErr)
-		}
-	}
-
 	l.Infof("Job completed")
 
+	return nil
+}
+
+func (r *RuntimeScheduler) cleanupLegacyCompletion(ctx context.Context, id string) error {
+	video, err := r.repo.GetJob(ctx, id)
+	if err != nil {
+		return err
+	}
+	staging, err := uploadStagingPath(r.config.SourcePath, video.SourcePath, id)
+	if err != nil {
+		return err
+	}
+	legacy := filepath.Join(uploadStagingDirectory(r.config.SourcePath), uploadStagingName(id))
+	final := filepath.Join(r.config.SourcePath, video.TargetPath)
+	for _, path := range []string{staging, legacy} {
+		if !samePath(path, final) {
+			if err := removeUploadStagingFile(path); err != nil {
+				log.WithError(err).Warn("Final output saved but upload staging cleanup failed")
+			}
+		}
+	}
+	if r.config.DeleteSourceOnComplete {
+		if err := os.Remove(filepath.Join(r.config.SourcePath, video.SourcePath)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove source after successful output finalization: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -390,6 +409,9 @@ func (r *RuntimeScheduler) scheduleRoutine(ctx context.Context) {
 	maintenanceTicker := time.NewTicker(r.config.ScheduleTime)
 	defer progressTicker.Stop()
 	defer maintenanceTicker.Stop()
+	if err := r.recoverProtectedPublications(ctx); err != nil {
+		log.WithError(err).Error("Failed to recover protected publications")
+	}
 
 	for {
 		select {
@@ -502,6 +524,14 @@ func (r *RuntimeScheduler) scheduleJobRequestLocked(ctx context.Context, jobRequ
 			}
 			eventsToAdd = job.Events
 		} else {
+			var protectedState string
+			job, protectedState, err = tx.GetJobForMutation(ctx, job.Id.String())
+			if err != nil {
+				return err
+			}
+			if jobRequest.ForceAssigned && protectedState != "" && protectedState != "revoked" && protectedState != "completed" {
+				return fmt.Errorf("protected assignment must be canceled before requeue: %w", repository.ErrStaleAssignment)
+			}
 			// If job exist we check if we can retry the job
 			eventsToAdd, err = r.updateJobByRequest(job, jobRequest)
 			if err != nil {
@@ -603,6 +633,13 @@ func (r *RuntimeScheduler) ScheduleJobRequests(ctx context.Context, jobRequest *
 }
 
 func (r *RuntimeScheduler) isValidStremeableJob(ctx context.Context, uuid string, workerName string) (*model.Job, error) {
+	protected, err := r.repo.IsProtectedJob(ctx, uuid)
+	if err != nil {
+		return nil, err
+	}
+	if protected {
+		return nil, fmt.Errorf("%w: protected assignment requires authenticated transfer", ErrorStreamNotAllowed)
+	}
 	video, err := r.repo.GetJob(ctx, uuid)
 	if err != nil {
 		return nil, err
@@ -621,11 +658,28 @@ func (r *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string
 	if err != nil {
 		return nil, err
 	}
+	return r.downloadJobWriter(video)
+}
+
+func (r *RuntimeScheduler) GetProtectedDownload(ctx context.Context, worker string, claim model.AssignmentClaim) (*DownloadJobStream, error) {
+	video, err := r.repo.GetProtectedJob(ctx, worker, claim)
+	if err != nil {
+		return nil, err
+	}
+	return r.downloadJobWriter(video)
+}
+
+func (r *RuntimeScheduler) downloadJobWriter(video *model.Job) (*DownloadJobStream, error) {
 	if !filepath.IsLocal(video.SourcePath) {
 		return nil, fmt.Errorf("job %s has a non-local source path", video.Id)
 	}
 	filePath := filepath.Join(r.config.SourcePath, video.SourcePath)
-	downloadFile, err := os.Open(filePath)
+	root, err := os.OpenRoot(r.config.SourcePath)
+	if err != nil {
+		return nil, err
+	}
+	downloadFile, err := root.Open(video.SourcePath)
+	_ = root.Close()
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrorJobNotFound
@@ -635,7 +689,12 @@ func (r *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string
 	}
 	dfStat, err := downloadFile.Stat()
 	if err != nil {
+		_ = downloadFile.Close()
 		return nil, err
+	}
+	if !dfStat.Mode().IsRegular() {
+		_ = downloadFile.Close()
+		return nil, ErrorJobNotFound
 	}
 	return &DownloadJobStream{
 		JobStream: &JobStream{
@@ -659,6 +718,18 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string,
 	if err != nil {
 		return nil, err
 	}
+	return r.uploadJobWriter(video, 0)
+}
+
+func (r *RuntimeScheduler) GetProtectedUpload(ctx context.Context, worker string, claim model.AssignmentClaim) (*UploadJobStream, error) {
+	video, err := r.repo.GetProtectedJob(ctx, worker, claim)
+	if err != nil {
+		return nil, err
+	}
+	return r.uploadJobWriter(video, claim.Generation)
+}
+
+func (r *RuntimeScheduler) uploadJobWriter(video *model.Job, generation uint64) (*UploadJobStream, error) {
 	if !filepath.IsLocal(video.SourcePath) {
 		return nil, fmt.Errorf("job %s has a non-local source path", video.Id)
 	}
@@ -670,16 +741,19 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string,
 	if err != nil {
 		return nil, err
 	}
+	if generation > 0 {
+		temporalPath = fmt.Sprintf("%s.g%d", temporalPath, generation)
+	}
 	stagingName, err := filepath.Rel(r.config.SourcePath, temporalPath)
 	if err != nil || !filepath.IsLocal(stagingName) {
 		return nil, fmt.Errorf("resolve upload staging path for job %s", video.Id)
 	}
-	err = os.MkdirAll(filepath.Dir(temporalPath), os.ModePerm)
+	root, err := os.OpenRoot(r.config.SourcePath)
 	if err != nil {
 		return nil, err
 	}
-	root, err := os.OpenRoot(r.config.SourcePath)
-	if err != nil {
+	if err := root.MkdirAll(filepath.Dir(stagingName), os.ModePerm); err != nil {
+		_ = root.Close()
 		return nil, err
 	}
 	attemptName := filepath.Join(filepath.Dir(stagingName), "."+uploadStagingName(video.Id.String())+"-"+uuid.NewString()+".tmp")
@@ -687,7 +761,7 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string,
 	if errors.Is(err, os.ErrNotExist) {
 		// Finalization may remove an empty staging directory after MkdirAll.
 		// Recreate it and retry once to close that narrow race.
-		if mkdirErr := os.MkdirAll(filepath.Dir(temporalPath), os.ModePerm); mkdirErr != nil {
+		if mkdirErr := root.MkdirAll(filepath.Dir(stagingName), os.ModePerm); mkdirErr != nil {
 			_ = root.Close()
 			return nil, mkdirErr
 		}
@@ -705,7 +779,59 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string,
 	}, nil
 }
 
+func (r *RuntimeScheduler) StageProtectedUpload(ctx context.Context, worker string, claim model.AssignmentClaim, stream *UploadJobStream, checksum string, size int64) error {
+	if stream == nil {
+		return errors.New("protected upload stream is missing")
+	}
+	return r.repo.StageProtectedUpload(ctx, worker, claim, stream.stagingName, checksum, size, func() error {
+		if err := stream.Commit(); err != nil {
+			return err
+		}
+		dir := filepath.Dir(stream.stagingName)
+		if err := syncProtectedDirectory(stream.root, dir); err != nil {
+			return err
+		}
+		return syncProtectedDirectory(stream.root, filepath.Dir(dir))
+	})
+}
+
+func (r *RuntimeScheduler) GetProtectedChecksum(ctx context.Context, worker string, claim model.AssignmentClaim) (string, error) {
+	video, err := r.repo.GetProtectedJob(ctx, worker, claim)
+	if err != nil {
+		return "", err
+	}
+	stream, err := r.downloadJobWriter(video)
+	if err != nil {
+		return "", err
+	}
+	defer stream.Close(false)
+	hash := sha256.New()
+	if _, err := io.Copy(hash, &contextReader{ctx: ctx, reader: stream.file}); err != nil {
+		return "", fmt.Errorf("calculate protected source checksum: %w", err)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
+}
+
 func (r *RuntimeScheduler) GetChecksum(ctx context.Context, uuid string) (string, error) {
+	protected, err := r.repo.IsProtectedJob(ctx, uuid)
+	if err != nil {
+		return "", err
+	}
+	if protected {
+		return "", fmt.Errorf("%w: protected assignment requires authenticated checksum", ErrorStreamNotAllowed)
+	}
 	video, err := r.repo.GetJob(ctx, uuid)
 	if err != nil {
 		return "", err
@@ -738,6 +864,9 @@ func (r *RuntimeScheduler) progressJobMaintenance(ctx context.Context) error {
 }
 
 func (r *RuntimeScheduler) jobMaintenance(ctx context.Context) error {
+	if err := r.recoverProtectedPublications(ctx); err != nil {
+		return err
+	}
 	if err := r.queuedJobMaintenance(ctx); err != nil {
 		return err
 	}
@@ -807,19 +936,12 @@ func (r *RuntimeScheduler) assignedJobMaintenance(ctx context.Context) error {
 	}
 	for _, taskEvent := range taskEvents {
 		if taskEvent.IsAssigned() {
-			log.Infof("Rescheduling %s after job timeout", taskEvent.JobId.String())
-			job, err := r.repo.GetJob(ctx, taskEvent.JobId.String())
+			requeued, err := r.repo.RequeueTimedOutJob(ctx, taskEvent.JobId.String(), taskEvent.EventID, time.Now().UTC().Add(-r.config.JobTimeout))
 			if err != nil {
 				return err
 			}
-			jobRequest := &model.JobRequest{
-				SourcePath:    job.SourcePath,
-				TargetPath:    job.TargetPath,
-				ForceAssigned: true,
-			}
-			_, err = r.scheduleJobRequest(ctx, jobRequest)
-			if err != nil {
-				return err
+			if requeued {
+				log.Infof("Rescheduled %s after job timeout", taskEvent.JobId.String())
 			}
 		}
 	}

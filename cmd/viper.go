@@ -32,6 +32,9 @@ func ViperConfig(opts *CommandLineConfig) {
 	if err := viper.BindEnv("worker.dashboard.token", "TR_WORKER_DASHBOARD_TOKEN"); err != nil {
 		log.Panic(err)
 	}
+	if err := bindProtectedWorkerEnvironment(viper.GetViper()); err != nil {
+		log.Panic(err)
+	}
 	err := viper.ReadInConfig()
 	if err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
@@ -68,6 +71,13 @@ func ViperConfig(opts *CommandLineConfig) {
 
 func bindDashboardTokenEnvironment(v *viper.Viper) error {
 	return v.BindEnv("web.dashboardToken", "TR_WEB_DASHBOARD_TOKEN")
+}
+
+func bindProtectedWorkerEnvironment(v *viper.Viper) error {
+	if err := v.BindEnv("worker.protected.credential", "TR_WORKER_PROTECTED_CREDENTIAL"); err != nil {
+		return err
+	}
+	return v.BindEnv("worker.protected.workspaceId", "TR_WORKER_PROTECTED_WORKSPACE_ID")
 }
 
 func decodeHook() viper.DecoderConfigOption {

@@ -33,6 +33,19 @@ func TestDashboardTokenEnvironmentPrecedence(t *testing.T) {
 	}
 }
 
+func TestProtectedWorkerEnvironmentIsDecoded(t *testing.T) {
+	t.Setenv("TR_WORKER_PROTECTED_CREDENTIAL", "worker-secret")
+	t.Setenv("TR_WORKER_PROTECTED_WORKSPACE_ID", "7c395c98-0407-4d0b-b636-71de9c05c975")
+	v := viper.New()
+	if err := bindProtectedWorkerEnvironment(v); err != nil {
+		t.Fatal(err)
+	}
+	var cfg CommandLineConfig
+	if err := v.Unmarshal(&cfg); err != nil || cfg.Worker == nil || cfg.Worker.Protected == nil || cfg.Worker.Protected.Credential != "worker-secret" || cfg.Worker.Protected.WorkspaceID != "7c395c98-0407-4d0b-b636-71de9c05c975" {
+		t.Fatalf("protected worker environment not decoded: %v", err)
+	}
+}
+
 func TestCommandLineConfigDefaults(t *testing.T) {
 	cfg := &CommandLineConfig{}
 	if cfg.NoUpdateMode {

@@ -44,6 +44,35 @@ func TestDesktopPauseModeConfigurationAppliesWithoutDrain(t *testing.T) {
 	}
 }
 
+func TestDesktopSettingsPreserveProtectedProfilesForOlderClients(t *testing.T) {
+	dir := t.TempDir()
+	active := desktop.Settings{Domain: "https://server.test", Token: "secret", Name: "node", CPUJobs: 1, GPUJobs: 2,
+		CPUCredential: "cpu-secret", CPUWorkspaceID: "7c395c98-0407-4d0b-b636-71de9c05c975",
+		GPUCredential: "gpu-secret", GPUWorkspaceID: "91d3b22a-95e9-41fa-ac26-e9e84c051214"}
+	service := &supervisor{dir: dir, worker: filepath.Join(dir, "worker.exe"), state: desktop.Persisted{Active: &active}}
+	settings := active
+	settings.Token, settings.CPUCredential, settings.CPUWorkspaceID, settings.GPUCredential, settings.GPUWorkspaceID = "", "", "", "", ""
+	response := service.handle(desktop.Request{Command: "configure", Settings: &settings})
+	if response.Error != "" {
+		t.Fatal(response.Error)
+	}
+	if service.state.Active.CPUCredential != active.CPUCredential || service.state.Active.CPUWorkspaceID != active.CPUWorkspaceID || service.state.Active.GPUCredential != active.GPUCredential || service.state.Active.GPUWorkspaceID != active.GPUWorkspaceID {
+		t.Fatal("settings update discarded protected profile configuration")
+	}
+}
+
+func TestCancelPendingConfigurationRetainsActiveSettings(t *testing.T) {
+	dir := t.TempDir()
+	active := desktop.Settings{Domain: "https://server.test", Token: "secret", Name: "node", CPUJobs: 1}
+	pending := active
+	pending.Name = "new-node"
+	service := &supervisor{dir: dir, state: desktop.Persisted{Active: &active, Pending: &pending, PendingLimit: true, Paused: true}}
+	response := service.handle(desktop.Request{Command: "cancel-pending-configuration"})
+	if response.Error != "" || service.state.Pending != nil || service.state.Active.Name != "node" || !service.state.Paused || !service.pendingDrain || !service.state.PendingLimit {
+		t.Fatalf("canceled configuration = %+v, error=%q", service.state, response.Error)
+	}
+}
+
 func TestEncodeOwnerRoutesOnlyActiveOwnedJobs(t *testing.T) {
 	profiles := map[string]control.AdmissionStatus{
 		"cpu": {Jobs: []control.JobState{{JobID: "cpu-job", Phase: "FFMPEG", CanPause: true}}},

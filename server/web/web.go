@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -53,6 +54,12 @@ func (s *Server) requestJob(writer http.ResponseWriter, request *http.Request) {
 	if workerName == "" {
 		webError(writer, fmt.Errorf("workerName is mandatory in the headers"), 403)
 		return
+	}
+	if s.config.ProtectedEnabled {
+		if _, protected := s.config.ProtectedWorkerHashes[workerName]; protected {
+			http.Error(writer, "worker requires protected assignments", http.StatusForbidden)
+			return
+		}
 	}
 	job, err := s.scheduler.RequestJob(s.ctx, workerName)
 	if errors.Is(err, scheduler.ErrNoJobsAvailable) {
@@ -247,6 +254,17 @@ func (s *Server) upload(writer http.ResponseWriter, request *http.Request) {
 	case webError(writer, err, 500):
 		return
 	}
+	receiveUpload(writer, request, uploadStream, func(_ string, _ int64) error { return uploadStream.Commit() })
+}
+
+type uploadSink interface {
+	Write([]byte) (int, error)
+	Close(bool) error
+	Clean() error
+	GetHash() string
+}
+
+func receiveUpload(writer http.ResponseWriter, request *http.Request, uploadStream uploadSink, commit func(string, int64) error) {
 	closed := false
 	defer func() {
 		if !closed {
@@ -271,7 +289,7 @@ func (s *Server) upload(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	size, err := strconv.ParseUint(request.Header.Get("Content-Length"), 10, 64)
-	if err != nil {
+	if err != nil || size > math.MaxInt64 {
 		webError(writer, fmt.Errorf("invalid size %v", err), 400)
 		return
 	}
@@ -292,9 +310,10 @@ loop:
 		default:
 			readedBytes, readErr := reader.Read(b)
 			readed += uint64(readedBytes)
-			_, writeErr := uploadStream.Write(b[0:readedBytes])
-			if writeErr != nil {
-				break loop
+			written, writeErr := uploadStream.Write(b[0:readedBytes])
+			if writeErr != nil || written != readedBytes {
+				webError(writer, fmt.Errorf("could not write uploaded output"), http.StatusInternalServerError)
+				return
 			}
 			if errors.Is(readErr, io.EOF) {
 				break loop
@@ -320,8 +339,12 @@ loop:
 		webError(writer, fmt.Errorf("could not persist uploaded output: %w", err), 500)
 		return
 	}
-	if err = uploadStream.Commit(); err != nil {
-		webError(writer, fmt.Errorf("could not publish uploaded output: %w", err), 500)
+	if err = commit(checksumUpload, int64(size)); err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, repository.ErrStaleAssignment) || errors.Is(err, repository.ErrEventConflict) {
+			code = http.StatusConflict
+		}
+		webError(writer, fmt.Errorf("could not publish uploaded output: %w", err), code)
 		return
 	}
 	writer.WriteHeader(201)
@@ -399,12 +422,35 @@ func (s *Server) checksum(writer http.ResponseWriter, request *http.Request) {
 }
 
 type Config struct {
-	Port              int               `mapstructure:"port" envconfig:"WEB_PORT"`
-	Token             string            `mapstructure:"token" envconfig:"WEB_TOKEN"`
-	Domain            string            `mapstructure:"domain" envconfig:"WEB_DOMAIN"`
-	DashboardToken    string            `mapstructure:"dashboardToken"`
-	MediaRoots        map[string]string `mapstructure:"mediaRoots"`
-	PreviewMaxStreams int               `mapstructure:"previewMaxStreams"`
+	Port                  int               `mapstructure:"port" envconfig:"WEB_PORT"`
+	Token                 string            `mapstructure:"token" envconfig:"WEB_TOKEN"`
+	Domain                string            `mapstructure:"domain" envconfig:"WEB_DOMAIN"`
+	DashboardToken        string            `mapstructure:"dashboardToken"`
+	MediaRoots            map[string]string `mapstructure:"mediaRoots"`
+	PreviewMaxStreams     int               `mapstructure:"previewMaxStreams"`
+	ProtectedWorkerHashes map[string]string `mapstructure:"protectedWorkerHashes"`
+	AssignmentSigningKeys map[string]string `mapstructure:"assignmentSigningKeys"`
+	ActiveAssignmentKey   string            `mapstructure:"activeAssignmentKey"`
+	ProtectedEnabled      bool              `mapstructure:"protectedEnabled"`
+}
+
+// EnableProtectedAPI installs the opt-in protocol only after all credentials
+// and signing keys validate. Protected worker names cannot fall back to v1.
+func (s *Server) EnableProtectedAPI() error {
+	protected, ok := s.scheduler.(protectedScheduler)
+	if !ok {
+		return errors.New("scheduler does not support protected assignments")
+	}
+	handler, err := NewProtectedHandler(s.config, protected)
+	if err != nil {
+		return err
+	}
+	router, ok := s.srv.Handler.(*mux.Router)
+	if !ok {
+		return errors.New("protected API router is unavailable")
+	}
+	router.PathPrefix("/api/v2/worker/jobs/").Handler(s.AuthFunc(handler.ServeHTTP))
+	return nil
 }
 
 type ActiveTracker struct {

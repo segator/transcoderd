@@ -296,7 +296,7 @@ type supervisor struct {
 }
 
 func (s *supervisor) snapshotLocked() desktop.Status {
-	status := desktop.Status{ShutdownPending: s.shutdownPending, Configured: s.state.Active != nil, Running: len(s.children) > 0, Version: version.Version, Pending: s.state.Pending != nil || s.state.PendingLimit, Message: s.message, Queue: s.queue, QueueError: s.queueError, Profiles: make(map[string]control.AdmissionStatus)}
+	status := desktop.Status{ShutdownPending: s.shutdownPending, Configured: s.state.Active != nil, Running: len(s.children) > 0, Version: version.Version, Pending: s.state.Pending != nil || s.state.PendingLimit || s.updateHeld, UpdateHandoff: s.updateHeld, CanCancelConfiguration: s.state.Pending != nil, Message: s.message, Queue: s.queue, QueueError: s.queueError, Profiles: make(map[string]control.AdmissionStatus)}
 	if s.shutdownMessage != "" {
 		status.Message = s.shutdownMessage
 	}
@@ -354,6 +354,12 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 		combined.MaxActiveJobs += profileStatus.MaxActiveJobs
 		combined.MaxAcceptedJobs += profileStatus.MaxAcceptedJobs
 		combined.ActiveEncodes += profileStatus.ActiveEncodes
+		combined.RunningJobs += profileStatus.RunningJobs
+		combined.ParkedJobs += profileStatus.ParkedJobs
+		combined.PendingJobs += profileStatus.PendingJobs
+		if combined.RecoveryError == "" && profileStatus.RecoveryError != "" {
+			combined.RecoveryError = profile + ": " + profileStatus.RecoveryError
+		}
 		combined.RAMPaused = combined.RAMPaused || profileStatus.RAMPaused
 		combined.SuspendedEncodes += profileStatus.SuspendedEncodes
 		combined.Paused = combined.Paused && profileStatus.Paused
@@ -365,6 +371,7 @@ func (s *supervisor) snapshotLocked() desktop.Status {
 		combined.Progress = append(combined.Progress, profileStatus.Progress...)
 	}
 	if len(status.Profiles) > 0 {
+		combined.SafeIdle, combined.RestartBarrier = combinedProfileSafeIdle(status.Profiles)
 		if status.Settings != nil && !status.Pending && !s.maintenance && !s.shutdownPending && combined.MaxActiveJobs > 0 {
 			if cpu, ok := status.Profiles["cpu"]; ok {
 				status.Settings.CPUJobs = cpu.MaxActiveJobs
@@ -404,7 +411,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := desktop.Response{}
-	if (s.maintenance || s.updatePending()) && (req.Command == "stop-after-current" || req.Command == "configure" || req.Command == "set-max-jobs" || req.Command == "pause-job" || req.Command == "resume-job" || req.Command == "pause-encodes" || req.Command == "resume-encodes") {
+	if (s.maintenance || s.updatePending() || s.updateHeld) && (req.Command == "stop-after-current" || req.Command == "configure" || req.Command == "cancel-pending-configuration" || req.Command == "set-max-jobs" || req.Command == "pause-job" || req.Command == "resume-job" || req.Command == "pause-encodes" || req.Command == "resume-encodes") {
 		result.Error = managed.LockedMessage
 		result.Status = s.snapshotLocked()
 		return result
@@ -431,7 +438,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 	case "stop-after-current":
 		result.Error = s.stopAfterCurrentLocked(req.ShutdownAfterCurrent)
 	case "configure":
-		s.shutdownPending = false
+		s.cancelPendingShutdownLocked()
 		s.shutdownMessage = ""
 		if req.Settings == nil {
 			result.Error = "Settings are missing"
@@ -445,6 +452,20 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		}
 		if value.Token == "" && current != nil {
 			value.Token = current.Token
+		}
+		if current != nil {
+			if value.CPUCredential == "" {
+				value.CPUCredential = current.CPUCredential
+			}
+			if value.CPUWorkspaceID == "" {
+				value.CPUWorkspaceID = current.CPUWorkspaceID
+			}
+			if value.GPUCredential == "" {
+				value.GPUCredential = current.GPUCredential
+			}
+			if value.GPUWorkspaceID == "" {
+				value.GPUWorkspaceID = current.GPUWorkspaceID
+			}
 		}
 		value.Domain = strings.TrimRight(strings.TrimSpace(value.Domain), "/")
 		value.Name = strings.TrimSpace(value.Name)
@@ -473,6 +494,22 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 			break
 		}
 		s.state = next
+	case "cancel-pending-configuration":
+		if s.state.Pending == nil {
+			result.Error = "No pending configuration to cancel"
+			break
+		}
+		next := s.state
+		next.Pending = nil
+		// Reconcile the retained settings, including a previously pending limit.
+		next.PendingLimit = true
+		if err := desktop.Save(s.dir, next); err != nil {
+			result.Error = "Could not cancel pending configuration"
+			break
+		}
+		s.state = next
+		s.readyToApply = false
+		s.pendingDrain = true // Release even a partially applied admission hold.
 	case "pause-job", "resume-job":
 		id, err := uuid.Parse(req.JobID)
 		if err != nil {
@@ -517,7 +554,7 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 		}
 		s.state = next
 	case "set-max-jobs":
-		s.shutdownPending = false
+		s.cancelPendingShutdownLocked()
 		s.shutdownMessage = ""
 		if s.state.Active == nil {
 			result.Error = "Configure the server first"
@@ -570,11 +607,23 @@ func (s *supervisor) handle(req desktop.Request) desktop.Response {
 				result.Error = "The " + target.key + " worker is reconnecting; try again shortly"
 				break
 			}
-			if _, err := control.Call(workerPipe(target.key), control.Request{Command: "set-pause-mode", PauseMode: "finish"}); err != nil {
+			status, err := s.callWorker(target.key, control.Request{Command: "status"})
+			if err != nil || status.Error != "" {
+				result.Error = "Could not inspect the " + target.key + " worker"
+				break
+			}
+			if status.Status.RestartBarrier {
+				response, err := s.callWorker(target.key, control.Request{Command: "release-restart-barrier"})
+				if err != nil || response.Error != "" || response.Status.RestartBarrier {
+					result.Error = "Could not release the " + target.key + " worker restart barrier"
+					break
+				}
+			}
+			if _, err := s.callWorker(target.key, control.Request{Command: "set-pause-mode", PauseMode: "finish"}); err != nil {
 				result.Error = "Could not change the " + target.key + " worker pause mode: " + err.Error()
 				break
 			}
-			if _, err := control.Call(workerPipe(target.key), control.Request{Command: "set-admission-limit", MaxJobs: target.jobs}); err != nil {
+			if _, err := s.callWorker(target.key, control.Request{Command: "set-admission-limit", MaxJobs: target.jobs}); err != nil {
 				result.Error = "Could not change the " + target.key + " worker limit"
 				break
 			}
@@ -619,7 +668,7 @@ func (s *supervisor) run(ctx context.Context) {
 		s.mu.Lock()
 		updatePending := s.updatePending()
 		if updatePending || s.maintenance || s.state.Pending != nil || s.state.PendingLimit {
-			s.shutdownPending = false
+			s.cancelPendingShutdownLocked()
 		}
 		s.checkShutdownLocked()
 		if updatePending {
@@ -632,7 +681,7 @@ func (s *supervisor) run(ctx context.Context) {
 						}
 					}
 					if s.children[profile.Key] != nil {
-						_, _ = control.Call(workerPipe(profile.Key), control.Request{Command: "hold-admission"})
+						_, _ = s.callWorker(profile.Key, control.Request{Command: "begin-restart-barrier"})
 					}
 				}
 			}
@@ -645,6 +694,21 @@ func (s *supervisor) run(ctx context.Context) {
 			}
 		}
 		if !s.maintenance && !updatePending && !s.updateHeld && s.state.Active != nil {
+			if s.state.Pending == nil && s.pendingDrain {
+				released := true
+				for _, profile := range []string{"cpu", "gpu"} {
+					if s.children[profile] != nil {
+						if response, err := s.callWorker(profile, control.Request{Command: "release-admission"}); err != nil || response.Error != "" {
+							released = false
+						}
+					}
+				}
+				if released {
+					s.pendingDrain = false
+				} else {
+					s.message = "Waiting to release the canceled configuration hold"
+				}
+			}
 			if s.state.Pending == nil && s.state.PendingLimit && s.allChildrenStoppedLocked() {
 				ok := true
 				for _, profile := range s.state.Active.Profiles() {
@@ -672,7 +736,9 @@ func (s *supervisor) run(ctx context.Context) {
 					allDrained := true
 					for _, profile := range []string{"cpu", "gpu"} {
 						if s.children[profile] != nil {
-							_, err := control.Call(workerPipe(profile), control.Request{Command: "drain"})
+							// Configuration changes must not resume a stopped queue or
+							// RAM-suspended encodes merely to empty the worker.
+							_, err := control.Call(workerPipe(profile), control.Request{Command: "hold-admission"})
 							if err != nil {
 								allDrained = false
 							}
@@ -816,7 +882,7 @@ func (s *supervisor) run(ctx context.Context) {
 }
 
 func (s *supervisor) onChildStoppedLocked(err error) {
-	s.shutdownPending = false
+	s.cancelPendingShutdownLocked()
 	if s.state.Pending != nil && s.readyToApply && s.allChildrenStoppedLocked() {
 		next := s.state
 		next.Active = next.Pending

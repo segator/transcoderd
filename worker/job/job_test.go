@@ -1,11 +1,15 @@
 package job
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"transcoder/model"
+	"transcoder/worker/ffmpeg"
 
 	"github.com/google/uuid"
 )
@@ -28,6 +32,42 @@ func TestNewContext(t *testing.T) {
 	}
 	if ctx.Source == nil {
 		t.Error("Source should not be nil")
+	}
+}
+
+func TestValidatePrefetchedSource(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "source.mkv")
+	data := []byte("prefetched source")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	base := VideoData{FilePath: path, Size: int64(len(data)), Checksum: hex.EncodeToString(sum[:]), FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{}}}
+	tests := []struct {
+		name   string
+		source *VideoData
+		wantOK bool
+	}{
+		{"valid", &base, true},
+		{"missing metadata", nil, false},
+		{"missing video metadata", &VideoData{FilePath: path, Size: base.Size, Checksum: base.Checksum, FFProbeData: &ffmpeg.NormalizedFFProbe{}}, false},
+		{"wrong checksum", &VideoData{FilePath: path, Size: int64(len(data)), Checksum: "bad", FFProbeData: base.FFProbeData}, false},
+		{"wrong size", &VideoData{FilePath: path, Size: int64(len(data)) + 1, Checksum: base.Checksum, FFProbeData: base.FFProbeData}, false},
+		{"missing file", &VideoData{FilePath: filepath.Join(dir, "missing.mkv"), Size: base.Size, Checksum: base.Checksum, FFProbeData: base.FFProbeData}, false},
+		{"outside workspace", &VideoData{FilePath: filepath.Join(t.TempDir(), "outside.mkv"), Size: base.Size, Checksum: base.Checksum, FFProbeData: base.FFProbeData}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &Context{WorkingDir: dir, Source: tt.source}
+			err := ctx.ValidatePrefetchedSource()
+			if tt.wantOK && err != nil {
+				t.Errorf("ValidatePrefetchedSource() = %v, want nil", err)
+			}
+			if !tt.wantOK && !errors.Is(err, ErrInvalidPrefetchedSource) {
+				t.Errorf("ValidatePrefetchedSource() = %v, want ErrInvalidPrefetchedSource", err)
+			}
+		})
 	}
 }
 
@@ -138,5 +178,18 @@ func TestContextPersistJobContext(t *testing.T) {
 
 	if loadedCtx.JobId != ctx.JobId {
 		t.Errorf("Loaded JobId = %v, want %v", loadedCtx.JobId, ctx.JobId)
+	}
+
+	ctx.NextPhase = model.FFMPEGSNotification
+	if err := ctx.PersistJobContext(); err != nil {
+		t.Fatalf("PersistJobContext() replacement error = %v", err)
+	}
+	reloaded, err := ReadContextFromDiskByPath(contextFile)
+	if err != nil || reloaded.NextPhase != model.FFMPEGSNotification {
+		t.Fatalf("ReadContextFromDiskByPath() = %+v, %v, want FFmpeg next phase", reloaded, err)
+	}
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("context directory contains %d entries, err = %v; want one snapshot", len(entries), err)
 	}
 }

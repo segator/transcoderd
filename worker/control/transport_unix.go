@@ -3,6 +3,7 @@
 package control
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -50,7 +51,10 @@ func listenControl(path string) (net.Listener, error) {
 	return listener, nil
 }
 
-func dialControl(path string) (net.Conn, error) { return net.DialTimeout("unix", path, 2*time.Second) }
+func dialControlContext(ctx context.Context, path string) (net.Conn, error) {
+	dialer := net.Dialer{Timeout: 2 * time.Second}
+	return dialer.DialContext(ctx, "unix", path)
+}
 
 func closeControl(listener net.Listener) error {
 	path := listener.Addr().String()

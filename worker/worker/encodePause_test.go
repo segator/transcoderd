@@ -58,13 +58,14 @@ func TestPauseHoldsPrefetchedEncodeUntilResume(t *testing.T) {
 	}
 }
 
-func TestMaintenanceDrainsPausedAcceptedEncodes(t *testing.T) {
+func TestMaintenanceRespectsStoppedQueue(t *testing.T) {
 	tests := []struct {
-		name  string
-		drain func(*JobExecutor) error
+		name       string
+		drain      func(*JobExecutor) error
+		startsWork bool
 	}{
-		{"configuration drain", (*JobExecutor).DrainAcceptedJobs},
-		{"mandatory update hold", (*JobExecutor).HoldAdmission},
+		{"configuration drain", (*JobExecutor).DrainAcceptedJobs, true},
+		{"mandatory update hold", (*JobExecutor).HoldAdmission, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -82,7 +83,11 @@ func TestMaintenanceDrainsPausedAcceptedEncodes(t *testing.T) {
 			if err := tt.drain(worker); err != nil {
 				t.Fatal(err)
 			}
-			waitForEncode(t, started)
+			if tt.startsWork {
+				waitForEncode(t, started)
+			} else {
+				assertNoEncodeStarted(t, started)
+			}
 			if worker.ReserveJobSlot() {
 				t.Fatal("maintenance reopened job requests")
 			}

@@ -38,7 +38,7 @@ function renderUpdate(update) {
 }
 renderUpdate(); lockConfiguration(true);
 function request(command, data = {}) {
-  if (configurationLocked && ['stop-after-current','configure','set-max-jobs','set-encoder-jobs','pause-job','resume-job','pause-encodes','resume-encodes'].includes(command)) return Promise.reject(new Error('Configuration is locked until the mandatory update completes or service status is confirmed.'));
+  if (configurationLocked && ['stop-after-current','configure','cancel-pending-configuration','set-max-jobs','set-encoder-jobs','pause-job','resume-job','pause-encodes','resume-encodes'].includes(command)) return Promise.reject(new Error('Configuration is locked until the mandatory update completes or service status is confirmed.'));
   return new Promise((resolve, reject) => {
     if (!window.chrome?.webview) {
       (async () => {
@@ -114,6 +114,8 @@ function phaseDescription(phase) {
 }
 function jobLabel(job) {
   if (job.state === 'paused') return ['Paused in RAM','ready'];
+	if (job.state === 'parked') return ['Prefetched','ready'];
+	if (job.state === 'reconciling') return ['Recovering','ready'];
   if (job.state === 'queued') return job.downloaded && job.phase === 'FFMPEG' ? ['Ready to encode','ready'] : ['Queued',job.downloaded ? 'ready' : ''];
   return ({FFMPEG:['Encoding',''], Download:['Downloading','download'], PGS:['Subtitle OCR',''], MKVExtract:['Extracting subtitles',''], Upload:['Uploading','download'], JobVerify:['Verifying','']})[job.phase] || ['Working',''];
 }
@@ -129,7 +131,7 @@ function encoderLabel(job, progress) {
 function render(status) {
   current = status;
   renderUpdate(status.update || null);
-  lockConfiguration(Boolean(status.update?.pending));
+  lockConfiguration(Boolean(status.update?.pending || status.updateHandoff));
   $('check-update').hidden = !window.chrome?.webview || !status.update;
   $('release-notes-toggle').hidden = !window.chrome?.webview || !status.update;
   updateReleaseNotes(status);
@@ -158,7 +160,7 @@ function render(status) {
   $('stat-encoding-caption').textContent = worker?.suspendedEncodes > 0 ? `${worker.suspendedEncodes} paused in RAM · ${Math.max(0,worker.activeEncodes-worker.suspendedEncodes)} running` : worker ? `of ${worker.maxEncodes} concurrent encodes` : 'Active encodes';
   const ramPause = Boolean(worker?.ramPaused);
   $('pause-description').textContent = 'Stop after current holds the queue. Pause encodes suspends active work in RAM. Individual pauses remain independent.';
-  $('stat-ready').textContent = worker ? jobs.filter(j => j.downloaded && j.state === 'queued' && j.phase === 'FFMPEG').length : '—';
+  $('stat-ready').textContent = worker ? jobs.filter(j => j.downloaded && ['queued', 'parked'].includes(j.state) && j.phase === 'FFMPEG').length : '—';
   $('stat-downloading').textContent = worker ? jobs.filter(j => j.phase === 'Download' && j.state === 'running').length : '—';
   const visibleJobs = TranscoderDashboard.filterJobs(jobs, selectedFilters);
   $('local-count').textContent = selectedFilters.size ? `${visibleJobs.length}/${jobs.length}` : jobs.length;
@@ -169,7 +171,7 @@ function render(status) {
     const [label, badge] = jobLabel(j); const name = j.name || p?.name || `Job ${j.jobId.slice(0,8)}`;
     const heldByWorker = Boolean(j.pausedByWorker || generalRAMHold);
     const pct = p ? Math.min(100, Math.max(0, Number(p.percent) || 0)) : 0;
-    let details = j.state === 'paused' ? `${j.individuallyPaused ? (heldByWorker ? 'Paused individually and by worker' : 'Paused individually') : heldByWorker ? 'Paused by worker profile' : 'Encoding suspended'} · progress preserved · RAM/VRAM retained` : p ? jobProgressText(p) : '';
+    let details = j.state === 'parked' ? 'Prefetched and parked · waiting to encode' : j.state === 'reconciling' ? 'Reconciling prefetched work' : j.state === 'paused' ? `${j.individuallyPaused ? (heldByWorker ? 'Paused individually and by worker' : 'Paused individually') : heldByWorker ? 'Paused by worker profile' : 'Encoding suspended'} · progress preserved · RAM/VRAM retained` : p ? jobProgressText(p) : '';
     if (!details && j.state === 'queued') details = j.downloaded && j.phase === 'FFMPEG' ? (ramPause && isPaused ? 'Waiting for Resume queue and Resume encodes' : ramPause ? 'Waiting for Resume encodes · downloaded' : isPaused && worker.paused !== false ? 'Waiting for Resume queue · downloaded' : 'Downloaded and ready to encode') : !j.downloaded && j.phase === 'Download' ? 'Waiting to download' : phaseDescription(j.phase);
     if (!details) details = phaseDescription(j.phase);
     const jobAction = j.canPause && j.phase === 'FFMPEG' ? `<button type="button" class="job-toggle" data-job-pause="${escapeHTML(j.jobId)}" aria-label="${j.individuallyPaused || heldByWorker ? 'Resume' : 'Pause'} encoding ${escapeHTML(name)}" title="${heldByWorker ? 'Resume or enable this worker profile first. Individual pauses are preserved by general Resume.' : j.individuallyPaused ? 'Resume only this encode.' : 'Pause only this encode in RAM; other encodes continue. RAM and VRAM remain allocated.'}" ${configurationLocked || status.pending || heldByWorker || jobPausePending.has(j.jobId) ? 'disabled' : ''}>${jobPausePending.has(j.jobId) ? 'Working…' : j.individuallyPaused || heldByWorker ? '▶ Resume' : 'Ⅱ Pause'}</button>` : '';
@@ -180,8 +182,9 @@ function render(status) {
   $('stat-queue').textContent = queue ? queue.total : '—'; $('queue-count').textContent = queue ? queue.total : '—';
   $('stat-queue-caption').textContent = queue ? 'Awaiting assignment' : 'Unavailable';
   $('server-queue').innerHTML = queue ? (queue.jobs?.length ? queue.jobs.map((j, i) => `<div class="queue-item"><span class="queue-num">${String(i+1).padStart(2,'0')}</span><div class="queue-info"><div class="queue-name" title="${escapeHTML(j.name)}">${escapeHTML(j.name)}</div><div class="queue-meta">${escapeHTML(fileSize(j.size) ? `Awaiting assignment · ${fileSize(j.size)}` : 'Awaiting assignment')}</div></div><span class="badge ready">Queued</span></div>`).join('') : empty('Queue empty','There are no jobs waiting to be assigned.',true)) : empty('Queue unavailable',status.queueError === 'unsupported' ? 'Update the server to view its queue.' : 'The queue will appear when the server is available.',true);
-  const notice = !status.configured ? 'Configure the connection to start your worker.' : status.pending ? 'Changes are pending and will be applied when current jobs finish.' : status.message || (ramPause ? `Encoding is paused in RAM; RAM and VRAM remain allocated. ${isPaused ? 'The queue is also stopped.' : 'The queue will reopen when encoding resumes.'} Worker exit or PC restart loses live encoder state.` : isPaused ? 'The queue is stopped. Running encodes and uploads can finish; queued encodes wait for Resume queue.' : worker?.suspendedEncodes > 0 ? `${worker.suspendedEncodes} encoding(s) paused individually in RAM. Other work can continue.` : worker?.withinSchedule === false ? 'Outside the work schedule. New assignments resume during the next window.' : '');
+  const notice = !status.configured ? 'Configure the connection to start your worker.' : status.updateHandoff ? 'Finishing the update and reconnecting worker profiles.' : status.pending ? 'Changes are pending until accepted work finishes. Stopped queues and paused encodes remain paused.' : worker?.recoveryError ? `Recovery needs attention: ${worker.recoveryError}` : status.message || (worker?.safeIdle === true ? `Safe to restart. ${worker.parkedJobs || 0} prefetched job(s) remain parked.` : ramPause ? `Encoding is paused in RAM; RAM and VRAM remain allocated. ${isPaused ? 'The queue is also stopped.' : 'The queue will reopen when encoding resumes.'} Worker exit or PC restart loses live encoder state.` : isPaused ? 'The queue is stopped. Running encodes and uploads can finish; queued encodes wait for Resume queue.' : worker?.suspendedEncodes > 0 ? `${worker.suspendedEncodes} encoding(s) paused individually in RAM. Other work can continue.` : worker?.withinSchedule === false ? 'Outside the work schedule. New assignments resume during the next window.' : '');
   $('notice').classList.toggle('hidden', !notice); $('notice-text').textContent = notice; $('notice-start').classList.add('hidden'); $('notice-settings').classList.remove('hidden');
+  $('cancel-pending-configuration').classList.toggle('hidden', !status.canCancelConfiguration || !window.chrome?.webview || configurationLocked);
   $('shutdown-pending').hidden = !status.shutdownPending;
   $('shutdown-pending').textContent = status.shutdownPending ? 'This PC will shut down after all accepted jobs and uploads finish. Resume queue cancels shutdown.' : '';
   $('toggle-pause').disabled = configurationLocked || !worker || status.pending;
@@ -190,7 +193,7 @@ function render(status) {
   $('toggle-encodes').disabled = configurationLocked || !worker || status.pending || status.shutdownPending;
   $('toggle-encodes').textContent = ramPause ? '▶ Resume encodes' : 'Ⅱ Pause encodes';
   $('toggle-encodes').title = 'Suspend active CPU/GPU encodes immediately in RAM. Keeps RAM/VRAM allocated. Resume preserves the queue setting and individual pauses.';
-  if (!dirty && status.settings) { const s = status.settings; $('domain').value = s.domain; $('name').value = s.name; $('working-directory').value = s.workingDirectory || ''; $('cpu-codec').value = s.cpuCodec; $('cpu-jobs').value = s.cpuJobs; $('gpu-codec').value = s.gpuCodec; $('gpu-jobs').value = s.gpuJobs; $('pause-mode').value = 'ram'; $('schedule').value = (s.schedule || []).join('\n'); $('token-note').textContent = s.tokenSet ? 'Token saved. Leave blank to keep it.' : 'Your token is stored securely on this machine.'; }
+  if (!dirty && status.settings) { const s = status.settings; $('domain').value = s.domain; $('name').value = s.name; $('working-directory').value = s.workingDirectory || ''; $('cpu-codec').value = s.cpuCodec; $('cpu-jobs').value = s.cpuJobs; $('gpu-codec').value = s.gpuCodec; $('gpu-jobs').value = s.gpuJobs; $('cpu-workspace-id').value = s.cpuWorkspaceId || ''; $('gpu-workspace-id').value = s.gpuWorkspaceId || ''; $('cpu-credential-note').textContent = s.cpuCredentialSet ? 'Credential saved. Leave blank to keep it.' : 'Use the credential provisioned on the server.'; $('gpu-credential-note').textContent = s.gpuCredentialSet ? 'Credential saved. Leave blank to keep it.' : 'Use a different credential provisioned on the server.'; $('pause-mode').value = 'ram'; $('schedule').value = (s.schedule || []).join('\n'); $('token-note').textContent = s.tokenSet ? 'Token saved. Leave blank to keep it.' : 'Your token is stored securely on this machine.'; }
   if (!status.configured && !shownSetup) { shownSetup = true; page('settings'); request('show-window').catch(() => {}); }
 }
 async function refresh() {
@@ -241,11 +244,12 @@ $('release-notes-retry').addEventListener('click', loadReleaseNotes);
 $('check-update').addEventListener('click', async () => { $('check-update').disabled = true; try { await request('check-update'); toast('Checking for updates…'); } catch (err) { toast(err.message); } finally { $('check-update').disabled = false; } });
 $('refresh').addEventListener('click', () => { if (!window.chrome?.webview) dashboardPromptAllowed = true; refresh(); });
 $('notice-start').addEventListener('click', async () => { try { await request('start-service'); toast('Starting service…'); setTimeout(refresh, 2000); } catch (err) { toast(err.message); } });
+$('cancel-pending-configuration').addEventListener('click', async () => { if (configurationLocked) return; try { render(await request('cancel-pending-configuration')); toast('Pending configuration canceled.'); } catch (err) { toast(err.message); } });
 $('settings-form').addEventListener('input', () => { dirty = true; });
 $('settings-form').addEventListener('submit', async e => {
   e.preventDefault(); if (configurationLocked) { toast('Configuration is locked while the mandatory update completes.'); return; } $('save').disabled = true;
-  const settings = {pauseMode:$('pause-mode').value, domain:$('domain').value.trim(), token:$('token').value, name:$('name').value.trim(), workingDirectory:$('working-directory').value.trim(), cpuCodec:$('cpu-codec').value, cpuJobs:Number($('cpu-jobs').value), gpuCodec:$('gpu-codec').value, gpuJobs:Number($('gpu-jobs').value), schedule:$('schedule').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)};
-  try { const status = await request('configure', {settings}); $('token').value = ''; dirty = false; render(status); toast(status.pending ? 'Changes saved; they will apply when current jobs finish.' : 'Settings saved.'); page('overview'); }
+  const settings = {pauseMode:$('pause-mode').value, domain:$('domain').value.trim(), token:$('token').value, name:$('name').value.trim(), workingDirectory:$('working-directory').value.trim(), cpuCodec:$('cpu-codec').value, cpuJobs:Number($('cpu-jobs').value), gpuCodec:$('gpu-codec').value, gpuJobs:Number($('gpu-jobs').value), cpuCredential:$('cpu-credential').value, cpuWorkspaceId:$('cpu-workspace-id').value.trim(), gpuCredential:$('gpu-credential').value, gpuWorkspaceId:$('gpu-workspace-id').value.trim(), schedule:$('schedule').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)};
+  try { const status = await request('configure', {settings}); $('token').value = ''; $('cpu-credential').value = ''; $('gpu-credential').value = ''; dirty = false; render(status); toast(status.pending ? 'Changes saved; they will apply when current jobs finish.' : 'Settings saved.'); page('overview'); }
   catch (err) { toast(err.message); } finally { $('save').disabled = configurationLocked; }
 });
 let queueActionPending = false;

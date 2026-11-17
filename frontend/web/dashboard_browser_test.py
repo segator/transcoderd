@@ -496,6 +496,23 @@ def main():
             acknowledge()
             assert job_controls == [dict(action="pause-job",jobId="active-0"),dict(action="resume-job",jobId="active-0")]
 
+            # A prefetched job remains assigned, but is not encoding.
+            workers[0]["runtime"]["jobs"][0].update(state="parked", canPause=False)
+            workers[0]["runtime"]["parkedJobs"] = 1
+            page.locator("#refresh").click()
+            expect(first).to_contain_text("Prefetched and parked")
+            expect(first).not_to_contain_text("Waiting for progress")
+            page.evaluate("location.hash='jobs'")
+            page.locator("#job-search").fill("")
+            page.locator('[data-filter="all"]').click()
+            parked_row = page.locator("#job-list tr").filter(has_text="active-movie-0.mkv")
+            expect(parked_row).to_contain_text("Prefetched")
+            expect(parked_row).to_contain_text("Prefetched and parked")
+            workers[0]["runtime"]["jobs"][0].update(state="running", canPause=True)
+            workers[0]["runtime"].pop("parkedJobs")
+            page.evaluate("location.hash='workers'")
+            page.locator("#refresh").click()
+
             # Reporting period changes membership before pagination, including details.
             page.evaluate("location.hash='workers'")
             workers[-1]["lastSeen"] = (datetime.now(timezone.utc)-timedelta(days=2)).isoformat()

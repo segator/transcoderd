@@ -18,6 +18,7 @@ import (
 	"transcoder/worker/console"
 	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
+	"transcoder/worker/serverclient"
 
 	"github.com/avast/retry-go"
 	"github.com/google/uuid"
@@ -28,6 +29,7 @@ var errJobNotFound = errors.New("job Not found")
 type DownloadStepExecutor struct {
 	workerName    string
 	BaseDomainURL string
+	protected     protectedTransfers
 }
 
 func NewDownloadStepExecutor(workerName string, baseDomainUrl string, options ...ExecutorOption) *Executor {
@@ -35,7 +37,9 @@ func NewDownloadStepExecutor(workerName string, baseDomainUrl string, options ..
 		workerName:    workerName,
 		BaseDomainURL: baseDomainUrl,
 	}
-	return NewStepExecutor(model.DownloadNotification, downloadStep.actions, options...)
+	executor := NewStepExecutor(model.DownloadNotification, downloadStep.actions, options...)
+	downloadStep.protected = executor.protected
+	return executor
 }
 
 func (d *DownloadStepExecutor) actions(jobContext *job.Context) []Action {
@@ -56,6 +60,9 @@ func (d *DownloadStepExecutor) actions(jobContext *job.Context) []Action {
 }
 
 func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jobContext *job.Context) (*job.VideoData, error) {
+	if jobContext.Assignment != nil {
+		return d.downloadProtected(ctx, tracker, jobContext)
+	}
 	var sourceFilePath string
 	var sourceChecksum string
 	var originalName string
@@ -130,6 +137,14 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 		if sourceChecksum != bodyString {
 			return fmt.Errorf("checksum error on download source:%s downloaded:%s", bodyString, sourceChecksum)
 		}
+		// A completed download can later be parked across a process restart.
+		// Its data must reach durable storage before a snapshot can reference it.
+		if err := downloadFile.Sync(); err != nil {
+			return fmt.Errorf("sync downloaded source: %w", err)
+		}
+		if err := downloadFile.Close(); err != nil {
+			return fmt.Errorf("close downloaded source: %w", err)
+		}
 
 		tracker.UpdateValue(contentLength)
 		return nil
@@ -147,6 +162,10 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 		return nil, err
 	}
 
+	return downloadedVideoData(ctx, sourceFilePath, originalName, sourceChecksum, fileSize)
+}
+
+func downloadedVideoData(ctx context.Context, sourceFilePath, originalName, sourceChecksum string, fileSize int64) (*job.VideoData, error) {
 	ffprobeData, err := ffmpeg.ExtractFFProbeData(ctx, sourceFilePath)
 	if err != nil {
 		return nil, err
@@ -164,6 +183,67 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 		Size:         fileSize,
 		FFProbeData:  normalizedFFProbeData,
 	}, nil
+}
+
+func (d *DownloadStepExecutor) downloadProtected(ctx context.Context, tracker Tracker, j *job.Context) (*job.VideoData, error) {
+	if d.protected == nil || j.Assignment == nil {
+		return nil, errors.New("protected download is not configured")
+	}
+	var path, checksum, name string
+	var size int64
+	err := retry.Do(func() error {
+		download, err := d.protected.Download(ctx, *j.Assignment)
+		if err != nil {
+			return err
+		}
+		defer download.Body.Close()
+		if download.Size <= 0 {
+			return errors.New("protected download has invalid size")
+		}
+		name = download.Name
+		path = filepath.Join(j.WorkingDir, j.JobId.String()+filepath.Ext(name))
+		file, err := os.Create(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		tracker.SetTotal(download.Size)
+		if named, ok := tracker.(interface{ SetDisplayName(string) }); ok && name != "" {
+			named.SetDisplayName(name)
+		}
+		reader := NewProgressTrackStream(tracker, download.Body)
+		size, err = io.Copy(file, reader)
+		if err != nil {
+			return err
+		}
+		if size != download.Size {
+			return fmt.Errorf("protected download size mismatch: expected %d, received %d", download.Size, size)
+		}
+		checksum = hex.EncodeToString(reader.SumSha())
+		serverChecksum, err := d.protected.Checksum(ctx, *j.Assignment)
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(checksum, serverChecksum) {
+			return errors.New("protected download checksum mismatch")
+		}
+		if err := file.Sync(); err != nil {
+			return fmt.Errorf("sync protected download: %w", err)
+		}
+		if err := file.Close(); err != nil {
+			return fmt.Errorf("close protected download: %w", err)
+		}
+		tracker.UpdateValue(size)
+		return nil
+	}, retry.Context(ctx), retry.Delay(5*time.Second), retry.DelayType(retry.FixedDelay), retry.Attempts(180), retry.LastErrorOnly(true), retry.RetryIf(protectedTransferRetryable))
+	if err != nil {
+		return nil, err
+	}
+	return downloadedVideoData(ctx, path, name, checksum, size)
+}
+
+func protectedTransferRetryable(err error) bool {
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, serverclient.ErrProtectedConflict) && !errors.Is(err, serverclient.ErrProtectedUnavailable)
 }
 
 func (d *DownloadStepExecutor) getChecksum(jobContext *job.Context, logger console.LeveledLogger) (string, error) {

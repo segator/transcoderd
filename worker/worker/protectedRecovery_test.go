@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"transcoder/model"
+	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
 	"transcoder/worker/serverclient"
 
@@ -177,5 +179,64 @@ func TestRecoverPrefetchWaitsForPreviousProcessLease(t *testing.T) {
 	}
 	if _, err := recoverParkedJob(t.Context(), j, "node", client, true, time.Millisecond); err != nil || !j.Parked || len(client.parks) != 1 {
 		t.Fatalf("recovery after lease expiry: parked=%t error=%v", j.Parked, err)
+	}
+}
+
+func TestRecoverCompletedPrefetchBeforeNextPhaseWasPersisted(t *testing.T) {
+	for _, phase := range []model.NotificationType{model.DownloadNotification, model.MKVExtractNotification, model.PGSNotification} {
+		for _, pending := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/pending=%t", phase, pending), func(t *testing.T) {
+				j := testParkableContext(t)
+				j.NextPhase = phase
+				j.LastEvent.NotificationType = phase
+				if pending {
+					j.LastEvent.Status = model.StartedNotificationStatus
+					event, err := j.NewProtectedEvent("node", phase, model.CompletedNotificationStatus, "")
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := j.StageProtectedEvent(event); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := j.PersistJobContext(); err != nil {
+					t.Fatal(err)
+				}
+				reloaded, err := job.ReadContextFromDiskByPath(filepath.Join(j.WorkingDir, j.JobId.String()+".json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				client := &fakeProtectedRecoveryClient{}
+				guard, err := recoverParkedJob(t.Context(), reloaded, "node", client, true, time.Millisecond)
+				if err != nil || guard != nil || !reloaded.Parked || reloaded.NextPhase != model.FFMPEGSNotification || len(client.parks) != 1 || len(client.events) != boolInt(pending) {
+					t.Fatalf("recovery = %v, guard=%v, parked=%t, next=%s, parks=%d, events=%d", err, guard, reloaded.Parked, reloaded.NextPhase, len(client.parks), len(client.events))
+				}
+				reloaded, err = job.ReadContextFromDiskByPath(filepath.Join(j.WorkingDir, j.JobId.String()+".json"))
+				if err != nil || !reloaded.Parked || reloaded.NextPhase != model.FFMPEGSNotification || reloaded.PendingProtectedEvent() != nil {
+					t.Fatalf("persisted recovery = %+v, %v", reloaded, err)
+				}
+			})
+		}
+	}
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func TestRecoverCompletedPrefetchDoesNotSkipSubtitlePreparation(t *testing.T) {
+	for _, phase := range []model.NotificationType{model.DownloadNotification, model.MKVExtractNotification} {
+		t.Run(string(phase), func(t *testing.T) {
+			j := testParkableContext(t)
+			j.NextPhase = phase
+			j.LastEvent.NotificationType = phase
+			j.Source.FFProbeData.Subtitle = []*ffmpeg.Subtitle{{Format: "hdmv_pgs_subtitle"}}
+			client := &fakeProtectedRecoveryClient{}
+			if guard, err := recoverParkedJob(t.Context(), j, "node", client, true, time.Millisecond); err == nil || guard != nil || len(client.leases) != 0 {
+				t.Fatalf("unfinished subtitle preparation was recovered: guard=%v error=%v leases=%d", guard, err, len(client.leases))
+			}
+		})
 	}
 }

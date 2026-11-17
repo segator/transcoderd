@@ -33,9 +33,17 @@ At startup, the worker SHALL find JSON contexts in its workspace and recover eac
 - **WHEN** a valid parked job is recovered with its completed download and required files intact
 - **THEN** it remains parked until queue resume and then continues to encoding without repeating that download
 
+#### Scenario: Crash before recording the next phase
+- **WHEN** the final preparation phase completed but the next phase was not yet recorded, including when its completion acknowledgement was lost
+- **THEN** the worker reconciles the same completion event and recovers the encode boundary only if no subtitle preparation remains
+
 #### Scenario: Parked workspace is unavailable
 - **WHEN** the saved context or downloaded data cannot be validated
 - **THEN** the worker reports recovery failure, does not claim safe idle, and does not silently duplicate or complete the assignment
+
+#### Scenario: Generated subtitle is missing or changed
+- **WHEN** a parked job requires a generated subtitle that is missing, modified or lacks its saved checksum
+- **THEN** the worker rejects the checkpoint and does not resume the encode or report safe idle
 
 ## ADDED Requirements
 

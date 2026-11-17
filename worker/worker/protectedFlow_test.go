@@ -113,14 +113,21 @@ func TestProtectedFlowStopsRestartsAndResumesPrefetch(t *testing.T) {
 		t.Fatal(err)
 	}
 	j.Source = &job.VideoData{FilePath: path, Size: int64(len(downloaded)), Checksum: checksum, FFProbeData: &ffmpeg.NormalizedFFProbe{Video: &ffmpeg.Video{}}}
-	if err := publisher.Publish(guard.ctx, j, model.DownloadNotification, model.CompletedNotificationStatus, ""); err != nil {
+	// Simulate the server accepting the completion while the worker crashes
+	// before recording its response or the transition to the encode queue.
+	j.NextPhase = model.DownloadNotification
+	completedDownload, err := j.NewProtectedEvent("node", model.DownloadNotification, model.CompletedNotificationStatus, "")
+	if err != nil {
 		t.Fatal(err)
 	}
-	j.NextPhase = model.FFMPEGSNotification
-	if err := j.PersistJobContext(); err != nil {
+	if err := j.StageProtectedEvent(completedDownload); err != nil {
 		t.Fatal(err)
 	}
-	if err := parkProtectedJob(ctx, j, guard, client, time.Millisecond); err != nil {
+	if err := client.PublishEvent(guard.ctx, *j.Assignment, completedDownload); err != nil {
+		t.Fatal(err)
+	}
+	guard.Close()
+	if err := client.Park(ctx, *j.Assignment); err != nil {
 		t.Fatal(err)
 	}
 	current, err := repo.GetJob(ctx, video.Id.String())

@@ -3,6 +3,7 @@ package job
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"transcoder/model"
 
@@ -28,9 +29,23 @@ func (e *Context) PreparePark() error {
 	if e.ParkIntent || e.Parked {
 		return nil
 	}
+	root, err := os.OpenRoot(e.WorkingDir)
+	if err != nil {
+		return fmt.Errorf("open prefetch workspace: %w", err)
+	}
+	checksums, err := e.prefetchedArtifactChecksums(root)
+	_ = root.Close()
+	if err != nil {
+		return err
+	}
+	previousArtifacts := e.PrefetchedArtifacts
+	if len(checksums) != 0 {
+		e.PrefetchedArtifacts = checksums
+	}
 	e.ParkIntent = true
 	if err := e.persistJobContextLocked(); err != nil {
 		e.ParkIntent = false
+		e.PrefetchedArtifacts = previousArtifacts
 		return fmt.Errorf("persist protected park intent: %w", err)
 	}
 	return nil

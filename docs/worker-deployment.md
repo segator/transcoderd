@@ -47,6 +47,9 @@ It leaves the barrier held on success or timeout; use
 `control release-restart-barrier` if no restart follows. A missing capability,
 marker, unresolved request or recovery error cannot establish safe idle. Inspect
 `control status` and resolve ownership before restarting in those cases.
+For parked jobs with extracted or OCR subtitles, the worker also records and
+checks the generated subtitle files' checksums. Missing files, changed files or
+missing checksums prevent a safe-idle acknowledgement and automatic resume.
 
 If status reports an unreconciled assignment, retain its workspace and inspect
 the job through `GET /api/v1/job/{id}`. An operator may cancel an assigned or

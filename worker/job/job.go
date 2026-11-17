@@ -22,22 +22,23 @@ import (
 var ErrInvalidPrefetchedSource = errors.New("invalid prefetched source")
 
 type Context struct {
-	JobId            uuid.UUID              `json:"job_id"`
-	EventId          int                    `json:"event_id"`
-	WorkingDir       string                 `json:"working_dir"`
-	LastEvent        *ContextEvent          `json:"last_event"`
-	NextPhase        model.NotificationType `json:"next_phase,omitempty"`
-	Source           *VideoData             `json:"source"`
-	Target           *VideoData             `json:"target"`
-	TargetMediaProbe *model.MediaProbe      `json:"target_media_probe,omitempty"`
-	EncodeKind       string                 `json:"encode_kind,omitempty"`
-	EncodeConfig     *config.FFMPEGConfig   `json:"encode_config,omitempty"`
-	Assignment       *model.AssignmentClaim `json:"assignment,omitempty"`
-	RequestID        uuid.UUID              `json:"request_id,omitempty"`
-	PendingEvent     *model.TaskEventType   `json:"pending_event,omitempty"`
-	ParkIntent       bool                   `json:"park_intent,omitempty"`
-	Parked           bool                   `json:"parked,omitempty"`
-	mu               sync.Mutex
+	JobId               uuid.UUID              `json:"job_id"`
+	EventId             int                    `json:"event_id"`
+	WorkingDir          string                 `json:"working_dir"`
+	LastEvent           *ContextEvent          `json:"last_event"`
+	NextPhase           model.NotificationType `json:"next_phase,omitempty"`
+	Source              *VideoData             `json:"source"`
+	Target              *VideoData             `json:"target"`
+	TargetMediaProbe    *model.MediaProbe      `json:"target_media_probe,omitempty"`
+	EncodeKind          string                 `json:"encode_kind,omitempty"`
+	EncodeConfig        *config.FFMPEGConfig   `json:"encode_config,omitempty"`
+	Assignment          *model.AssignmentClaim `json:"assignment,omitempty"`
+	RequestID           uuid.UUID              `json:"request_id,omitempty"`
+	PendingEvent        *model.TaskEventType   `json:"pending_event,omitempty"`
+	ParkIntent          bool                   `json:"park_intent,omitempty"`
+	Parked              bool                   `json:"parked,omitempty"`
+	PrefetchedArtifacts map[string]string      `json:"prefetched_artifacts,omitempty"`
+	mu                  sync.Mutex
 }
 
 type VideoData struct {
@@ -174,7 +175,59 @@ func (e *Context) ValidatePrefetchedSource() error {
 	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), e.Source.Checksum) {
 		return fmt.Errorf("%w: checksum mismatch", ErrInvalidPrefetchedSource)
 	}
+	artifacts, err := e.prefetchedArtifactChecksums(root)
+	if err != nil {
+		return err
+	}
+	if len(artifacts) != 0 && e.PrefetchedArtifacts == nil && (e.Parked || e.ParkIntent) {
+		return fmt.Errorf("%w: parked subtitle checksums are missing", ErrInvalidPrefetchedSource)
+	}
+	if e.PrefetchedArtifacts != nil {
+		if len(artifacts) != len(e.PrefetchedArtifacts) {
+			return fmt.Errorf("%w: subtitle manifest does not match source", ErrInvalidPrefetchedSource)
+		}
+		for name, checksum := range artifacts {
+			if !strings.EqualFold(e.PrefetchedArtifacts[name], checksum) {
+				return fmt.Errorf("%w: subtitle %s checksum mismatch", ErrInvalidPrefetchedSource, name)
+			}
+		}
+	}
 	return nil
+}
+
+// prefetchedArtifactChecksums covers every generated subtitle consumed by
+// FFmpeg. Opening through the workspace root also prevents escaping it.
+func (e *Context) prefetchedArtifactChecksums(root *os.Root) (map[string]string, error) {
+	checksums := make(map[string]string)
+	for _, subtitle := range e.Source.FFProbeData.Subtitle {
+		if subtitle == nil {
+			return nil, fmt.Errorf("%w: invalid subtitle metadata", ErrInvalidPrefetchedSource)
+		}
+		if !subtitle.IsImageTypeSubtitle() && !subtitle.NeedsMKVExtraction() {
+			continue
+		}
+		name := fmt.Sprintf("%d.srt", subtitle.Id)
+		if _, exists := checksums[name]; exists {
+			return nil, fmt.Errorf("%w: duplicate subtitle %s", ErrInvalidPrefetchedSource, name)
+		}
+		f, err := root.Open(name)
+		if err != nil {
+			return nil, fmt.Errorf("%w: open subtitle %s: %v", ErrInvalidPrefetchedSource, name, err)
+		}
+		info, err := f.Stat()
+		if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 {
+			_ = f.Close()
+			return nil, fmt.Errorf("%w: subtitle %s is not a nonempty regular file", ErrInvalidPrefetchedSource, name)
+		}
+		hash := sha256.New()
+		n, err := io.Copy(hash, f)
+		closeErr := f.Close()
+		if err != nil || closeErr != nil || n != info.Size() {
+			return nil, fmt.Errorf("%w: cannot read complete subtitle %s", ErrInvalidPrefetchedSource, name)
+		}
+		checksums[name] = hex.EncodeToString(hash.Sum(nil))
+	}
+	return checksums, nil
 }
 
 func ReadContextFromDiskByPath(path string) (*Context, error) {

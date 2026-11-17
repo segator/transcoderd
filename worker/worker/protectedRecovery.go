@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -77,14 +78,49 @@ func recoverableInitialAssignment(j *job.Context) bool {
 }
 
 func recoverablePreEncodeCheckpoint(j *job.Context) bool {
-	if j == nil || j.Assignment == nil || j.Assignment.JobID != j.JobId || j.Assignment.Generation == 0 || j.Assignment.Capability == "" || j.NextPhase != model.FFMPEGSNotification || j.PendingProtectedEvent() != nil || j.LastEvent == nil || j.LastEvent.Status != model.CompletedNotificationStatus {
+	if j == nil || j.Assignment == nil || j.Assignment.JobID != j.JobId || j.Assignment.Generation == 0 || j.Assignment.Capability == "" {
 		return false
 	}
-	switch j.LastEvent.NotificationType {
+	phase, status := model.NotificationType(""), model.NotificationStatus("")
+	if pending := j.PendingProtectedEvent(); pending != nil {
+		// A phase completion can be persisted before its response is received.
+		// Only replay it when the preceding event proves that phase had started.
+		if j.LastEvent == nil || j.LastEvent.NotificationType != pending.NotificationType || j.LastEvent.Status != model.StartedNotificationStatus || pending.JobId != j.JobId {
+			return false
+		}
+		phase, status = pending.NotificationType, pending.Status
+	} else if j.LastEvent != nil {
+		phase, status = j.LastEvent.NotificationType, j.LastEvent.Status
+	}
+	if status != model.CompletedNotificationStatus {
+		return false
+	}
+	switch phase {
 	case model.DownloadNotification, model.MKVExtractNotification, model.PGSNotification:
-		return true
 	default:
 		return false
+	}
+	if j.NextPhase == model.FFMPEGSNotification {
+		return j.PendingProtectedEvent() == nil
+	}
+	// The completion event was persisted before OnComplete saved the next
+	// phase. Infer FFmpeg only when the same routing rules prove that no
+	// subtitle preparation remains. Never infer it from a parked snapshot.
+	if j.NextPhase != phase || j.Parked || j.ParkIntent || j.Source == nil || j.Source.FFProbeData == nil {
+		return false
+	}
+	for _, subtitle := range j.Source.FFProbeData.Subtitle {
+		if subtitle == nil {
+			return false
+		}
+	}
+	switch phase {
+	case model.DownloadNotification:
+		return !j.Source.FFProbeData.HaveExtractableSubtitle()
+	case model.MKVExtractNotification:
+		return !j.Source.FFProbeData.HaveImageTypeSubtitle()
+	default:
+		return true
 	}
 }
 
@@ -120,6 +156,14 @@ func recoverParkedJob(ctx context.Context, j *job.Context, worker string, client
 	publisher := &protectedEventPublisher{client: client, workerName: worker, retryDelay: retryDelay}
 	if err := publisher.Reconcile(guard.ctx, j); err != nil {
 		return nil, err
+	}
+	if j.NextPhase != model.FFMPEGSNotification {
+		previous := j.NextPhase
+		j.NextPhase = model.FFMPEGSNotification
+		if err := j.PersistJobContext(); err != nil {
+			j.NextPhase = previous
+			return nil, fmt.Errorf("persist recovered pre-encode boundary: %w", err)
+		}
 	}
 	if queueStopped {
 		if err := parkProtectedJob(ctx, j, guard, client, retryDelay); err != nil {

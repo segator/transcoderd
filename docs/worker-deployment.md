@@ -26,6 +26,12 @@ must remain available until their assignments are terminal. Protect the server
 configuration and use TLS on untrusted networks. The shared `web.token` remains
 required in addition to the per-worker credential.
 
+Before enabling protected assignments, replace every server replica with a
+version that enforces the protected protocol and stop all older server
+processes. An older server sharing the database or media storage can bypass the
+new checks even if it receives no new requests through the load balancer. The
+database schema alone does not prevent such a server from starting or running.
+
 Configure `worker.protected.credential` and `worker.protected.workspaceId` for
 the worker. Before starting it, create a `.workspace-id` file containing that
 UUID inside `<worker.temporalPath>/worker-<worker.name>` on storage that survives

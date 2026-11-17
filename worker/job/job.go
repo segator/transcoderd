@@ -35,6 +35,7 @@ type Context struct {
 	Assignment          *model.AssignmentClaim `json:"assignment,omitempty"`
 	RequestID           uuid.UUID              `json:"request_id,omitempty"`
 	PendingEvent        *model.TaskEventType   `json:"pending_event,omitempty"`
+	PhaseFailure        *PhaseFailureIntent    `json:"phase_failure,omitempty"`
 	ParkIntent          bool                   `json:"park_intent,omitempty"`
 	Parked              bool                   `json:"parked,omitempty"`
 	PrefetchedArtifacts map[string]string      `json:"prefetched_artifacts,omitempty"`
@@ -54,6 +55,13 @@ type ContextEvent struct {
 	NotificationType model.NotificationType   `json:"notification_type"`
 	Status           model.NotificationStatus `json:"status"`
 	Message          string                   `json:"message"`
+}
+
+// PhaseFailureIntent records a definitive action failure before its phase
+// notification is sent, so a restart can finish reporting that same failure.
+type PhaseFailureIntent struct {
+	Phase   model.NotificationType `json:"phase"`
+	Message string                 `json:"message"`
 }
 
 func NewContext(jobId uuid.UUID, lastEvent int, workingDir string) *Context {

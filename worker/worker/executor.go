@@ -1082,6 +1082,11 @@ func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step
 		return context.Cause(ctx)
 	}
 	if err != nil {
+		if jobContext.Assignment != nil && isDefinitiveProtectedFailure(err) {
+			if persistErr := jobContext.RecordPhaseFailure(stepExecutor.NotificationType(), err.Error()); persistErr != nil {
+				return fmt.Errorf("%w: %w", ErrProtectedEventUncertain, persistErr)
+			}
+		}
 		if publishErr := e.publishStepEvent(ctx, jobContext, stepExecutor.NotificationType(), model.FailedNotificationStatus, err.Error()); publishErr != nil {
 			return publishErr
 		}

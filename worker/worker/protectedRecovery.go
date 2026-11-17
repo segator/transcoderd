@@ -28,14 +28,73 @@ func recoverableTerminalAssignment(j *job.Context) bool {
 		return false
 	}
 	if pending := j.PendingProtectedEvent(); pending != nil {
-		return pending.NotificationType == model.JobNotification && (pending.Status == model.CompletedNotificationStatus || pending.Status == model.FailedNotificationStatus)
+		if pending.NotificationType == model.JobNotification && (pending.Status == model.CompletedNotificationStatus || pending.Status == model.FailedNotificationStatus) {
+			if j.PhaseFailure == nil {
+				return true
+			}
+			return pending.Status == model.FailedNotificationStatus && pending.Message == fmt.Sprintf("%s:%s", j.PhaseFailure.Phase, j.PhaseFailure.Message) && j.LastEvent != nil && j.LastEvent.NotificationType == j.PhaseFailure.Phase && j.LastEvent.Status == model.FailedNotificationStatus && j.LastEvent.Message == j.PhaseFailure.Message
+		}
+		return recoverablePhaseFailure(j)
 	}
-	return j.LastEvent != nil && j.LastEvent.NotificationType == model.JobNotification && (j.LastEvent.Status == model.CompletedNotificationStatus || j.LastEvent.Status == model.FailedNotificationStatus)
+	if j.LastEvent != nil && j.LastEvent.NotificationType == model.JobNotification {
+		if j.PhaseFailure != nil {
+			return j.LastEvent.Status == model.FailedNotificationStatus && j.LastEvent.Message == fmt.Sprintf("%s:%s", j.PhaseFailure.Phase, j.PhaseFailure.Message)
+		}
+		return j.LastEvent.Status == model.CompletedNotificationStatus || j.LastEvent.Status == model.FailedNotificationStatus
+	}
+	return recoverablePhaseFailure(j)
+}
+
+func recoverablePhaseFailure(j *job.Context) bool {
+	if j == nil || j.PhaseFailure == nil || j.NextPhase != j.PhaseFailure.Phase || j.LastEvent == nil || j.LastEvent.NotificationType != j.PhaseFailure.Phase {
+		return false
+	}
+	switch j.PhaseFailure.Phase {
+	case model.DownloadNotification, model.MKVExtractNotification, model.PGSNotification, model.FFMPEGSNotification, model.JobVerify, model.UploadNotification:
+	default:
+		return false
+	}
+	if pending := j.PendingProtectedEvent(); pending != nil {
+		return j.LastEvent.Status == model.StartedNotificationStatus && pending.JobId == j.JobId && pending.NotificationType == j.PhaseFailure.Phase && pending.Status == model.FailedNotificationStatus && pending.Message == j.PhaseFailure.Message
+	}
+	return j.LastEvent.Status == model.StartedNotificationStatus || (j.LastEvent.Status == model.FailedNotificationStatus && j.LastEvent.Message == j.PhaseFailure.Message)
+}
+
+func recoverProtectedPhaseFailure(ctx context.Context, j *job.Context, worker string, client protectedRecoveryClient) error {
+	claim := *j.Assignment
+	claim.InstanceID = uuid.New()
+	guard, err := startLeaseGuard(ctx, func(ctx context.Context) (time.Time, error) {
+		return client.AcquireLease(ctx, claim)
+	}, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	defer guard.Close()
+	if err := j.RecordAcquiredLease(claim.InstanceID); err != nil {
+		return err
+	}
+	publisher := &protectedEventPublisher{client: client, workerName: worker, retryDelay: time.Second}
+	if err := publisher.Reconcile(guard.ctx, j); err != nil {
+		return err
+	}
+	intent := j.PhaseFailure
+	if j.LastEvent.Status == model.StartedNotificationStatus {
+		if err := publisher.Publish(guard.ctx, j, intent.Phase, model.FailedNotificationStatus, intent.Message); err != nil {
+			return err
+		}
+	}
+	if err := publisher.Publish(guard.ctx, j, model.JobNotification, model.FailedNotificationStatus, fmt.Sprintf("%s:%s", intent.Phase, intent.Message)); err != nil {
+		return err
+	}
+	return j.Clean()
 }
 
 func recoverProtectedTerminal(ctx context.Context, j *job.Context, worker string, client protectedRecoveryClient) error {
 	if !recoverableTerminalAssignment(j) || worker == "" || client == nil {
 		return errors.New("protected terminal checkpoint cannot be reconciled")
+	}
+	if recoverablePhaseFailure(j) {
+		return recoverProtectedPhaseFailure(ctx, j, worker, client)
 	}
 	publisher := &protectedEventPublisher{client: client, workerName: worker, retryDelay: time.Second}
 	if j.PendingProtectedEvent() != nil {
@@ -65,7 +124,7 @@ func recoverProtectedTerminal(ctx context.Context, j *job.Context, worker string
 // Only checkpoints before Download starts are replayed here. Other interrupted
 // phases require their own recovery policy and continue to fail closed.
 func recoverableInitialAssignment(j *job.Context) bool {
-	if j == nil || j.Assignment == nil || j.Assignment.JobID != j.JobId || j.Assignment.Generation == 0 || j.Assignment.Capability == "" || j.RequestID == uuid.Nil || j.Parked || j.ParkIntent || (j.NextPhase != "" && j.NextPhase != model.DownloadNotification) {
+	if j == nil || j.Assignment == nil || j.Assignment.JobID != j.JobId || j.Assignment.Generation == 0 || j.Assignment.Capability == "" || j.RequestID == uuid.Nil || j.Parked || j.ParkIntent || j.PhaseFailure != nil || (j.NextPhase != "" && j.NextPhase != model.DownloadNotification) {
 		return false
 	}
 	if j.LastEvent != nil && (j.LastEvent.NotificationType != model.JobNotification || j.LastEvent.Status != model.StartedNotificationStatus) {
@@ -78,7 +137,7 @@ func recoverableInitialAssignment(j *job.Context) bool {
 }
 
 func recoverablePreEncodeCheckpoint(j *job.Context) bool {
-	if j == nil || j.Assignment == nil || j.Assignment.JobID != j.JobId || j.Assignment.Generation == 0 || j.Assignment.Capability == "" {
+	if j == nil || j.Assignment == nil || j.Assignment.JobID != j.JobId || j.Assignment.Generation == 0 || j.Assignment.Capability == "" || j.PhaseFailure != nil {
 		return false
 	}
 	phase, status := model.NotificationType(""), model.NotificationStatus("")

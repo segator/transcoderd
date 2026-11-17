@@ -37,6 +37,14 @@ At startup, the worker SHALL find JSON contexts in its workspace and recover eac
 - **WHEN** the final preparation phase completed but the next phase was not yet recorded, including when its completion acknowledgement was lost
 - **THEN** the worker reconciles the same completion event and recovers the encode boundary only if no subtitle preparation remains
 
+#### Scenario: Crash while reporting a definitive phase failure
+- **WHEN** a definitive action failure was durably recorded before the worker stopped, including when its phase failure acknowledgement was lost
+- **THEN** the worker reacquires the assignment lease and reconciles the phase and job failure without rerunning the action or duplicating its event
+
+#### Scenario: Transient action failure during lease or server loss
+- **WHEN** an action is interrupted by cancellation, lease loss or an unavailable server
+- **THEN** the worker does not infer a definitive job failure from that interruption
+
 #### Scenario: Parked workspace is unavailable
 - **WHEN** the saved context or downloaded data cannot be validated
 - **THEN** the worker reports recovery failure, does not claim safe idle, and does not silently duplicate or complete the assignment

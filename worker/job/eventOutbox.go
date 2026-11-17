@@ -34,6 +34,20 @@ func (e *Context) NewProtectedEvent(worker string, phase model.NotificationType,
 
 var ErrPendingEvent = errors.New("another protected event awaits acknowledgement")
 
+func (e *Context) RecordPhaseFailure(phase model.NotificationType, message string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.Assignment == nil || e.Assignment.JobID != e.JobId || e.PendingEvent != nil || e.NextPhase != phase || e.LastEvent == nil || e.LastEvent.NotificationType != phase || e.LastEvent.Status != model.StartedNotificationStatus || e.PhaseFailure != nil {
+		return errors.New("protected phase failure cannot be recorded")
+	}
+	e.PhaseFailure = &PhaseFailureIntent{Phase: phase, Message: message}
+	if err := e.persistJobContextLocked(); err != nil {
+		e.PhaseFailure = nil
+		return fmt.Errorf("persist protected phase failure: %w", err)
+	}
+	return nil
+}
+
 // StageProtectedEvent persists exactly one immutable event before transmission.
 // Until it is acknowledged, later events cannot consume its sequence number.
 func (e *Context) StageProtectedEvent(event model.TaskEventType) error {

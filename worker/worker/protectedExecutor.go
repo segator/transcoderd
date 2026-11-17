@@ -170,6 +170,10 @@ func (e *JobExecutor) finishProtectedSuccess(j *job.Context) {
 	e.finishProtectedJob(j, execution)
 }
 
+func isDefinitiveProtectedFailure(cause error) bool {
+	return cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) && !errors.Is(cause, ErrProtectedLeaseLost) && !errors.Is(cause, ErrProtectedEventUncertain) && !errors.Is(cause, serverclient.ErrProtectedConflict) && !errors.Is(cause, serverclient.ErrProtectedUnavailable)
+}
+
 func (e *JobExecutor) finishProtectedFailure(j *job.Context, phase model.NotificationType, cause error) {
 	execution := e.protectedExecution(j.JobId)
 	if execution == nil {
@@ -177,7 +181,7 @@ func (e *JobExecutor) finishProtectedFailure(j *job.Context, phase model.Notific
 		return
 	}
 	guard := execution.currentGuard()
-	if guard == nil || guard.ctx.Err() != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) || errors.Is(cause, serverclient.ErrProtectedConflict) || errors.Is(cause, serverclient.ErrProtectedUnavailable) {
+	if guard == nil || guard.ctx.Err() != nil || !isDefinitiveProtectedFailure(cause) {
 		e.blockProtectedJob(j, cause)
 		return
 	}

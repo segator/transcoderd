@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"transcoder/helper"
 	"transcoder/model"
@@ -59,11 +60,12 @@ type Config struct {
 type RuntimeScheduler struct {
 	config          *Config
 	repo            repository.Repository
-	checksumChan    chan PathChecksum
+	checksumMu      sync.RWMutex
 	pathChecksumMap map[string]string
 	jobRequestMu    sync.Mutex
 	jobIntakeMu     sync.Mutex
 	handleEventMu   sync.Mutex
+	sourceReadGuard sourceReadGuard
 }
 
 func (r *RuntimeScheduler) ListQueuedJobs(ctx context.Context) (model.QueueSnapshot, error) {
@@ -361,7 +363,6 @@ func NewScheduler(config *Config, repo repository.Repository) (*RuntimeScheduler
 	runtimeScheduler := &RuntimeScheduler{
 		config:          config,
 		repo:            repo,
-		checksumChan:    make(chan PathChecksum),
 		pathChecksumMap: make(map[string]string),
 	}
 
@@ -395,8 +396,6 @@ func (r *RuntimeScheduler) scheduleRoutine(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case checksumPath := <-r.checksumChan:
-			r.pathChecksumMap[checksumPath.path] = checksumPath.checksum
 		case <-progressTicker.C:
 			if err := r.progressJobMaintenance(ctx); err != nil {
 				log.Errorf("Error on progress job maintenance: %s", err)
@@ -624,28 +623,52 @@ func (r *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string
 	if !filepath.IsLocal(video.SourcePath) {
 		return nil, fmt.Errorf("job %s has a non-local source path", video.Id)
 	}
+	assignment := sourceReadAssignment{jobID: uuid, eventID: video.Events.GetLatestPerNotificationType(model.JobNotification).EventID}
+	if r.sourceReadGuard.isBlocked(assignment, time.Now()) {
+		return nil, fmt.Errorf("%w: source read failed for this assignment", ErrorJobNotFound)
+	}
 	filePath := filepath.Join(r.config.SourcePath, video.SourcePath)
+	markReadFailure := func(readErr error) {
+		r.sourceReadGuard.block(assignment, time.Now())
+		log.WithError(readErr).WithFields(log.Fields{"job_id": uuid, "source_path": video.SourcePath}).Error("Source read failed; blocking further downloads for this assignment")
+	}
 	downloadFile, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrorJobNotFound
-		} else {
-			return nil, err
 		}
+		if errors.Is(err, syscall.EIO) {
+			markReadFailure(err)
+			return nil, fmt.Errorf("%w: source cannot be opened", ErrorJobNotFound)
+		}
+		return nil, err
 	}
 	dfStat, err := downloadFile.Stat()
 	if err != nil {
+		_ = downloadFile.Close()
+		if errors.Is(err, syscall.EIO) {
+			markReadFailure(err)
+			return nil, fmt.Errorf("%w: source cannot be inspected", ErrorJobNotFound)
+		}
 		return nil, err
 	}
 	return &DownloadJobStream{
 		JobStream: &JobStream{
-			video:             video,
-			file:              downloadFile,
-			path:              filePath,
-			checksumPublisher: r.checksumChan,
+			video: video,
+			file:  downloadFile,
+			path:  filePath,
+			checksumPublisher: func(checksum PathChecksum) {
+				r.checksumMu.Lock()
+				defer r.checksumMu.Unlock()
+				if r.pathChecksumMap == nil {
+					r.pathChecksumMap = make(map[string]string)
+				}
+				r.pathChecksumMap[checksum.path] = checksum.checksum
+			},
 		},
-		FileSize: dfStat.Size(),
-		FileName: dfStat.Name(),
+		FileSize:    dfStat.Size(),
+		FileName:    dfStat.Name(),
+		onReadError: markReadFailure,
 	}, nil
 
 }
@@ -711,7 +734,9 @@ func (r *RuntimeScheduler) GetChecksum(ctx context.Context, uuid string) (string
 		return "", err
 	}
 	filePath := filepath.Join(r.config.SourcePath, video.SourcePath)
+	r.checksumMu.RLock()
 	checksum := r.pathChecksumMap[filePath]
+	r.checksumMu.RUnlock()
 	if checksum == "" {
 		return "", fmt.Errorf("%w: Checksum not found for %s", ErrorJobNotFound, filePath)
 	}
@@ -856,6 +881,7 @@ func verifyFailureMessage(message string) bool {
 	// transient-looking text elsewhere in FFmpeg's complete diagnostic output.
 	for _, permanent := range []string{
 		"job not found", "runtime error:", "download code 404", "dowload code 404",
+		"repeated incomplete source downloads", "repeated source download verification failures",
 		"source file size ", "source file duration ", "source video duration ",
 		"subtitle codec eia_608", "invalid color configuration", "identity matrix",
 		"invalid data found when processing input", "could not parse subtitles",

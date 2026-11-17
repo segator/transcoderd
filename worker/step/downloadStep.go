@@ -24,10 +24,15 @@ import (
 )
 
 var errJobNotFound = errors.New("job Not found")
+var errRepeatedIncompleteDownload = errors.New("repeated incomplete source downloads; check source storage, local storage, and network before retrying")
+var errRepeatedVerificationFailure = errors.New("repeated source download verification failures; check source storage, local storage, and network before retrying")
+
+const maxSourceDownloadFailures = 3
 
 type DownloadStepExecutor struct {
 	workerName    string
 	BaseDomainURL string
+	retryDelay    time.Duration
 }
 
 func NewDownloadStepExecutor(workerName string, baseDomainUrl string, options ...ExecutorOption) *Executor {
@@ -56,12 +61,36 @@ func (d *DownloadStepExecutor) actions(jobContext *job.Context) []Action {
 }
 
 func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jobContext *job.Context) (*job.VideoData, error) {
+	videoData, err := d.downloadSource(ctx, tracker, jobContext)
+	if err != nil {
+		return nil, err
+	}
+	ffprobeData, err := ffmpeg.ExtractFFProbeData(ctx, videoData.FilePath)
+	if err != nil {
+		return nil, err
+	}
+	normalizedFFProbeData, err := ffmpeg.NormalizeFFProbeData(ffprobeData)
+	if err != nil {
+		return nil, err
+	}
+	videoData.FFProbeData = normalizedFFProbeData
+	return videoData, nil
+}
+
+func (d *DownloadStepExecutor) downloadSource(ctx context.Context, tracker Tracker, jobContext *job.Context) (*job.VideoData, error) {
 	var sourceFilePath string
 	var sourceChecksum string
 	var originalName string
 	var fileSize int64
 	logger := tracker.Logger()
+	incompleteAttempts := 0
+	verificationFailures := 0
+	retryDelay := d.retryDelay
+	if retryDelay <= 0 {
+		retryDelay = 5 * time.Second
+	}
 	err := retry.Do(func() error {
+		tracker.UpdateValue(0)
 		req, err := http.NewRequestWithContext(ctx, "GET", d.GetDownloadURL(jobContext.JobId), nil)
 		if err != nil {
 			return err
@@ -71,13 +100,13 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusNotFound {
 			return errJobNotFound
 		}
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("not 200 respose in download code %d", resp.StatusCode)
 		}
-		defer resp.Body.Close()
 		contentLength, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
 		tracker.SetTotal(contentLength)
 		if err != nil {
@@ -115,6 +144,16 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 		reader := NewProgressTrackStream(tracker, resp.Body)
 
 		fileSize, err = io.Copy(downloadFile, reader)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if fileSize < contentLength {
+			incompleteAttempts++
+			if incompleteAttempts >= maxSourceDownloadFailures {
+				return fmt.Errorf("%w: received %d of %d bytes on attempt %d: %v", errRepeatedIncompleteDownload, fileSize, contentLength, incompleteAttempts, err)
+			}
+			return fmt.Errorf("incomplete download: received %d of %d bytes: %v", fileSize, contentLength, err)
+		}
 		if err != nil {
 			return err
 		}
@@ -123,17 +162,21 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 		}
 		sourceChecksum = hex.EncodeToString(reader.SumSha())
 		bodyString, err := d.getChecksum(jobContext, logger)
-		if err != nil {
-			return err
+		if err == nil && sourceChecksum != bodyString {
+			err = fmt.Errorf("checksum error on download source:%s downloaded:%s", bodyString, sourceChecksum)
 		}
-
-		if sourceChecksum != bodyString {
-			return fmt.Errorf("checksum error on download source:%s downloaded:%s", bodyString, sourceChecksum)
+		if err != nil {
+			verificationFailures++
+			if verificationFailures >= maxSourceDownloadFailures {
+				return fmt.Errorf("%w: %v", errRepeatedVerificationFailure, err)
+			}
+			return err
 		}
 
 		tracker.UpdateValue(contentLength)
 		return nil
-	}, retry.Delay(time.Second*5),
+	}, retry.Delay(retryDelay),
+		retry.Context(ctx),
 		retry.DelayType(retry.FixedDelay),
 		retry.Attempts(180), // 15 min
 		retry.LastErrorOnly(true),
@@ -141,18 +184,8 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 			logger.Errorf("Error on downloading job %v", err)
 		}),
 		retry.RetryIf(func(err error) bool {
-			return !errors.Is(err, context.Canceled) && !errors.Is(err, errJobNotFound)
+			return !errors.Is(err, context.Canceled) && !errors.Is(err, errJobNotFound) && !errors.Is(err, errRepeatedIncompleteDownload) && !errors.Is(err, errRepeatedVerificationFailure)
 		}))
-	if err != nil {
-		return nil, err
-	}
-
-	ffprobeData, err := ffmpeg.ExtractFFProbeData(ctx, sourceFilePath)
-	if err != nil {
-		return nil, err
-	}
-
-	normalizedFFProbeData, err := ffmpeg.NormalizeFFProbeData(ffprobeData)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +195,6 @@ func (d *DownloadStepExecutor) download(ctx context.Context, tracker Tracker, jo
 		OriginalName: originalName,
 		Checksum:     sourceChecksum,
 		Size:         fileSize,
-		FFProbeData:  normalizedFFProbeData,
 	}, nil
 }
 

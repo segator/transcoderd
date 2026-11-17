@@ -11,6 +11,10 @@ A job notification SHALL carry a phase type, status, worker name, message, and i
 - **WHEN** a protected assignment retries an identical committed event, repeats a number with different data, or skips ahead
 - **THEN** the server acknowledges the identical retry and rejects conflicting or skipped events without appending them
 
+#### Scenario: Failure acknowledgement is lost
+- **WHEN** the server has recorded a protected terminal failure but its acknowledgement is lost and the process lease subsequently expires
+- **THEN** the current authenticated assignment may reconcile the identical failure event without a lease, while revoked generations and conflicting payloads remain rejected
+
 ### Requirement: Finalize a completed job
 Before recording `Job/completed`, the server SHALL validate the current assignment and durably authorize publication for protected jobs, then inspect the uploaded output's primary video stream, choose a non-conflicting codec-derived destination, and persist the final destination path and size. If probing or finalization fails, the server SHALL NOT record the job as completed or delete the source. If `deleteOnComplete` is enabled, the server SHALL attempt source deletion only after finalization and completion-event persistence succeed.
 

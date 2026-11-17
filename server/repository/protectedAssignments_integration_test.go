@@ -132,6 +132,7 @@ func TestProtectedAssignmentsPostgres(t *testing.T) {
 		t.Fatalf("concurrent protected/legacy assignment = %+v %v / %+v %v; want exactly one winner", protected, protectedErr, legacy, legacyErr)
 	}
 	testProtectedParking(t, repo)
+	testProtectedFailureAcknowledgementAfterLeaseLoss(t, repo)
 	testProtectedUploadRevocation(t, repo)
 	testProtectedPublication(t, repo)
 	testProtectedLease(t, repo)

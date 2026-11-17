@@ -28,9 +28,9 @@ func recoverableTerminalAssignment(j *job.Context) bool {
 		return false
 	}
 	if pending := j.PendingProtectedEvent(); pending != nil {
-		return pending.NotificationType == model.JobNotification && pending.Status == model.CompletedNotificationStatus
+		return pending.NotificationType == model.JobNotification && (pending.Status == model.CompletedNotificationStatus || pending.Status == model.FailedNotificationStatus)
 	}
-	return j.LastEvent != nil && j.LastEvent.NotificationType == model.JobNotification && j.LastEvent.Status == model.CompletedNotificationStatus
+	return j.LastEvent != nil && j.LastEvent.NotificationType == model.JobNotification && (j.LastEvent.Status == model.CompletedNotificationStatus || j.LastEvent.Status == model.FailedNotificationStatus)
 }
 
 func recoverProtectedTerminal(ctx context.Context, j *job.Context, worker string, client protectedRecoveryClient) error {

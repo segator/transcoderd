@@ -248,21 +248,34 @@ func (s *SQLRepository) ApplyProtectedEvent(ctx context.Context, worker string, 
 		if owner != worker || generation < 1 || uint64(generation) != claim.Generation || subtle.ConstantTimeCompare(expected, provided[:]) != 1 || state == "revoked" {
 			return ErrStaleAssignment
 		}
-		if err := protectedLeaseValid(ctx, conn, claim, false); err != nil {
-			return err
+		leaseErr := protectedLeaseValid(ctx, conn, claim, false)
+		if leaseErr != nil && !errors.Is(leaseErr, ErrStaleAssignment) {
+			return leaseErr
 		}
 		for _, existing := range job.Events {
 			if existing.EventID == event.EventID {
 				var saved []byte
 				err := conn.QueryRowContext(ctx, `SELECT payload_hash FROM protected_events WHERE job_id=$1 AND generation=$2 AND event_id=$3`, claim.JobID.String(), generation, event.EventID).Scan(&saved)
 				if err == nil && subtle.ConstantTimeCompare(saved, payloadHash[:]) == 1 {
-					return nil
+					// A committed failure is terminal. Its exact acknowledgement can
+					// be replayed after the process lease expires, but never for a
+					// revoked or superseded assignment.
+					if state == "completed" && event.NotificationType == model.JobNotification && event.Status == model.FailedNotificationStatus {
+						return nil
+					}
+					return leaseErr
 				}
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return err
 				}
+				if leaseErr != nil {
+					return leaseErr
+				}
 				return ErrEventConflict
 			}
+		}
+		if leaseErr != nil {
+			return leaseErr
 		}
 		if state != "assigned" && state != "running" {
 			return ErrStaleAssignment

@@ -95,6 +95,41 @@ func TestRecoverProtectedTerminalCompletion(t *testing.T) {
 	}
 }
 
+func TestRecoverProtectedTerminalFailure(t *testing.T) {
+	for _, accepted := range []bool{true, false} {
+		t.Run(fmt.Sprintf("server_committed=%t", accepted), func(t *testing.T) {
+			id := uuid.New()
+			path := filepath.Join(t.TempDir(), id.String())
+			j := job.NewContext(id, 5, path)
+			j.Assignment = &model.AssignmentClaim{JobID: id, Generation: 1, Capability: "secret", InstanceID: uuid.New()}
+			j.RequestID = uuid.New()
+			if err := j.Init(); err != nil {
+				t.Fatal(err)
+			}
+			event, err := j.NewProtectedEvent("node", model.JobNotification, model.FailedNotificationStatus, "FFMPEG:encoder failed")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := j.StageProtectedEvent(event); err != nil {
+				t.Fatal(err)
+			}
+			client := &terminalRecoveryClient{}
+			if !accepted {
+				client.errors = []error{serverclient.ErrProtectedConflict, nil}
+			}
+			if err := recoverProtectedTerminal(t.Context(), j, "node", client); err != nil {
+				t.Fatal(err)
+			}
+			if len(client.leases) != boolInt(!accepted) || len(client.events) != 1+boolInt(!accepted) {
+				t.Fatalf("failure recovery leases=%d events=%d", len(client.leases), len(client.events))
+			}
+			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("terminal workspace was not cleaned: %v", err)
+			}
+		})
+	}
+}
+
 func (f *fakeProtectedRecoveryClient) AcquireLease(_ context.Context, claim model.AssignmentClaim) (time.Time, error) {
 	f.leases = append(f.leases, claim)
 	if len(f.leaseErrors) > 0 {

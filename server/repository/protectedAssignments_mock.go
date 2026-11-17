@@ -384,17 +384,27 @@ func (r *InMemoryRepository) ApplyProtectedEvent(ctx context.Context, worker str
 	if !ok || job == nil || state.worker != worker || state.generation != claim.Generation || state.state == "revoked" || subtle.ConstantTimeCompare(state.capabilityHash[:], provided[:]) != 1 {
 		return ErrStaleAssignment
 	}
-	if !memoryProtectedLeaseValid(state, claim, false) {
-		return ErrStaleAssignment
-	}
+	leaseValid := memoryProtectedLeaseValid(state, claim, false)
 	for _, existing := range r.events[id] {
 		if existing.EventID == event.EventID {
 			saved, ok := r.protectedEvents[protectedEventKey{id, claim.Generation, event.EventID}]
 			if ok && subtle.ConstantTimeCompare(saved[:], payloadHash[:]) == 1 {
-				return nil
+				if state.state == "completed" && event.NotificationType == model.JobNotification && event.Status == model.FailedNotificationStatus {
+					return nil
+				}
+				if leaseValid {
+					return nil
+				}
+				return ErrStaleAssignment
+			}
+			if !leaseValid {
+				return ErrStaleAssignment
 			}
 			return ErrEventConflict
 		}
+	}
+	if !leaseValid {
+		return ErrStaleAssignment
 	}
 	if state.state != "assigned" && state.state != "running" {
 		return ErrStaleAssignment

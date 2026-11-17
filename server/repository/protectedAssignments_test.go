@@ -212,6 +212,70 @@ func addTestCompletedPrefetch(t *testing.T, repo Repository, worker string, clai
 
 func TestProtectedParking(t *testing.T) { testProtectedParking(t, NewInMemoryRepository()) }
 
+func testProtectedFailureAcknowledgementAfterLeaseLoss(t *testing.T, repo Repository) {
+	t.Helper()
+	ctx := context.Background()
+	keys, err := assignment.NewKeyring("key", map[string][]byte{"key": bytes.Repeat([]byte{8}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := &model.Job{Id: uuid.New(), SourcePath: uuid.NewString() + ".mkv", TargetPath: uuid.NewString() + ".mkv"}
+	if err := repo.AddJob(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddNewTaskEvent(ctx, j.AddEvent(model.JobNotification, model.QueuedNotificationStatus)); err != nil {
+		t.Fatal(err)
+	}
+	assigned, err := repo.RequestProtectedJob(ctx, "worker", uuid.NewString(), keys)
+	if err != nil || assigned == nil || assigned.Id != j.Id {
+		t.Fatalf("assignment = %+v, %v", assigned, err)
+	}
+	j, err = repo.GetJob(ctx, j.Id.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := model.AssignmentClaim{JobID: j.Id, Generation: assigned.Generation, Capability: assigned.Capability}
+	acquireTestLease(t, repo, "worker", &claim)
+	started := j.AddEvent(model.JobNotification, model.StartedNotificationStatus)
+	started.WorkerName = "worker"
+	if err := repo.ApplyProtectedEvent(ctx, "worker", claim, *started); err != nil {
+		t.Fatal(err)
+	}
+	j, err = repo.GetJob(ctx, j.Id.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := j.AddEvent(model.JobNotification, model.FailedNotificationStatus)
+	failed.WorkerName = "worker"
+	failed.Message = "FFMPEG:encoder failed"
+	if err := repo.ApplyProtectedEvent(ctx, "worker", claim, *failed); err != nil {
+		t.Fatal(err)
+	}
+	withoutLease := claim
+	withoutLease.InstanceID = uuid.New()
+	if err := repo.ApplyProtectedEvent(ctx, "worker", withoutLease, *failed); err != nil {
+		t.Fatalf("replay committed failure without lease: %v", err)
+	}
+	changed := *failed
+	changed.Message = "different failure"
+	if err := repo.ApplyProtectedEvent(ctx, "worker", withoutLease, changed); err == nil {
+		t.Fatal("accepted a different terminal event")
+	}
+	withoutLease.Generation++
+	if err := repo.ApplyProtectedEvent(ctx, "worker", withoutLease, *failed); !errors.Is(err, ErrStaleAssignment) {
+		t.Fatalf("replay with wrong generation = %v", err)
+	}
+	withoutLease = claim
+	withoutLease.Capability = "wrong"
+	if err := repo.ApplyProtectedEvent(ctx, "worker", withoutLease, *failed); !errors.Is(err, ErrStaleAssignment) {
+		t.Fatalf("replay with wrong capability = %v", err)
+	}
+}
+
+func TestProtectedFailureAcknowledgementAfterLeaseLoss(t *testing.T) {
+	testProtectedFailureAcknowledgementAfterLeaseLoss(t, NewInMemoryRepository())
+}
+
 func testProtectedParkTimeoutRace(t *testing.T, repo Repository) {
 	t.Helper()
 	ctx := context.Background()

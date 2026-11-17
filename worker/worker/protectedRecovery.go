@@ -20,9 +20,9 @@ type protectedRecoveryClient interface {
 	AcquireLease(context.Context, model.AssignmentClaim) (time.Time, error)
 }
 
-// A terminal completion can be replayed without a live lease if the server
-// has already recorded the exact publication intent. Otherwise it must first
-// grant a new process lease before accepting that event.
+// A terminal event can be replayed without a live lease after the server has
+// recorded the exact completion publication or failure. Otherwise it must
+// first grant a new process lease before accepting the event.
 func recoverableTerminalAssignment(j *job.Context) bool {
 	if j == nil || j.Assignment == nil || j.Assignment.JobID != j.JobId || j.Assignment.Generation == 0 || j.Assignment.Capability == "" || j.Assignment.InstanceID == uuid.Nil || j.RequestID == uuid.Nil || j.Parked || j.ParkIntent {
 		return false

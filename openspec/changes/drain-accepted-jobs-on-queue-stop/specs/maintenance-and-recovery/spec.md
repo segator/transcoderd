@@ -42,7 +42,7 @@ At startup, the worker SHALL find JSON contexts in its workspace and recover eac
 - **THEN** the worker reports recovery failure, does not claim safe idle, and does not silently duplicate or complete the assignment
 
 #### Scenario: Generated subtitle is missing or changed
-- **WHEN** a parked job requires a generated subtitle that is missing, modified or lacks its saved checksum
+- **WHEN** validation detects that a parked job's generated subtitle is missing, modified or lacks its saved checksum
 - **THEN** the worker rejects the checkpoint and does not resume the encode or report safe idle
 
 ## ADDED Requirements

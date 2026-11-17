@@ -175,7 +175,7 @@ func (e *Context) ValidatePrefetchedSource() error {
 	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), e.Source.Checksum) {
 		return fmt.Errorf("%w: checksum mismatch", ErrInvalidPrefetchedSource)
 	}
-	artifacts, err := e.prefetchedArtifactChecksums(root)
+	artifacts, err := e.prefetchedArtifactChecksums(root, false)
 	if err != nil {
 		return err
 	}
@@ -197,7 +197,7 @@ func (e *Context) ValidatePrefetchedSource() error {
 
 // prefetchedArtifactChecksums covers every generated subtitle consumed by
 // FFmpeg. Opening through the workspace root also prevents escaping it.
-func (e *Context) prefetchedArtifactChecksums(root *os.Root) (map[string]string, error) {
+func (e *Context) prefetchedArtifactChecksums(root *os.Root, flush bool) (map[string]string, error) {
 	checksums := make(map[string]string)
 	for _, subtitle := range e.Source.FFProbeData.Subtitle {
 		if subtitle == nil {
@@ -210,7 +210,12 @@ func (e *Context) prefetchedArtifactChecksums(root *os.Root) (map[string]string,
 		if _, exists := checksums[name]; exists {
 			return nil, fmt.Errorf("%w: duplicate subtitle %s", ErrInvalidPrefetchedSource, name)
 		}
-		f, err := root.Open(name)
+		flags := os.O_RDONLY
+		if flush {
+			// Windows requires a writable handle for FlushFileBuffers.
+			flags = os.O_RDWR
+		}
+		f, err := root.OpenFile(name, flags, 0)
 		if err != nil {
 			return nil, fmt.Errorf("%w: open subtitle %s: %v", ErrInvalidPrefetchedSource, name, err)
 		}
@@ -218,6 +223,12 @@ func (e *Context) prefetchedArtifactChecksums(root *os.Root) (map[string]string,
 		if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 {
 			_ = f.Close()
 			return nil, fmt.Errorf("%w: subtitle %s is not a nonempty regular file", ErrInvalidPrefetchedSource, name)
+		}
+		if flush {
+			if err := f.Sync(); err != nil {
+				_ = f.Close()
+				return nil, fmt.Errorf("%w: sync subtitle %s: %v", ErrInvalidPrefetchedSource, name, err)
+			}
 		}
 		hash := sha256.New()
 		n, err := io.Copy(hash, f)

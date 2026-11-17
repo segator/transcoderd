@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"transcoder/model"
 
@@ -33,12 +34,22 @@ func (e *Context) PreparePark() error {
 	if err != nil {
 		return fmt.Errorf("open prefetch workspace: %w", err)
 	}
-	checksums, err := e.prefetchedArtifactChecksums(root)
+	checksums, err := e.prefetchedArtifactChecksums(root, true)
 	_ = root.Close()
 	if err != nil {
 		return err
 	}
 	previousArtifacts := e.PrefetchedArtifacts
+	if previousArtifacts != nil {
+		if len(previousArtifacts) != len(checksums) {
+			return fmt.Errorf("%w: subtitle manifest changed while parking", ErrInvalidPrefetchedSource)
+		}
+		for name, checksum := range checksums {
+			if !strings.EqualFold(previousArtifacts[name], checksum) {
+				return fmt.Errorf("%w: subtitle %s changed while parking", ErrInvalidPrefetchedSource, name)
+			}
+		}
+	}
 	if len(checksums) != 0 {
 		e.PrefetchedArtifacts = checksums
 	}

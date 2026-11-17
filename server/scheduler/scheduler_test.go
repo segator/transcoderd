@@ -408,6 +408,16 @@ func TestVerifyFailureMessage(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "repeated incomplete downloads take precedence over transient text",
+			message: "repeated incomplete source downloads; connection reset by peer",
+			want:    false,
+		},
+		{
+			name:    "repeated verification failures take precedence over checksum retry",
+			message: "repeated source download verification failures: checksum error on download source",
+			want:    false,
+		},
+		{
 			name:    "checksum error retries",
 			message: "CHecksum error on download source",
 			want:    true,

@@ -1,13 +1,19 @@
 package step
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
 	"transcoder/model"
 	"transcoder/worker/console"
 	"transcoder/worker/job"
@@ -141,7 +147,17 @@ func TestDownloadStepExecutorDownloadSuccess(t *testing.T) {
 }
 
 func TestDownloadStepExecutorDownloadNotFound(t *testing.T) {
-	t.Skip("Skipping test with retry logic")
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.Error(w, "source read failed for this assignment", http.StatusNotFound)
+	}))
+	defer server.Close()
+	executor := &DownloadStepExecutor{workerName: "worker", BaseDomainURL: server.URL, retryDelay: time.Millisecond}
+	_, err := executor.downloadSource(context.Background(), &mockStepTracker{}, &job.Context{JobId: uuid.New(), WorkingDir: t.TempDir()})
+	if !errors.Is(err, errJobNotFound) || attempts != 1 {
+		t.Fatalf("downloadSource() error = %v, attempts = %d; want job not found after one request", err, attempts)
+	}
 }
 
 // Test download URLs are constructed correctly
@@ -246,5 +262,108 @@ func TestChecksumCalculation(t *testing.T) {
 	_, err := hex.DecodeString(checksum)
 	if err != nil {
 		t.Errorf("checksum is not valid hex: %v", err)
+	}
+}
+
+func TestDownloadSourceIncompleteTransfers(t *testing.T) {
+	const content = "complete-video"
+	tests := []struct {
+		name              string
+		truncatedAttempts int
+		wantAttempts      int
+		wantError         bool
+	}{
+		{name: "repeated truncation stops", truncatedAttempts: 3, wantAttempts: 3, wantError: true},
+		{name: "one truncation recovers", truncatedAttempts: 1, wantAttempts: 2},
+		{name: "complete first attempt", truncatedAttempts: 0, wantAttempts: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attempts := 0
+			checksumRequests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/download":
+					attempts++
+					w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+					w.Header().Set("Content-Disposition", `attachment; filename="film.mkv"`)
+					if attempts <= tt.truncatedAttempts {
+						_, _ = io.WriteString(w, content[:3])
+						return
+					}
+					_, _ = io.WriteString(w, content)
+				case "/api/v1/checksum":
+					checksumRequests++
+					sum := sha256.Sum256([]byte(content))
+					_, _ = fmt.Fprint(w, hex.EncodeToString(sum[:]))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			tracker := &mockStepTracker{}
+			executor := &DownloadStepExecutor{workerName: "worker", BaseDomainURL: server.URL, retryDelay: time.Millisecond}
+			jobContext := &job.Context{JobId: uuid.New(), WorkingDir: t.TempDir()}
+			result, err := executor.downloadSource(context.Background(), tracker, jobContext)
+			if tt.wantError {
+				if !errors.Is(err, errRepeatedIncompleteDownload) {
+					t.Fatalf("downloadSource() error = %v, want repeated incomplete download", err)
+				}
+				if result != nil || checksumRequests != 0 {
+					t.Fatalf("downloadSource() = %v, checksum requests = %d; partial input must not be verified", result, checksumRequests)
+				}
+				if tracker.current != 3 {
+					t.Errorf("download progress = %d, want 3 for last attempt", tracker.current)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("downloadSource() error = %v", err)
+				}
+				if result.Size != int64(len(content)) || tracker.current != int64(len(content)) || checksumRequests != 1 {
+					t.Errorf("downloadSource() size = %d, progress = %d, checksums = %d", result.Size, tracker.current, checksumRequests)
+				}
+				got, readErr := os.ReadFile(result.FilePath)
+				if readErr != nil || string(got) != content {
+					t.Errorf("downloaded file = %q, error = %v", got, readErr)
+				}
+			}
+			if attempts != tt.wantAttempts {
+				t.Errorf("download attempts = %d, want %d", attempts, tt.wantAttempts)
+			}
+		})
+	}
+}
+
+func TestDownloadSourceRepeatedChecksumMismatch(t *testing.T) {
+	const content = "complete-video"
+	attempts := 0
+	checksums := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/download":
+			attempts++
+			w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+			w.Header().Set("Content-Disposition", `attachment; filename="film.mkv"`)
+			_, _ = io.WriteString(w, content)
+		case "/api/v1/checksum":
+			checksums++
+			_, _ = io.WriteString(w, "wrong-checksum")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	executor := &DownloadStepExecutor{workerName: "worker", BaseDomainURL: server.URL, retryDelay: time.Millisecond}
+	tracker := &mockStepTracker{}
+	jobContext := &job.Context{JobId: uuid.New(), WorkingDir: t.TempDir()}
+	result, err := executor.downloadSource(context.Background(), tracker, jobContext)
+	if !errors.Is(err, errRepeatedVerificationFailure) || result != nil {
+		t.Fatalf("downloadSource() = %v, error = %v; want repeated verification failure", result, err)
+	}
+	if attempts != 3 || checksums != 3 {
+		t.Errorf("downloads = %d, checksum requests = %d; want 3 each", attempts, checksums)
+	}
+	if tracker.current != int64(len(content)) {
+		t.Errorf("download progress = %d, want %d for last attempt", tracker.current, len(content))
 	}
 }

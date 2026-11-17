@@ -28,7 +28,7 @@ func TestDownloadStreamClosePublishesReadOnlyChecksum(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = file.Close() })
 			published := make(chan PathChecksum, 1)
-			stream := &DownloadJobStream{JobStream: &JobStream{file: file, path: path, checksumPublisher: published}}
+			stream := &DownloadJobStream{JobStream: &JobStream{file: file, path: path, checksumPublisher: func(checksum PathChecksum) { published <- checksum }}}
 			if _, err := io.Copy(io.Discard, stream); err != nil {
 				t.Fatal(err)
 			}

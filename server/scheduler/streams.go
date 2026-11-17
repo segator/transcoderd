@@ -20,7 +20,7 @@ type JobStream struct {
 	video             *model.Job
 	path              string
 	file              *os.File
-	checksumPublisher chan PathChecksum
+	checksumPublisher func(PathChecksum)
 }
 
 type UploadJobStream struct {
@@ -32,8 +32,10 @@ type UploadJobStream struct {
 
 type DownloadJobStream struct {
 	*JobStream
-	FileSize int64
-	FileName string
+	FileSize     int64
+	FileName     string
+	sourceReader io.Reader
+	onReadError  func(error)
 }
 
 func (j *JobStream) hash(p []byte) (err error) {
@@ -56,15 +58,28 @@ func (u *UploadJobStream) Write(p []byte) (n int, err error) {
 	return u.file.Write(p)
 }
 func (d *DownloadJobStream) Read(p []byte) (n int, err error) {
-	readed, err := d.file.Read(p)
-	if err != nil {
-		return readed, err
+	reader := d.sourceReader
+	if reader == nil {
+		reader = d.file
 	}
-	err = d.hash(p[0:readed])
-	if err != nil {
-		return 0, err
+	n, err = reader.Read(p)
+	if n > 0 {
+		if hashErr := d.hash(p[:n]); hashErr != nil {
+			return 0, hashErr
+		}
 	}
-	return readed, err
+	if err != nil && !errors.Is(err, io.EOF) {
+		d.FailSourceRead(err)
+	}
+	return n, err
+}
+
+// FailSourceRead records a source failure that is discovered by the caller,
+// such as EOF before the size advertised in the download headers.
+func (d *DownloadJobStream) FailSourceRead(err error) {
+	if d.onReadError != nil {
+		d.onReadError(err)
+	}
 }
 
 func (d *DownloadJobStream) Size() int64 {
@@ -124,10 +139,15 @@ func (d *DownloadJobStream) Close(pushChecksum bool) error {
 	if err := d.file.Close(); err != nil {
 		return err
 	}
-	if d.hasher != nil && pushChecksum {
-		d.checksumPublisher <- PathChecksum{
-			path:     d.path,
-			checksum: d.GetHash(),
+	if pushChecksum {
+		if d.hasher == nil {
+			d.hasher = sha256.New()
+		}
+		if d.checksumPublisher != nil {
+			d.checksumPublisher(PathChecksum{
+				path:     d.path,
+				checksum: d.GetHash(),
+			})
 		}
 	}
 	return nil

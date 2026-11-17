@@ -349,31 +349,43 @@ func (s *Server) download(writer http.ResponseWriter, request *http.Request) {
 	case webError(writer, err, 500):
 		return
 	}
-	defer downloadStream.Close(true)
+	complete := false
+	defer func() { _ = downloadStream.Close(complete) }()
 
 	writer.Header().Set("Content-Length", strconv.FormatInt(downloadStream.Size(), 10))
 	writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", url.PathEscape(downloadStream.Name())))
-	writer.WriteHeader(200)
+	writer.WriteHeader(http.StatusOK)
 	b := make([]byte, 131072)
-loop:
+	var sent int64
 	for {
 		select {
 		case <-request.Context().Done():
 			return
 		default:
-			readedBytes, readErr := downloadStream.Read(b)
-			_, writeErr := writer.Write(b[0:readedBytes])
-			if writeErr != nil {
-				break loop
-			}
-			if errors.Is(readErr, io.EOF) {
-				break loop
-			}
-			if readErr != nil {
-				log.Errorf("Error reading from download stream: %v", readErr)
+		}
+		n, readErr := downloadStream.Read(b)
+		written, writeErr := writer.Write(b[:n])
+		sent += int64(written)
+		if writeErr != nil || written != n {
+			return
+		}
+		if errors.Is(readErr, io.EOF) {
+			if sent != downloadStream.Size() {
+				err := fmt.Errorf("source ended after %d of %d bytes", sent, downloadStream.Size())
+				downloadStream.FailSourceRead(err)
+				log.WithError(err).Error("Error reading from download stream")
 				return
 			}
-
+			complete = true
+			return
+		}
+		if readErr != nil {
+			log.WithError(readErr).Error("Error reading from download stream")
+			return
+		}
+		if sent == downloadStream.Size() {
+			complete = true
+			return
 		}
 	}
 }

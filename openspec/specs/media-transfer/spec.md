@@ -22,7 +22,7 @@ Define how the assigned worker obtains the source, verifies its integrity, and r
 - **THEN** the API returns HTTP 404
 
 ### Requirement: Source checksum availability
-The server SHALL calculate SHA-256 while streaming the source and SHALL expose the published checksum at `GET /api/v1/checksum?uuid=<id>` once the stream closes.
+The server SHALL calculate SHA-256 while streaming the source and SHALL expose the published checksum at `GET /api/v1/checksum?uuid=<id>` only after a complete source stream closes.
 
 #### Scenario: Completed source stream
 - **WHEN** the source has been streamed and its checksum published
@@ -31,6 +31,10 @@ The server SHALL calculate SHA-256 while streaming the source and SHALL expose t
 #### Scenario: Checksum unavailable
 - **WHEN** no checksum is available for the job source
 - **THEN** the checksum route returns an error
+
+#### Scenario: Source read fails
+- **WHEN** the source stream stops before completion due to a read error
+- **THEN** the server does not publish the incomplete stream's checksum
 
 ### Requirement: Worker download verification
 The worker SHALL compare downloaded byte count with the declared content length and its locally calculated SHA-256 with the server checksum before probing the source. It SHALL retry eligible download failures, but SHALL not retry a source reported as HTTP 404.
@@ -72,3 +76,40 @@ The worker SHALL hash the encoded file and send its checksum with the upload. It
 #### Scenario: Upload attempt rejected
 - **WHEN** the server returns a response other than HTTP 201
 - **THEN** that attempt does not cause a `Job/completed` notification
+
+### Requirement: Bounded incomplete downloads
+The worker SHALL stop after three incomplete source transfers or three failed source integrity checks for one assignment and report an actionable failure. The server SHALL NOT automatically requeue a job with that failure. Users MAY explicitly retry the failed job after resolving the cause.
+
+#### Scenario: Repeated truncated transfer
+- **WHEN** three source transfers end before their declared size
+- **THEN** the worker fails the job with a diagnostic identifying repeated incomplete downloads and the server does not automatically requeue it
+
+#### Scenario: Repeated verification failure
+- **WHEN** three downloaded sources cannot be verified against the server checksum
+- **THEN** the worker fails the job with a diagnostic identifying repeated verification failures and the server does not automatically requeue it
+
+#### Scenario: Transient interruption
+- **WHEN** an incomplete transfer is followed by a complete, verified transfer before the limit
+- **THEN** the worker continues processing the verified source
+
+### Requirement: Download progress per attempt
+Download progress SHALL describe bytes received in the current attempt rather than accumulating bytes across attempts.
+
+#### Scenario: A new download attempt starts
+- **WHEN** the worker starts a replacement download attempt
+- **THEN** its reported transferred byte count resets to zero
+
+### Requirement: Protect an unreadable source from repeated downloads
+If a source read fails while serving an assignment, the server SHALL refuse subsequent downloads for that assignment without reopening the source. It SHALL return HTTP 404 to stop existing workers from retrying and log the source read failure. A new assignment SHALL be allowed to try again. The guard SHALL remain effective while the server process runs, up to 24 hours.
+
+#### Scenario: Source read failure
+- **WHEN** the server observes a source read error during a download
+- **THEN** subsequent download requests for that assignment receive HTTP 404 without another source read
+
+#### Scenario: Manual retry after repair
+- **WHEN** a failed job is manually requeued and assigned again
+- **THEN** the new assignment can attempt to read the source
+
+#### Scenario: Client disconnect
+- **WHEN** the client disconnects without a source read error
+- **THEN** a later request for the assignment can retry the download

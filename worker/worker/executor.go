@@ -180,7 +180,10 @@ func setupStepExecutors(jobExecutor *JobExecutor) map[model.NotificationType]*st
 	return stepExecutors
 }
 
-func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) {
+func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) error {
+	if err := e.resumeJobs(ctx); err != nil {
+		return err
+	}
 	serviceCtx, cancelServiceCtx := context.WithCancel(context.Background())
 	log.Info("Starting Worker Client...")
 	e.start(serviceCtx)
@@ -193,13 +196,13 @@ func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) {
 		log.Info("Stopping Worker Client...")
 		wg.Done()
 	}()
+	return nil
 }
 
 func (e *JobExecutor) start(ctx context.Context) {
 	if e.resources != nil {
 		e.resources.Start(ctx)
 	}
-	e.resumeJobs()
 	for notificationType, stepExecutor := range e.stepExecutors {
 		if notificationType == model.FFMPEGSNotification {
 			go e.encodeQueueRoutine(ctx, stepExecutor)
@@ -218,9 +221,12 @@ func (e *JobExecutor) stop() {
 	}
 }
 
-func (e *JobExecutor) resumeJobs() {
-	err := filepath.Walk(e.tempPath, func(path string, info os.FileInfo, err error) error {
+func (e *JobExecutor) resumeJobs(ctx context.Context) error {
+	return filepath.Walk(e.tempPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if info.IsDir() {
@@ -274,16 +280,36 @@ func (e *JobExecutor) resumeJobs() {
 				return nil
 			}
 
+			current, err := e.client.GetJobForRecovery(ctx, jobContext.JobId)
+			if err != nil {
+				return err
+			}
+			if current == nil || !e.matchesSavedAssignment(current, jobContext) {
+				log.WithField("job_id", jobContext.JobId.String()).Info("Discarding expired local assignment")
+				workspace := filepath.Join(e.tempPath, jobContext.JobId.String())
+				if path == filepath.Join(workspace, jobContext.JobId.String()+".json") {
+					if err := os.RemoveAll(workspace); err != nil {
+						log.WithError(err).WithField("context_path", path).Warn("Could not remove expired workspace")
+					}
+					return filepath.SkipDir
+				} else if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					log.WithError(err).WithField("context_path", path).Warn("Could not remove expired context")
+				}
+				return nil
+			}
+			jobContext.LastEvent.EventId = current.Events.GetLatest().EventID
 			atomic.AddUint32(&e.activeJobs, 1)
 			stepExecutor.AddJob(jobContext)
 		}
 
 		return nil
 	})
+}
 
-	if err != nil {
-		panic(err)
-	}
+func (e *JobExecutor) matchesSavedAssignment(current *model.Job, saved *job.Context) bool {
+	started := current.Events.GetLatestPerNotificationType(model.JobNotification)
+	return started != nil && started.Status == model.StartedNotificationStatus &&
+		started.WorkerName == e.workerConfig.Name && started.EventID == saved.EventId+1
 }
 
 type AdmissionStatus = control.AdmissionStatus

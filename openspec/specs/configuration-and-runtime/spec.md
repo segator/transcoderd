@@ -63,7 +63,7 @@ The worker SHALL validate its encoder, concurrency, and admission-schedule setti
 
 #### Scenario: Initial presence fails
 - **WHEN** the initial presence event cannot be published
-- **THEN** job coordination does not start
+- **THEN** the worker SHALL retry presence with bounded requests and a delay between attempts until it succeeds or shutdown is requested, and SHALL wait for success before starting job coordination
 
 #### Scenario: Initial presence succeeds
 - **WHEN** the initial presence event succeeds

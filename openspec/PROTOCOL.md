@@ -7,6 +7,7 @@ This reference describes the current `/api/v1` interface. The corresponding beha
 | Method and path | Purpose | Required inputs | Success | Principal error responses |
 | --- | --- | --- | --- | --- |
 | `POST /api/v1/job/` | Schedule a source file or directory | Bearer token; JSON `sourcePath` | `200` with `scheduled`, `failed`, `skipped` | `400` for empty path; `500` for processing errors |
+| `GET /api/v1/job/{jobid}` | Read job state and event history for restart recovery | Bearer token; job UUID in path | `200` with the job and its events | `404` for a missing job; `500` on server error |
 | `DELETE /api/v1/job/{jobid}` | Request cancellation | Bearer token; job UUID in path | No response body on a successful handler return | `500` for scheduler errors; see `BASELINE.md` for current cancellation behavior |
 | `GET /api/v1/job/request` | Assign the next queued job | Bearer token; `workerName` header | `200` with `id`, `eventID`; `204` if empty | `403` without worker name; `500` on server error |
 | `GET /api/v1/worker/settings` | Read the persisted job limit for a worker | Bearer token; `workerName` header | `200` with `maxActiveJobs` integer or `null`, and optional `cpuJobs`/`gpuJobs` pair | `400` without worker name; `500` on server error |

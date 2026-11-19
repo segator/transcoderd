@@ -2,6 +2,9 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -11,8 +14,10 @@ import (
 	"github.com/google/uuid"
 
 	"transcoder/model"
+	"transcoder/server/web"
 	"transcoder/worker/config"
 	"transcoder/worker/job"
+	"transcoder/worker/serverclient"
 	"transcoder/worker/step"
 )
 
@@ -75,7 +80,9 @@ func TestResumeJobsDiscardsTerminalJobContext(t *testing.T) {
 	executor, downloadExecutor, contextPath := newResumeTestExecutor(t)
 	jobContext := persistResumeTestContext(t, executor.tempPath, model.JobNotification, model.CompletedNotificationStatus)
 
-	executor.resumeJobs()
+	if err := executor.resumeJobs(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 
 	if got := executor.ActiveJobs(); got != 0 {
 		t.Errorf("ActiveJobs() = %d, want 0", got)
@@ -88,17 +95,72 @@ func TestResumeJobsDiscardsTerminalJobContext(t *testing.T) {
 	}
 }
 
-func TestResumeJobsRoutesStartedJobContextToDownload(t *testing.T) {
-	executor, downloadExecutor, _ := newResumeTestExecutor(t)
-	persistResumeTestContext(t, executor.tempPath, model.JobNotification, model.StartedNotificationStatus)
-
-	executor.resumeJobs()
-
-	if got := executor.ActiveJobs(); got != 1 {
-		t.Errorf("ActiveJobs() = %d, want 1", got)
+func TestResumeJobsChecksServerAssignment(t *testing.T) {
+	tests := []struct {
+		name   string
+		status model.NotificationStatus
+		worker string
+		id     int
+		resume bool
+	}{
+		{name: "current", status: model.StartedNotificationStatus, worker: "worker-test", id: 1, resume: true},
+		{name: "requeued", status: model.QueuedNotificationStatus, id: 3},
+		{name: "reassigned to another worker", status: model.StartedNotificationStatus, worker: "other", id: 4},
+		{name: "reassigned to same worker", status: model.StartedNotificationStatus, worker: "worker-test", id: 4},
+		{name: "missing job"},
 	}
-	if got := len(downloadExecutor.GetJobChan()); got != 1 {
-		t.Errorf("queued download jobs = %d, want 1", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			executor, downloads, contextPath := newResumeTestExecutor(t)
+			saved := persistResumeTestContext(t, executor.tempPath, model.JobNotification, model.StartedNotificationStatus)
+			if err := os.WriteFile(filepath.Join(saved.WorkingDir, saved.JobId.String()+".mkv"), []byte("partial media"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/api/v1/job/"+saved.JobId.String() || r.Header.Get("Authorization") != "Bearer test" {
+					t.Errorf("unexpected recovery request: %s %s", r.Method, r.URL)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if tt.status == "" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				current := model.Job{Id: saved.JobId, Events: model.TaskEvents{
+					{EventID: tt.id, Event: model.Event{WorkerName: tt.worker}, NotificationType: model.JobNotification, Status: tt.status},
+					{EventID: tt.id + 1, NotificationType: model.DownloadNotification, Status: model.StartedNotificationStatus},
+				}}
+				if err := json.NewEncoder(w).Encode(current); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			executor.client = serverclient.NewServerClient(&web.Config{Domain: server.URL, Token: "test"}, executor.workerConfig.Name)
+
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if err := executor.resumeJobs(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if tt.resume {
+				if got := executor.ActiveJobs(); got != 1 || len(downloads.GetJobChan()) != 1 {
+					t.Fatalf("expected one restored download, got %d active jobs", got)
+				}
+				if got := (<-downloads.GetJobChan()).LastEvent.EventId; got != tt.id+1 {
+					t.Errorf("restored event sequence = %d, want %d", got, tt.id+1)
+				}
+				if _, err := os.Stat(contextPath(saved)); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if got := executor.ActiveJobs(); got != 0 || len(downloads.GetJobChan()) != 0 {
+				t.Errorf("expired assignment was restored, got %d active jobs", got)
+			}
+			if _, err := os.Stat(saved.WorkingDir); !os.IsNotExist(err) {
+				t.Errorf("expired workspace still exists, stat error = %v", err)
+			}
+		})
 	}
 }
 
@@ -109,7 +171,9 @@ func TestResumeJobsSkipsUnreadableAndUnsupportedContexts(t *testing.T) {
 	}
 	persistResumeTestContext(t, executor.tempPath, model.NotificationType("Unknown"), model.StartedNotificationStatus)
 
-	executor.resumeJobs()
+	if err := executor.resumeJobs(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 
 	if got := executor.ActiveJobs(); got != 0 {
 		t.Errorf("ActiveJobs() = %d, want 0", got)
@@ -150,7 +214,8 @@ func newResumeTestExecutor(t *testing.T) (*JobExecutor, *step.Executor, func(*jo
 	}
 	downloadExecutor := step.NewStepExecutor(model.DownloadNotification, nil)
 	executor := &JobExecutor{
-		tempPath: tempPath,
+		tempPath:     tempPath,
+		workerConfig: &config.Config{Name: "worker-test"},
 		stepExecutors: map[model.NotificationType]*step.Executor{
 			model.DownloadNotification: downloadExecutor,
 		},

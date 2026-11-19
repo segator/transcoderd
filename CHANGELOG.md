@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.16.0](https://github.com/segator/transcoderd/compare/v2.15.1...v2.16.0) (2026-11-19)
+
+
+### 🎉 Features
+
+* **worker:** show release notes for updates ([#232](https://github.com/segator/transcoderd/issues/232)) ([da06de1](https://github.com/segator/transcoderd/commit/da06de1e5973630cf89a14fc75f44717c4a37d91))
+
+
+### 🐛 Bug Fixes
+
+* stop repeated downloads of unreadable sources ([#234](https://github.com/segator/transcoderd/issues/234)) ([e08575a](https://github.com/segator/transcoderd/commit/e08575a5ef93fc0df159241a651b8636491b6a87))
+* **worker:** reconcile saved assignments before resuming ([#236](https://github.com/segator/transcoderd/issues/236)) ([caefe32](https://github.com/segator/transcoderd/commit/caefe32ab4d39fa9c46cc506b08459629da5f253))
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.8.3 to 6.9.1 ([#229](https://github.com/segator/transcoderd/issues/229)) ([bb0ec02](https://github.com/segator/transcoderd/commit/bb0ec02e0ebd6eb31068bc5941f6033d280023d4))
+* **deps:** bump github.com/jedib0t/go-pretty/v6 from 6.9.1 to 6.9.2 ([#235](https://github.com/segator/transcoderd/issues/235)) ([4393d3f](https://github.com/segator/transcoderd/commit/4393d3f7f218f7b7b1e7b08d21309a4189b71fd0))
+* **deps:** bump go.opentelemetry.io/otel/trace from 1.41.0 to 1.47.0 in /magefiles in the go_modules group across 1 directory ([#231](https://github.com/segator/transcoderd/issues/231)) ([3fb9ae9](https://github.com/segator/transcoderd/commit/3fb9ae90d4de06cddb269e6393672637131b34e6))
+* **deps:** bump gopkg.in/ini.v1 from 1.67.3 to 1.68.0 ([#230](https://github.com/segator/transcoderd/issues/230)) ([b03730c](https://github.com/segator/transcoderd/commit/b03730c9624cbed7b0854afa60811d90783eb40c))
+
 ## [2.15.1](https://github.com/segator/transcoderd/compare/v2.15.0...v2.15.1) (2026-11-15)
 
 

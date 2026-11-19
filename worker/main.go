@@ -170,8 +170,8 @@ func applicationRunWithShutdown(wg *sync.WaitGroup, ctx context.Context, updater
 
 	serverClient := serverclient.NewServerClient(opts.Web, opts.Worker.Name)
 
-	if err := serverClient.PublishPingEvent(); err != nil {
-		return err
+	if err := serverClient.WaitForInitialPresence(ctx); err != nil {
+		return nil
 	}
 
 	encodeWorker := worker.NewEncodeWorker(opts.Worker, serverClient, renderService)
@@ -184,7 +184,12 @@ func applicationRunWithShutdown(wg *sync.WaitGroup, ctx context.Context, updater
 		}
 	}
 	encodeWorker.RequireWorkerSettings()
-	encodeWorker.Run(wg, ctx)
+	if err := encodeWorker.Run(wg, ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("recover local jobs: %w", err)
+	}
 	controlServer, err := control.Start(control.ConfiguredPath(), encodeWorker, shutdown)
 	if err != nil {
 		return fmt.Errorf("start worker control interface: %w", err)

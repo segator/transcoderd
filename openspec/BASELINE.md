@@ -121,3 +121,7 @@ The same audit reproduced EIA-608 stream-copy failure in Matroska, an identity/g
 - Download retries previously reused the same progress counter, so a failed transfer could report more bytes than the declared source size; repeated incomplete responses or checksum failures could also consume the full 180-attempt retry budget. The `protect-incomplete-downloads` change bounds these failures and resets attempt progress.
 
 - Before `stop-retrying-unreadable-sources`, the server continued opening sources after storage read failures, published checksums for interrupted or partial downloads, and accessed its checksum map concurrently without synchronization. Existing workers retried truncated responses, amplifying disk and network load.
+
+## Worker restart reconciliation
+
+Before `reconcile-worker-recovery`, restart recovery treated parseable job contexts as valid even after server maintenance had canceled their assignments. The worker could then retry a rejected event indefinitely while holding its event publication lock. Recovery now checks the server's assignment and event sequence before enqueuing a saved phase. Startup presence retries also prevent supervised restart loops during DNS outages.

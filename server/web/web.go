@@ -196,7 +196,11 @@ func (s *Server) getJob(writer http.ResponseWriter, request *http.Request) {
 		webError(writer, fmt.Errorf("jobId is mandatory"), 400)
 		return
 	}
-	job, err := s.scheduler.GetJob(s.ctx, jobId)
+	job, err := s.scheduler.GetJob(request.Context(), jobId)
+	if errors.Is(err, repository.ErrElementNotFound) {
+		http.NotFound(writer, request)
+		return
+	}
 	if webError(writer, err, 500) {
 		return
 	}

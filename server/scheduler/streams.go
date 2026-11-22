@@ -28,6 +28,7 @@ type UploadJobStream struct {
 	root        *os.Root
 	attemptName string
 	stagingName string
+	commitGuard func(func() error) error
 }
 
 type DownloadJobStream struct {
@@ -102,6 +103,13 @@ func (u *UploadJobStream) Close(pushChecksum bool) error {
 // Each HTTP upload attempt writes a separate temporary file, so cleanup from a
 // failed retry cannot unlink a later successful attempt.
 func (u *UploadJobStream) Commit() error {
+	if u.commitGuard != nil {
+		return u.commitGuard(u.commit)
+	}
+	return u.commit()
+}
+
+func (u *UploadJobStream) commit() error {
 	if u.root == nil || u.attemptName == "" || u.stagingName == "" {
 		return errors.New("upload staging paths are not initialized")
 	}

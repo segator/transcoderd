@@ -18,6 +18,7 @@ import (
 	"transcoder/worker/console"
 	"transcoder/worker/ffmpeg"
 	"transcoder/worker/job"
+	"transcoder/worker/serverclient"
 
 	"github.com/avast/retry-go"
 	"github.com/google/uuid"
@@ -89,103 +90,120 @@ func (d *DownloadStepExecutor) downloadSource(ctx context.Context, tracker Track
 	if retryDelay <= 0 {
 		retryDelay = 5 * time.Second
 	}
-	err := retry.Do(func() error {
-		tracker.UpdateValue(0)
-		req, err := http.NewRequestWithContext(ctx, "GET", d.GetDownloadURL(jobContext.JobId), nil)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("workerName", d.workerName)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusNotFound {
-			return errJobNotFound
-		}
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("not 200 respose in download code %d", resp.StatusCode)
-		}
-		contentLength, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
-		tracker.SetTotal(contentLength)
-		if err != nil {
-			return err
-		}
-		contentDisposition := resp.Header.Get("Content-Disposition")
-		_, params, err := mime.ParseMediaType(contentDisposition)
-		if err != nil {
-			return err
-		}
-		originalName = params["filename"]
-		if originalName != "" {
-			// Older servers encoded the entire filename with QueryEscape instead
-			// of using the RFC-compliant filename* parameter.
-			if !strings.Contains(strings.ToLower(contentDisposition), "filename*=") {
-				originalName, err = url.QueryUnescape(originalName)
-				if err != nil {
-					return fmt.Errorf("decode downloaded filename: %w", err)
+	var err error
+	for {
+		err = retry.Do(func() error {
+			tracker.UpdateValue(0)
+			req, err := http.NewRequestWithContext(ctx, "GET", d.GetDownloadURL(jobContext.JobId), nil)
+			if err != nil {
+				return err
+			}
+			req.Header.Set("workerName", d.workerName)
+			req.Header.Set("X-TranscoderD-Assignment", strconv.Itoa(jobContext.EventId))
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusConflict && resp.Header.Get("X-TranscoderD-Error") == "assignment-expired" {
+				return serverclient.ErrAssignmentExpired
+			}
+			if resp.StatusCode == http.StatusNotFound {
+				return errJobNotFound
+			}
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("not 200 respose in download code %d", resp.StatusCode)
+			}
+			contentLength, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
+			tracker.SetTotal(contentLength)
+			if err != nil {
+				return err
+			}
+			contentDisposition := resp.Header.Get("Content-Disposition")
+			_, params, err := mime.ParseMediaType(contentDisposition)
+			if err != nil {
+				return err
+			}
+			originalName = params["filename"]
+			if originalName != "" {
+				// Older servers encoded the entire filename with QueryEscape instead
+				// of using the RFC-compliant filename* parameter.
+				if !strings.Contains(strings.ToLower(contentDisposition), "filename*=") {
+					originalName, err = url.QueryUnescape(originalName)
+					if err != nil {
+						return fmt.Errorf("decode downloaded filename: %w", err)
+					}
 				}
+				originalName = filepath.Base(originalName)
 			}
-			originalName = filepath.Base(originalName)
-		}
-		if named, ok := tracker.(interface{ SetDisplayName(string) }); ok && originalName != "" {
-			named.SetDisplayName(originalName)
-		}
-
-		sourceFilePath = filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%s%s", jobContext.JobId.String(), filepath.Ext(params["filename"])))
-		downloadFile, err := os.Create(sourceFilePath)
-		if err != nil {
-			return err
-		}
-
-		defer downloadFile.Close()
-
-		reader := NewProgressTrackStream(tracker, resp.Body)
-
-		fileSize, err = io.Copy(downloadFile, reader)
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if fileSize < contentLength {
-			incompleteAttempts++
-			if incompleteAttempts >= maxSourceDownloadFailures {
-				return fmt.Errorf("%w: received %d of %d bytes on attempt %d: %v", errRepeatedIncompleteDownload, fileSize, contentLength, incompleteAttempts, err)
+			if named, ok := tracker.(interface{ SetDisplayName(string) }); ok && originalName != "" {
+				named.SetDisplayName(originalName)
 			}
-			return fmt.Errorf("incomplete download: received %d of %d bytes: %v", fileSize, contentLength, err)
-		}
-		if err != nil {
-			return err
-		}
-		if fileSize != contentLength {
-			return fmt.Errorf("file size error on download source:%d downloaded:%d", contentLength, fileSize)
-		}
-		sourceChecksum = hex.EncodeToString(reader.SumSha())
-		bodyString, err := d.getChecksum(jobContext, logger)
-		if err == nil && sourceChecksum != bodyString {
-			err = fmt.Errorf("checksum error on download source:%s downloaded:%s", bodyString, sourceChecksum)
-		}
-		if err != nil {
-			verificationFailures++
-			if verificationFailures >= maxSourceDownloadFailures {
-				return fmt.Errorf("%w: %v", errRepeatedVerificationFailure, err)
-			}
-			return err
-		}
 
-		tracker.UpdateValue(contentLength)
-		return nil
-	}, retry.Delay(retryDelay),
-		retry.Context(ctx),
-		retry.DelayType(retry.FixedDelay),
-		retry.Attempts(180), // 15 min
-		retry.LastErrorOnly(true),
-		retry.OnRetry(func(n uint, err error) {
-			logger.Errorf("Error on downloading job %v", err)
-		}),
-		retry.RetryIf(func(err error) bool {
-			return !errors.Is(err, context.Canceled) && !errors.Is(err, errJobNotFound) && !errors.Is(err, errRepeatedIncompleteDownload) && !errors.Is(err, errRepeatedVerificationFailure)
-		}))
+			sourceFilePath = filepath.Join(jobContext.WorkingDir, fmt.Sprintf("%s%s", jobContext.JobId.String(), filepath.Ext(params["filename"])))
+			downloadFile, err := os.Create(sourceFilePath)
+			if err != nil {
+				return err
+			}
+
+			defer downloadFile.Close()
+
+			reader := NewProgressTrackStream(tracker, resp.Body)
+
+			fileSize, err = io.Copy(downloadFile, reader)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err != nil {
+				// A broken connection is ambiguous; it must not count as a
+				// definitive unreadable-source failure.
+				return err
+			}
+			if fileSize < contentLength {
+				incompleteAttempts++
+				if incompleteAttempts >= maxSourceDownloadFailures {
+					return fmt.Errorf("%w: received %d of %d bytes on attempt %d: %v", errRepeatedIncompleteDownload, fileSize, contentLength, incompleteAttempts, err)
+				}
+				return fmt.Errorf("incomplete download: received %d of %d bytes: %v", fileSize, contentLength, err)
+			}
+			if err != nil {
+				return err
+			}
+			if fileSize != contentLength {
+				return fmt.Errorf("file size error on download source:%d downloaded:%d", contentLength, fileSize)
+			}
+			sourceChecksum = hex.EncodeToString(reader.SumSha())
+			bodyString, err := d.getChecksum(ctx, jobContext, logger)
+			if err == nil && sourceChecksum != bodyString {
+				err = fmt.Errorf("checksum error on download source:%s downloaded:%s", bodyString, sourceChecksum)
+			}
+			if err != nil {
+				verificationFailures++
+				if verificationFailures >= maxSourceDownloadFailures {
+					return fmt.Errorf("%w: %v", errRepeatedVerificationFailure, err)
+				}
+				return err
+			}
+
+			tracker.UpdateValue(contentLength)
+			return nil
+		}, retry.Delay(retryDelay),
+			retry.Context(ctx),
+			retry.DelayType(retry.FixedDelay),
+			retry.Attempts(180), // 15 min
+			retry.LastErrorOnly(true),
+			retry.OnRetry(func(n uint, err error) {
+				logger.Errorf("Error on downloading job %v", err)
+			}),
+			retry.RetryIf(func(err error) bool {
+				return !errors.Is(err, context.Canceled) && !errors.Is(err, serverclient.ErrAssignmentExpired) && !errors.Is(err, errJobNotFound) && !errors.Is(err, errRepeatedIncompleteDownload) && !errors.Is(err, errRepeatedVerificationFailure)
+			}))
+		if err == nil || ctx.Err() != nil || errors.Is(err, serverclient.ErrAssignmentExpired) ||
+			errors.Is(err, errJobNotFound) || errors.Is(err, errRepeatedIncompleteDownload) ||
+			errors.Is(err, errRepeatedVerificationFailure) {
+			break
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -198,33 +216,48 @@ func (d *DownloadStepExecutor) downloadSource(ctx context.Context, tracker Track
 	}, nil
 }
 
-func (d *DownloadStepExecutor) getChecksum(jobContext *job.Context, logger console.LeveledLogger) (string, error) {
+func (d *DownloadStepExecutor) getChecksum(ctx context.Context, jobContext *job.Context, logger console.LeveledLogger) (string, error) {
 	var bodyString string
-	err := retry.Do(func() error {
-		respsha256, err := http.Get(d.GetChecksumURL(jobContext.JobId))
-		if err != nil {
-			return err
-		}
-		defer respsha256.Body.Close()
-		if respsha256.StatusCode != http.StatusOK {
-			return fmt.Errorf("not 200 respose in sha265 code %d", respsha256.StatusCode)
-		}
+	var err error
+	delay := d.retryDelay
+	if delay <= 0 {
+		delay = 5 * time.Second
+	}
+	for {
+		err = retry.Do(func() error {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.GetChecksumURL(jobContext.JobId), nil)
+			if err != nil {
+				return err
+			}
+			respsha256, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+			if err != nil {
+				return err
+			}
+			defer respsha256.Body.Close()
+			if respsha256.StatusCode != http.StatusOK {
+				return fmt.Errorf("not 200 respose in sha265 code %d", respsha256.StatusCode)
+			}
 
-		bodyBytes, err := io.ReadAll(respsha256.Body)
-		if err != nil {
-			return err
+			bodyBytes, err := io.ReadAll(respsha256.Body)
+			if err != nil {
+				return err
+			}
+			bodyString = string(bodyBytes)
+			return nil
+		}, retry.Delay(delay),
+			retry.Context(ctx),
+			retry.Attempts(10),
+			retry.LastErrorOnly(true),
+			retry.OnRetry(func(n uint, err error) {
+				logger.Errorf("error %v on calculate checksum of downloaded job", err)
+			}),
+			retry.RetryIf(func(err error) bool {
+				return !errors.Is(err, context.Canceled)
+			}))
+		if err == nil || ctx.Err() != nil {
+			break
 		}
-		bodyString = string(bodyBytes)
-		return nil
-	}, retry.Delay(time.Second*5),
-		retry.Attempts(10),
-		retry.LastErrorOnly(true),
-		retry.OnRetry(func(n uint, err error) {
-			logger.Errorf("error %v on calculate checksum of downloaded job", err)
-		}),
-		retry.RetryIf(func(err error) bool {
-			return !errors.Is(err, context.Canceled)
-		}))
+	}
 	if err != nil {
 		return "", err
 	}

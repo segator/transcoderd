@@ -7,19 +7,23 @@ Define how the assigned worker obtains the source, verifies its integrity, and r
 ## Requirements
 
 ### Requirement: Assignment-checked download
-`GET /api/v1/download?uuid=<id>` SHALL serve the source only while the job is `started` and the `workerName` header matches the assigned worker. Its `Content-Disposition` filename SHALL use RFC 5987 UTF-8 encoding so workers can recover the original filename.
+`GET /api/v1/download?uuid=<id>` SHALL serve the source only while the job is `started` and the `workerName` header matches the assigned worker. Updated workers SHALL send the assignment identity and the server SHALL reject a stale identity. Its `Content-Disposition` filename SHALL use RFC 5987 UTF-8 encoding so workers can recover the original filename.
 
 #### Scenario: Assigned worker
 - **WHEN** the assigned worker requests a started job
 - **THEN** the server returns HTTP 200 with file bytes, `Content-Length`, and `Content-Disposition` filename
 
 #### Scenario: Different worker
-- **WHEN** another worker requests the file
+- **WHEN** another worker requests the file without an assignment identity
 - **THEN** the API returns HTTP 403
 
 #### Scenario: Missing source file
 - **WHEN** the source file of an otherwise eligible job no longer exists
 - **THEN** the API returns HTTP 404
+
+#### Scenario: Stale assignment identity
+- **WHEN** a request identifies an expired assignment
+- **THEN** the server explicitly rejects it even if the same worker name owns the new assignment
 
 ### Requirement: Source checksum availability
 The server SHALL calculate SHA-256 while streaming the source and SHALL expose the published checksum at `GET /api/v1/checksum?uuid=<id>` only after a complete source stream closes.
@@ -52,7 +56,7 @@ The worker SHALL compare downloaded byte count with the declared content length 
 - **THEN** the worker treats that source as not found rather than retrying it
 
 ### Requirement: Assignment-checked upload
-`POST` and `PUT /api/v1/upload?uuid=<id>` SHALL accept an output stream only from the worker assigned to a `started` job. The server SHALL compare the declared `Content-Length` and `checksum` header with the received byte count and calculated SHA-256 before returning HTTP 201.
+`POST` and `PUT /api/v1/upload?uuid=<id>` SHALL accept an output stream only from the worker assigned to a `started` job. Updated workers SHALL send their assignment identity, and the server SHALL recheck that identity before publishing the upload. The server SHALL compare the declared `Content-Length` and `checksum` header with the received byte count and calculated SHA-256 before returning HTTP 201.
 
 #### Scenario: Valid output stream
 - **WHEN** the assigned worker sends the declared number of bytes and matching SHA-256
@@ -63,8 +67,12 @@ The worker SHALL compare downloaded byte count with the declared content length 
 - **THEN** the API returns HTTP 400
 
 #### Scenario: Different worker
-- **WHEN** a worker other than the assigned worker tries to upload
+- **WHEN** a worker other than the assigned worker tries to upload without an assignment identity
 - **THEN** the API returns HTTP 403
+
+#### Scenario: Reassignment during upload
+- **WHEN** an assignment expires before its upload commits
+- **THEN** the server rejects the stale upload without publishing it
 
 ### Requirement: Completion after accepted upload
 The worker SHALL hash the encoded file and send its checksum with the upload. It SHALL report `Job/completed` and clean its temporary job directory only after receiving HTTP 201.
@@ -78,10 +86,10 @@ The worker SHALL hash the encoded file and send its checksum with the upload. It
 - **THEN** that attempt does not cause a `Job/completed` notification
 
 ### Requirement: Bounded incomplete downloads
-The worker SHALL stop after three incomplete source transfers or three failed source integrity checks for one assignment and report an actionable failure. The server SHALL NOT automatically requeue a job with that failure. Users MAY explicitly retry the failed job after resolving the cause.
+The worker SHALL stop after three source transfers that end cleanly before their declared size or three failed source integrity checks for one assignment and report an actionable failure. Ambiguous network interruptions SHALL be retried without an overall deadline. The server SHALL NOT automatically requeue a job with an actionable failure. Users MAY explicitly retry the failed job after resolving the cause.
 
 #### Scenario: Repeated truncated transfer
-- **WHEN** three source transfers end before their declared size
+- **WHEN** three source transfers end cleanly before their declared size
 - **THEN** the worker fails the job with a diagnostic identifying repeated incomplete downloads and the server does not automatically requeue it
 
 #### Scenario: Repeated verification failure
@@ -89,8 +97,8 @@ The worker SHALL stop after three incomplete source transfers or three failed so
 - **THEN** the worker fails the job with a diagnostic identifying repeated verification failures and the server does not automatically requeue it
 
 #### Scenario: Transient interruption
-- **WHEN** an incomplete transfer is followed by a complete, verified transfer before the limit
-- **THEN** the worker continues processing the verified source
+- **WHEN** a network interruption interrupts a transfer
+- **THEN** the worker retries until the source is complete and verified, the assignment expires, or shutdown is requested
 
 ### Requirement: Download progress per attempt
 Download progress SHALL describe bytes received in the current attempt rather than accumulating bytes across attempts.

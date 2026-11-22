@@ -279,3 +279,10 @@ reference.
 If overriding `PROJECT_VERSION` for a local build, use a semantic version such
 as `0.0.0-av1-test`; the updater parses the version even with `--noUpdates`.
 Arbitrary image/branch labels are not valid application version metadata.
+
+
+## Event delivery and assignment expiry
+
+Deploy the server before upgrading workers. Updated workers persist unacknowledged events and retry transient network or server failures without an overall retry limit. Once connectivity returns they replay the same event and continue. If the server explicitly reports that the assignment expired, the worker discards that job's local workspace and frees its slot. If it explicitly reports an event conflict, the worker stops that job and retains its workspace and rejection reason for inspection.
+
+The server checks assignment identity again before publishing an upload. Full protection from stale execution requires updated workers as well as the updated server; older workers do not send an assignment identity.

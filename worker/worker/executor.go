@@ -33,10 +33,10 @@ type JobExecutor struct {
 	finishing       bool
 	managedLimits   bool
 
+	serviceCtx      context.Context
 	workerConfig    *config.Config
 	tempPath        string
 	wg              sync.WaitGroup
-	mu              sync.RWMutex
 	admissionMu     sync.Mutex
 	settingsMu      sync.Mutex
 	progress        progressRegistry
@@ -108,7 +108,10 @@ func setupStepExecutors(jobExecutor *JobExecutor) map[model.NotificationType]*st
 	client := jobExecutor.client
 
 	onErrOpt := step.WithOnErrorOpt(func(jobContext *job.Context, notificationType model.NotificationType, err error) {
-		jobExecutor.publishTaskEvent(jobContext, model.JobNotification, model.FailedNotificationStatus, fmt.Sprintf("%s:%s", notificationType, err.Error()))
+		if err := jobExecutor.publishTaskEvent(jobContext, model.JobNotification, model.FailedNotificationStatus, fmt.Sprintf("%s:%s", notificationType, err.Error())); err != nil {
+			jobExecutor.handleDeliveryError(jobContext, err)
+			return
+		}
 		jobExecutor.ConsoleTrackStep(jobContext.JobId.String(), model.JobNotification).Error()
 		if err := jobExecutor.CleanJob(jobContext); err != nil {
 			jobExecutor.jobLogger(jobContext).Errorf("failed to clean job workspace %v", err)
@@ -169,7 +172,10 @@ func setupStepExecutors(jobExecutor *JobExecutor) map[model.NotificationType]*st
 	stepExecutors[model.UploadNotification] = step.NewUploadStepExecutor(workerConfig.Name,
 		client.GetBaseDomain(),
 		step.WithOnCompleteOpt(func(jobContext *job.Context) {
-			jobExecutor.publishTaskEvent(jobContext, model.JobNotification, model.CompletedNotificationStatus, "")
+			if err := jobExecutor.publishTaskEvent(jobContext, model.JobNotification, model.CompletedNotificationStatus, ""); err != nil {
+				jobExecutor.handleDeliveryError(jobContext, err)
+				return
+			}
 			jobExecutor.ConsoleTrackStep(jobContext.JobId.String(), model.JobNotification).Done()
 			if err := jobExecutor.CleanJob(jobContext); err != nil {
 				jobExecutor.jobLogger(jobContext).Errorf("failed to clean job workspace: %v", err)
@@ -181,10 +187,12 @@ func setupStepExecutors(jobExecutor *JobExecutor) map[model.NotificationType]*st
 }
 
 func (e *JobExecutor) Run(wg *sync.WaitGroup, ctx context.Context) error {
+	e.serviceCtx = ctx
 	if err := e.resumeJobs(ctx); err != nil {
 		return err
 	}
 	serviceCtx, cancelServiceCtx := context.WithCancel(context.Background())
+	e.serviceCtx = serviceCtx
 	log.Info("Starting Worker Client...")
 	e.start(serviceCtx)
 	log.Info("Started Worker Client...")
@@ -216,9 +224,8 @@ func (e *JobExecutor) stop() {
 	if e.resources != nil {
 		e.resources.Stop()
 	}
-	for _, stepExecutor := range e.stepExecutors {
-		stepExecutor.Stop()
-	}
+	// Queue consumers exit on context cancellation. Closing their channels
+	// while in-flight actions can still enqueue a successor would race.
 }
 
 func (e *JobExecutor) resumeJobs(ctx context.Context) error {
@@ -238,53 +245,50 @@ func (e *JobExecutor) resumeJobs(ctx context.Context) error {
 				log.WithError(err).Warn("Ignoring unreadable persisted job context")
 				return nil
 			}
-			if jobContext.LastEvent == nil {
+			// Persisted paths are not trusted: recovery may delete a workspace
+			// only when it is the canonical job directory under this worker.
+			workspace, workspaceErr := filepath.Abs(filepath.Join(e.tempPath, jobContext.JobId.String()))
+			savedDir, savedErr := filepath.Abs(jobContext.WorkingDir)
+			snapshot, snapshotErr := filepath.Abs(path)
+			if jobContext.JobId == uuid.Nil || workspaceErr != nil || savedErr != nil || snapshotErr != nil ||
+				savedDir != workspace || filepath.Dir(snapshot) != workspace || filepath.Base(snapshot) != jobContext.JobId.String()+".json" {
+				log.WithField("context_path", path).Warn("Ignoring persisted job context with invalid workspace")
+				return nil
+			}
+			if jobContext.RejectedReason != "" {
+				log.WithFields(log.Fields{"job_id": jobContext.JobId.String(), "reason": jobContext.RejectedReason}).Error("Preserving rejected job for inspection")
+				return nil
+			}
+			pending := jobContext.PendingLegacyEvent()
+			if jobContext.LastEvent == nil && pending == nil {
 				log.WithField("context_path", path).Warn("Ignoring persisted job context without a last event")
 				return nil
 			}
-
-			notificationType := jobContext.LastEvent.NotificationType
-			if notificationType == model.JobNotification {
+			if pending == nil && jobContext.LastEvent != nil && jobContext.LastEvent.NotificationType == model.JobNotification {
 				switch jobContext.LastEvent.Status {
-				case model.AssignedNotificationStatus, model.StartedNotificationStatus:
-					// A worker can stop after persisting Job/started but before it
-					// persists the initial Download phase.
-					notificationType = model.DownloadNotification
 				case model.CompletedNotificationStatus, model.FailedNotificationStatus, model.CanceledNotificationStatus:
-					log.WithFields(log.Fields{
-						"context_path": path,
-						"job_id":       jobContext.JobId.String(),
-						"status":       jobContext.LastEvent.Status,
-					}).Info("Discarding terminal persisted job context")
 					if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-						log.WithError(err).WithField("context_path", path).Warn("Failed to remove terminal job context")
+						return err
 					}
-					return nil
-				default:
-					log.WithFields(log.Fields{
-						"context_path": path,
-						"job_id":       jobContext.JobId.String(),
-						"status":       jobContext.LastEvent.Status,
-					}).Warn("Ignoring persisted job context with unsupported job status")
 					return nil
 				}
 			}
-
-			stepExecutor, ok := e.stepExecutors[notificationType]
-			if !ok || stepExecutor == nil {
-				log.WithFields(log.Fields{
-					"context_path": path,
-					"job_id":       jobContext.JobId.String(),
-					"phase":        notificationType,
-				}).Warn("Ignoring persisted job context with unsupported phase")
-				return nil
+			if jobContext.LastEvent != nil && jobContext.LastEvent.NotificationType != model.JobNotification {
+				if _, ok := e.stepExecutors[jobContext.LastEvent.NotificationType]; !ok {
+					log.WithField("context_path", path).Warn("Ignoring persisted job context with unsupported phase")
+					return nil
+				}
 			}
-
 			current, err := e.client.GetJobForRecovery(ctx, jobContext.JobId)
 			if err != nil {
 				return err
 			}
-			if current == nil || !e.matchesSavedAssignment(current, jobContext) {
+			// A completed terminal event may have been committed while its
+			// response was lost. Replaying it performs any remaining cleanup.
+			terminalPending := pending != nil && pending.IsCompleted() && current != nil &&
+				current.Events.GetLatestPerNotificationType(model.JobNotification) != nil &&
+				current.Events.GetLatestPerNotificationType(model.JobNotification).EventID == pending.EventID
+			if current == nil || (!terminalPending && !e.matchesSavedAssignment(current, jobContext)) {
 				log.WithField("job_id", jobContext.JobId.String()).Info("Discarding expired local assignment")
 				workspace := filepath.Join(e.tempPath, jobContext.JobId.String())
 				if path == filepath.Join(workspace, jobContext.JobId.String()+".json") {
@@ -292,12 +296,92 @@ func (e *JobExecutor) resumeJobs(ctx context.Context) error {
 						log.WithError(err).WithField("context_path", path).Warn("Could not remove expired workspace")
 					}
 					return filepath.SkipDir
-				} else if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-					log.WithError(err).WithField("context_path", path).Warn("Could not remove expired context")
 				}
 				return nil
 			}
-			jobContext.LastEvent.EventId = current.Events.GetLatest().EventID
+			if pending == nil && jobContext.LastEvent != nil && current.Events.GetLatest() != nil {
+				// Compatibility with snapshots written before the durable outbox.
+				jobContext.LastEvent.EventId = current.Events.GetLatest().EventID
+			}
+			if pending != nil {
+				if err := e.client.PublishTaskEventContext(ctx, pending); err != nil {
+					if errors.Is(err, serverclient.ErrAssignmentExpired) {
+						if err := jobContext.Clean(); err != nil {
+							return err
+						}
+						return filepath.SkipDir
+					}
+					if errors.Is(err, serverclient.ErrNotificationConflict) {
+						return jobContext.MarkRejected(err.Error())
+					}
+					return err
+				}
+				if err := jobContext.AcknowledgeLegacyEvent(pending.EventID); err != nil {
+					return err
+				}
+			}
+			if jobContext.LastEvent == nil {
+				return fmt.Errorf("job %s has no acknowledged event", jobContext.JobId)
+			}
+			notificationType := jobContext.LastEvent.NotificationType
+			status := jobContext.LastEvent.Status
+			switch {
+			case notificationType == model.JobNotification:
+				switch status {
+				case model.AssignedNotificationStatus, model.StartedNotificationStatus:
+					notificationType = model.DownloadNotification
+				case model.CompletedNotificationStatus, model.FailedNotificationStatus, model.CanceledNotificationStatus:
+					if err := jobContext.Clean(); err != nil {
+						return err
+					}
+					return filepath.SkipDir
+				default:
+					return fmt.Errorf("job %s has unsupported terminal state %s", jobContext.JobId, status)
+				}
+			case status == model.FailedNotificationStatus:
+				if err := e.publishTaskEvent(jobContext, model.JobNotification, model.FailedNotificationStatus,
+					fmt.Sprintf("%s:%s", notificationType, jobContext.LastEvent.Message)); err != nil {
+					return err
+				}
+				if err := jobContext.Clean(); err != nil {
+					return err
+				}
+				return filepath.SkipDir
+			case status == model.CompletedNotificationStatus:
+				switch notificationType {
+				case model.DownloadNotification:
+					if jobContext.Source.FFProbeData.HaveExtractableSubtitle() {
+						notificationType = model.MKVExtractNotification
+					} else {
+						notificationType = model.FFMPEGSNotification
+					}
+				case model.MKVExtractNotification:
+					if jobContext.Source.FFProbeData.HaveImageTypeSubtitle() {
+						notificationType = model.PGSNotification
+					} else {
+						notificationType = model.FFMPEGSNotification
+					}
+				case model.PGSNotification:
+					notificationType = model.FFMPEGSNotification
+				case model.FFMPEGSNotification:
+					notificationType = model.JobVerify
+				case model.JobVerify:
+					notificationType = model.UploadNotification
+				case model.UploadNotification:
+					if err := e.publishTaskEvent(jobContext, model.JobNotification, model.CompletedNotificationStatus, ""); err != nil {
+						return err
+					}
+					if err := jobContext.Clean(); err != nil {
+						return err
+					}
+					return filepath.SkipDir
+				}
+			}
+			stepExecutor, ok := e.stepExecutors[notificationType]
+			if !ok || stepExecutor == nil {
+				return fmt.Errorf("job %s has unsupported phase %s", jobContext.JobId, notificationType)
+			}
+
 			atomic.AddUint32(&e.activeJobs, 1)
 			stepExecutor.AddJob(jobContext)
 		}
@@ -308,8 +392,9 @@ func (e *JobExecutor) resumeJobs(ctx context.Context) error {
 
 func (e *JobExecutor) matchesSavedAssignment(current *model.Job, saved *job.Context) bool {
 	started := current.Events.GetLatestPerNotificationType(model.JobNotification)
-	return started != nil && started.Status == model.StartedNotificationStatus &&
-		started.WorkerName == e.workerConfig.Name && started.EventID == saved.EventId+1
+	return started != nil && started.WorkerName == e.workerConfig.Name &&
+		((started.Status == model.StartedNotificationStatus && started.EventID == saved.EventId+1) ||
+			(started.Status == model.AssignedNotificationStatus && started.EventID == saved.EventId && saved.PendingLegacyEvent() != nil))
 }
 
 type AdmissionStatus = control.AdmissionStatus
@@ -660,7 +745,19 @@ func (e *JobExecutor) ExecuteReservedJob(jobId uuid.UUID, lastEvent int, origina
 		return err
 	}
 
-	e.publishTaskEvent(jobContext, model.JobNotification, model.StartedNotificationStatus, "")
+	if err := e.publishTaskEvent(jobContext, model.JobNotification, model.StartedNotificationStatus, ""); err != nil {
+		e.ReleaseJobSlot()
+		if errors.Is(err, serverclient.ErrAssignmentExpired) {
+			if cleanErr := jobContext.Clean(); cleanErr != nil {
+				e.jobLogger(jobContext).Errorf("failed to discard expired workspace: %v", cleanErr)
+			}
+		} else if errors.Is(err, serverclient.ErrNotificationConflict) {
+			if markErr := jobContext.MarkRejected(err.Error()); markErr != nil {
+				e.jobLogger(jobContext).Errorf("failed to persist rejection: %v", markErr)
+			}
+		}
+		return err
+	}
 
 	e.admissionMu.Lock()
 	if e.reservedJobs > 0 {
@@ -672,38 +769,49 @@ func (e *JobExecutor) ExecuteReservedJob(jobId uuid.UUID, lastEvent int, origina
 	return nil
 }
 
-func (e *JobExecutor) publishTaskEvent(jobContext *job.Context, notificationType model.NotificationType, status model.NotificationStatus, message string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	l := e.jobLogger(jobContext)
-	if notificationType == model.FFMPEGSNotification && message == "" && jobContext.EncodeConfig != nil {
-		if video, err := jobContext.EncodeConfig.ResolveVideoSettings(); err == nil {
-			message = fmt.Sprintf("%s · %s", jobContext.EncodeKind, video.Codec)
+var errNotificationDelivery = errors.New("notification delivery failed")
+
+func (e *JobExecutor) publishTaskEvent(j *job.Context, phase model.NotificationType, status model.NotificationStatus, message string) error {
+	if phase == model.FFMPEGSNotification && message == "" && j.EncodeConfig != nil {
+		if video, err := j.EncodeConfig.ResolveVideoSettings(); err == nil {
+			message = fmt.Sprintf("%s \u00b7 %s", j.EncodeKind, video.Codec)
 		}
 	}
-	jobContext.UpdateEvent(notificationType, status, message)
-	event := &model.TaskEventType{
-		Event: model.Event{
-			EventTime:  time.Now(),
-			WorkerName: e.workerConfig.Name,
-		},
-		JobId:            jobContext.JobId,
-		EventID:          jobContext.LastEvent.EventId,
-		NotificationType: jobContext.LastEvent.NotificationType,
-		Status:           jobContext.LastEvent.Status,
-		Message:          jobContext.LastEvent.Message,
+	ctx := e.serviceCtx
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if status == model.CompletedNotificationStatus && notificationType == model.JobNotification && jobContext.TargetMediaProbe != nil {
-		event.TargetProbe = jobContext.TargetMediaProbe
+	event, err := j.NewLegacyEvent(e.workerConfig.Name, phase, status, message)
+	if err != nil {
+		return errors.Join(errNotificationDelivery, err)
 	}
-	if err := e.client.PublishTaskEvent(event); err != nil {
-		l.Errorf("Error on publishing event %s", err.Error())
+	if err := j.StageLegacyEvent(event); err != nil {
+		return errors.Join(errNotificationDelivery, err)
 	}
-	if err := jobContext.PersistJobContext(); err != nil {
-		l.Errorf("Error on publishing event %s", err.Error())
+	if err := e.client.PublishTaskEventContext(ctx, &event); err != nil {
+		return errors.Join(errNotificationDelivery, err)
 	}
-	l.Logf("%s have been %s", event.NotificationType, event.Status)
+	if err := j.AcknowledgeLegacyEvent(event.EventID); err != nil {
+		return errors.Join(errNotificationDelivery, err)
+	}
+	e.jobLogger(j).Logf("%s have been %s", phase, status)
+	return nil
+}
 
+func (e *JobExecutor) handleDeliveryError(j *job.Context, err error) {
+	e.jobLogger(j).Errorf("notification delivery stopped: %v", err)
+	if errors.Is(err, serverclient.ErrAssignmentExpired) {
+		if cleanErr := e.CleanJob(j); cleanErr != nil {
+			e.jobLogger(j).Errorf("failed to discard expired workspace: %v", cleanErr)
+		}
+	} else if errors.Is(err, serverclient.ErrNotificationConflict) {
+		if markErr := j.MarkRejected(err.Error()); markErr != nil {
+			e.jobLogger(j).Errorf("failed to persist rejection: %v", markErr)
+			return
+		}
+		_ = e.cleanJob(func() error { return nil })
+		e.jobs.remove(j.JobId.String())
+	}
 }
 
 func (e *JobExecutor) ActiveJobs() uint32 {
@@ -712,7 +820,7 @@ func (e *JobExecutor) ActiveJobs() uint32 {
 
 func (e *JobExecutor) stepQueueRoutine(ctx context.Context, stepExecutor *step.Executor) {
 	runStepQueue(ctx, stepExecutor, func(jobCtx *job.Context) {
-		e.processStep(ctx, stepExecutor, jobCtx)
+		go e.processStep(ctx, stepExecutor, jobCtx)
 	})
 }
 
@@ -779,6 +887,10 @@ func (e *JobExecutor) processStep(ctx context.Context, stepExecutor *step.Execut
 	stepExecutor.OnJob(jobCtx)
 	err := e.executeStepActions(ctx, stepExecutor, jobCtx)
 	if err != nil {
+		if errors.Is(err, errNotificationDelivery) || errors.Is(err, serverclient.ErrAssignmentExpired) {
+			e.handleDeliveryError(jobCtx, err)
+			return
+		}
 		stepExecutor.OnError(jobCtx, stepExecutor.NotificationType(), err)
 		return
 	}
@@ -824,14 +936,31 @@ func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step
 		}()
 	}
 
-	e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.StartedNotificationStatus, "")
+	if err := e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.StartedNotificationStatus, ""); err != nil {
+		close(actionsChan)
+		wg.Wait()
+		return err
+	}
+	if stepExecutor.NotificationType() != model.FFMPEGSNotification {
+		if err := stepExecutor.AcquireJob(ctx); err != nil {
+			close(actionsChan)
+			wg.Wait()
+			return errors.Join(errNotificationDelivery, err)
+		}
+	}
 	for _, action := range actions {
 		actionsChan <- action
 	}
 
 	close(actionsChan)
 	wg.Wait()
+	if stepExecutor.NotificationType() != model.FFMPEGSNotification {
+		stepExecutor.ReleaseJob()
+	}
 	close(errs)
+	if err := ctx.Err(); err != nil {
+		return errors.Join(errNotificationDelivery, err)
+	}
 
 	var errorList []error
 	for err := range errs {
@@ -839,12 +968,16 @@ func (e *JobExecutor) executeStepActions(ctx context.Context, stepExecutor *step
 	}
 	err := errors.Join(errorList...)
 	if err != nil {
-		e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.FailedNotificationStatus, err.Error())
+		if errors.Is(err, serverclient.ErrAssignmentExpired) {
+			return err
+		}
+		if deliveryErr := e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.FailedNotificationStatus, err.Error()); deliveryErr != nil {
+			return deliveryErr
+		}
 		return err
 	}
 
-	e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.CompletedNotificationStatus, "")
-	return nil
+	return e.publishTaskEvent(jobContext, stepExecutor.NotificationType(), model.CompletedNotificationStatus, "")
 }
 
 func (e *JobExecutor) CleanJob(jobContext *job.Context) error {

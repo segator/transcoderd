@@ -273,7 +273,7 @@ func TestDownloadSourceIncompleteTransfers(t *testing.T) {
 		wantAttempts      int
 		wantError         bool
 	}{
-		{name: "repeated truncation stops", truncatedAttempts: 3, wantAttempts: 3, wantError: true},
+		{name: "repeated interrupted transfers recover", truncatedAttempts: 3, wantAttempts: 4},
 		{name: "one truncation recovers", truncatedAttempts: 1, wantAttempts: 2},
 		{name: "complete first attempt", truncatedAttempts: 0, wantAttempts: 1},
 	}

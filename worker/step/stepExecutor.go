@@ -23,6 +23,7 @@ type ExecutorOption func(stepExecutor *Executor)
 type Executor struct {
 	pauseController  *command.PauseController
 	stepChan         chan *job.Context
+	jobSlot          chan struct{}
 	notificationType model.NotificationType
 	OnJob            ActionJobContextFunc
 	OnAdd            ActionJobContextFunc
@@ -52,6 +53,18 @@ func (s *Executor) Parallel() int {
 	return s.parallelRunners
 }
 
+// AcquireJob limits concurrent actions without serializing event delivery.
+func (s *Executor) AcquireJob(ctx context.Context) error {
+	select {
+	case s.jobSlot <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Executor) ReleaseJob() { <-s.jobSlot }
+
 func (s *Executor) Stop() {
 	close(s.stepChan)
 }
@@ -64,6 +77,7 @@ type Action struct {
 func NewStepExecutor(notificationType model.NotificationType, actionsFunc ActionsFunc, options ...ExecutorOption) *Executor {
 	stepExecutor := &Executor{
 		stepChan:         make(chan *job.Context, 20),
+		jobSlot:          make(chan struct{}, 1),
 		notificationType: notificationType,
 		actionsFunc:      actionsFunc,
 		parallelRunners:  1,

@@ -85,7 +85,7 @@ func TestSourceReadErrorBlocksOnlyCurrentAssignment(t *testing.T) {
 	if err := repo.AddNewTaskEvent(context.Background(), started); err != nil {
 		t.Fatal(err)
 	}
-	stream, err := sched.GetDownloadJobWriter(context.Background(), job.Id.String(), "worker")
+	stream, err := sched.GetDownloadJobWriter(context.Background(), job.Id.String(), "worker", nil)
 	if err != nil {
 		t.Fatalf("new assignment could not reopen repaired source: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestClientDisconnectDoesNotBlockSourceOrPublishChecksum(t *testing.T) {
 	}
 	api, sched, _, job := downloadFixture(t, root, "film.mkv")
 	downloadRequest(api, job.Id, &disconnectedWriter{header: make(http.Header)})
-	stream, err := sched.GetDownloadJobWriter(context.Background(), job.Id.String(), "worker")
+	stream, err := sched.GetDownloadJobWriter(context.Background(), job.Id.String(), "worker", nil)
 	if err != nil {
 		t.Fatalf("client disconnect blocked source: %v", err)
 	}

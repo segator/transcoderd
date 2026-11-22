@@ -15,6 +15,11 @@ import (
 	retryablehttp "github.com/hashicorp/go-retryablehttp"
 )
 
+var ErrAssignmentExpired = errors.New("worker assignment expired")
+var ErrNotificationConflict = errors.New("server rejected conflicting notification")
+
+const eventAttemptTimeout = 30 * time.Second
+
 type ServerClient struct {
 	webServerConfig     *web.Config
 	retriableHttpClient *http.Client
@@ -40,7 +45,7 @@ func NewServerClient(webServerConfig *web.Config, workerName string) *ServerClie
 		webServerConfig:     webServerConfig,
 		workerName:          workerName,
 		retriableHttpClient: client.StandardClient(),
-		httpClient:          &http.Client{},
+		httpClient:          &http.Client{Timeout: eventAttemptTimeout},
 	}
 }
 
@@ -53,26 +58,54 @@ func (s *ServerClient) publishEventContext(ctx context.Context, event *model.Env
 	if err != nil {
 		return err
 	}
-	req, err := s.requestWithContext(ctx, "POST", "/api/v1/event", bytes.NewBuffer(b))
-	if err != nil {
-		fmt.Printf("Error creating request: %v\n", err)
-		return err
-	}
-	var resp *http.Response
-	if event.EventType == model.PingEvent || event.EventType == model.ProgressEvent {
-		resp, err = s.httpClient.Do(req)
-	} else {
-		resp, err = s.retriableHttpClient.Do(req)
-	}
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("error publishing event: %s", resp.Status)
+	if event.EventType != model.NotificationEvent {
+		req, err := s.requestWithContext(ctx, http.MethodPost, "/api/v1/event", bytes.NewReader(b))
+		if err != nil {
+			return err
+		}
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("error publishing event: %s", resp.Status)
+		}
+		return nil
 	}
 
-	return nil
+	// Retain the exact payload across uncertain outcomes. A request timeout
+	// bounds only one attempt, not the lifetime of the accepted job.
+	for {
+		attemptCtx, cancel := context.WithTimeout(ctx, eventAttemptTimeout)
+		req, err := s.requestWithContext(attemptCtx, http.MethodPost, "/api/v1/event", bytes.NewReader(b))
+		if err != nil {
+			cancel()
+			return err
+		}
+		resp, err := s.httpClient.Do(req)
+		if resp != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+		cancel()
+		if err == nil && resp.StatusCode == http.StatusOK {
+			return nil
+		}
+		if err == nil && resp.StatusCode == http.StatusConflict && resp.Header.Get("X-TranscoderD-Error") == "assignment-expired" {
+			return ErrAssignmentExpired
+		}
+		if err == nil && resp.StatusCode == http.StatusConflict && resp.Header.Get("X-TranscoderD-Error") == "event-conflict" {
+			return ErrNotificationConflict
+		}
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 var ErrNoJobAvailable = errors.New("no job available")
@@ -218,13 +251,17 @@ func (s *ServerClient) PublishPingEventContext(ctx context.Context, runtime ...*
 }
 
 func (s *ServerClient) PublishTaskEvent(taskEvent *model.TaskEventType) error {
+	return s.PublishTaskEventContext(context.Background(), taskEvent)
+}
+
+func (s *ServerClient) PublishTaskEventContext(ctx context.Context, taskEvent *model.TaskEventType) error {
 	taskEvent.WorkerName = s.workerName
 	event, err := envelopEvent(model.NotificationEvent, taskEvent)
 	if err != nil {
 		return err
 	}
 
-	return s.publishEvent(event)
+	return s.publishEventContext(ctx, event)
 }
 
 func (s *ServerClient) PublishTaskProgressEvent(taskProgress *model.TaskProgressType) error {

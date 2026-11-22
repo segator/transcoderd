@@ -26,6 +26,7 @@ type Repository interface {
 	GetJobs(ctx context.Context) (*[]model.Job, error)
 	GetJobsByStatus(ctx context.Context, notificationType model.NotificationType, status model.NotificationStatus) (jobs []*model.Job, returnError error)
 	GetJob(ctx context.Context, uuid string) (*model.Job, error)
+	LockJob(ctx context.Context, uuid string) error
 	GetJobByPath(ctx context.Context, path string) (*model.Job, error)
 	AddJob(ctx context.Context, video *model.Job) error
 	UpdateJob(ctx context.Context, video *model.Job) error
@@ -517,7 +518,7 @@ func (s *SQLRepository) getJobs(ctx context.Context, tx SQLDBOperations) (*[]mod
 }
 
 func (s *SQLRepository) getTaskEvents(ctx context.Context, tx SQLDBOperations, uuid string) ([]*model.TaskEventType, error) {
-	rows, err := tx.QueryContext(ctx, "select * from job_events where job_id=$1 order by event_time asc", uuid)
+	rows, err := tx.QueryContext(ctx, "select job_id,job_event_id,worker_name,event_time,notification_type,status,message,COALESCE(delivery_digest, '') from job_events where job_id=$1 order by event_time asc", uuid)
 	if err != nil {
 		return nil, err
 	}
@@ -525,7 +526,7 @@ func (s *SQLRepository) getTaskEvents(ctx context.Context, tx SQLDBOperations, u
 	var taskEvents []*model.TaskEventType
 	for rows.Next() {
 		event := model.TaskEventType{}
-		err := rows.Scan(&event.JobId, &event.EventID, &event.WorkerName, &event.EventTime, &event.NotificationType, &event.Status, &event.Message)
+		err := rows.Scan(&event.JobId, &event.EventID, &event.WorkerName, &event.EventTime, &event.NotificationType, &event.Status, &event.Message, &event.DeliveryDigest)
 		if err != nil {
 			return nil, err
 		}
@@ -621,7 +622,28 @@ func (s *SQLRepository) PingServerUpdate(ctx context.Context, remoteAddr string,
 	return err
 }
 
+// LockJob serializes assignment changes and notification finalization.
+func (s *SQLRepository) LockJob(ctx context.Context, id string) error {
+	if s.tx == nil {
+		return errors.New("job lock requires a transaction")
+	}
+	var locked string
+	err := s.tx.QueryRowContext(ctx, "SELECT id FROM jobs WHERE id=$1 FOR UPDATE", id).Scan(&locked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrElementNotFound
+	}
+	return err
+}
+
 func (s *SQLRepository) AddNewTaskEvent(ctx context.Context, event *model.TaskEventType) (returnError error) {
+	if s.tx == nil {
+		return s.WithTransaction(ctx, func(ctx context.Context, tx Repository) error {
+			return tx.AddNewTaskEvent(ctx, event)
+		})
+	}
+	if err := s.LockJob(ctx, event.JobId.String()); err != nil {
+		return err
+	}
 	conn, err := s.getConnection()
 	if err != nil {
 		return err
@@ -672,8 +694,12 @@ func (s *SQLRepository) addNewTaskEvent(ctx context.Context, tx SQLDBOperations,
 		return fmt.Errorf("EventID for %s not match,lastReceived %d, new %d", event.JobId.String(), videoEventID, event.EventID)
 	}
 
-	_, err = tx.ExecContext(ctx, "INSERT INTO job_events (job_id, job_event_id,worker_name,event_time,notification_type,status,message)"+
-		" VALUES ($1,$2,$3,$4,$5,$6,$7)", event.JobId.String(), event.EventID, event.WorkerName, time.Now().UTC(), event.NotificationType, event.Status, event.Message)
+	digest, err := model.NotificationDigest(event)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO job_events (job_id,job_event_id,worker_name,event_time,notification_type,status,message,delivery_digest)"+
+		" VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", event.JobId.String(), event.EventID, event.WorkerName, time.Now().UTC(), event.NotificationType, event.Status, event.Message, digest)
 	return err
 }
 func (s *SQLRepository) AddJob(ctx context.Context, job *model.Job) error {
@@ -723,7 +749,7 @@ func (s *SQLRepository) updateJob(ctx context.Context, tx SQLDBOperations, job *
 func (s *SQLRepository) getTimeoutJobs(ctx context.Context, tx SQLDBOperations, timeout time.Duration) ([]*model.TaskEventType, error) {
 	timeoutDate := time.Now().UTC().Add(-timeout)
 
-	rows, err := tx.QueryContext(ctx, "select v.* from job_events v right join "+
+	rows, err := tx.QueryContext(ctx, "select v.job_id,v.job_event_id,v.worker_name,v.event_time,v.notification_type,v.status,v.message from job_events v right join "+
 		"(select job_id,max(job_event_id) as job_event_id  from job_events where notification_type='Job'  group by job_id) as m "+
 		"on m.job_id=v.job_id and m.job_event_id=v.job_event_id where status in ('assigned','started') and v.event_time < $1::timestamp", timeoutDate)
 	if err != nil {

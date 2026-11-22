@@ -62,6 +62,19 @@ func uploadStagingPath(sourceRoot, sourcePath, jobID string) (string, error) {
 	return filepath.Join(filepath.Dir(filepath.Join(sourceRoot, sourcePath)), ".transcoderd-upload", uploadStagingName(jobID)), nil
 }
 
+// Assignment-specific paths keep an obsolete upload separate from a later
+// execution, including a reassignment to the same worker.
+func uploadAssignmentStagingPath(sourceRoot, sourcePath, jobID string, assignmentID *int) (string, error) {
+	path, err := uploadStagingPath(sourceRoot, sourcePath, jobID)
+	if err != nil || assignmentID == nil {
+		return path, err
+	}
+	if *assignmentID < 0 {
+		return "", fmt.Errorf("invalid assignment ID")
+	}
+	return fmt.Sprintf("%s.assignment-%d", path, *assignmentID), nil
+}
+
 func uploadStagingDirectory(sourceRoot string) string {
 	return filepath.Join(sourceRoot, ".transcoderd-upload")
 }

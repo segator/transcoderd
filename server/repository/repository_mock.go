@@ -14,6 +14,7 @@ import (
 // InMemoryRepository implementa Repository en memoria para tests
 type InMemoryRepository struct {
 	mu                  sync.RWMutex
+	txMu                sync.Mutex
 	jobs                map[string]*model.Job
 	events              map[string][]*model.TaskEventType
 	progress            map[string]*model.TaskProgressType
@@ -80,6 +81,11 @@ func (r *InMemoryRepository) GetJob(ctx context.Context, id string) (*model.Job,
 	return &jobCopy, nil
 }
 
+func (r *InMemoryRepository) LockJob(ctx context.Context, id string) error {
+	_, err := r.GetJob(ctx, id)
+	return err
+}
+
 func (r *InMemoryRepository) GetJobByPath(ctx context.Context, path string) (*model.Job, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -103,7 +109,13 @@ func (r *InMemoryRepository) AddNewTaskEvent(ctx context.Context, event *model.T
 	defer r.mu.Unlock()
 
 	jobId := event.JobId.String()
-	r.events[jobId] = append(r.events[jobId], event)
+	stored := *event
+	digest, err := model.NotificationDigest(event)
+	if err != nil {
+		return err
+	}
+	stored.DeliveryDigest = digest
+	r.events[jobId] = append(r.events[jobId], &stored)
 
 	// Actualizar el job con el último estado
 	if job, exists := r.jobs[jobId]; exists {
@@ -268,6 +280,8 @@ func (r *InMemoryRepository) PingServerUpdate(ctx context.Context, remoteAddr st
 }
 
 func (r *InMemoryRepository) WithTransaction(ctx context.Context, fn func(context.Context, Repository) error) error {
+	r.txMu.Lock()
+	defer r.txMu.Unlock()
 	// Para el test en memoria, simplemente ejecutamos la función
 	return fn(ctx, r)
 }

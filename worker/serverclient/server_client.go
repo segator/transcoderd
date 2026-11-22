@@ -16,6 +16,7 @@ import (
 )
 
 var ErrAssignmentExpired = errors.New("worker assignment expired")
+var ErrNotificationConflict = errors.New("server rejected conflicting notification")
 
 const eventAttemptTimeout = 30 * time.Second
 
@@ -44,7 +45,7 @@ func NewServerClient(webServerConfig *web.Config, workerName string) *ServerClie
 		webServerConfig:     webServerConfig,
 		workerName:          workerName,
 		retriableHttpClient: client.StandardClient(),
-		httpClient:          &http.Client{},
+		httpClient:          &http.Client{Timeout: eventAttemptTimeout},
 	}
 }
 
@@ -93,6 +94,9 @@ func (s *ServerClient) publishEventContext(ctx context.Context, event *model.Env
 		}
 		if err == nil && resp.StatusCode == http.StatusConflict && resp.Header.Get("X-TranscoderD-Error") == "assignment-expired" {
 			return ErrAssignmentExpired
+		}
+		if err == nil && resp.StatusCode == http.StatusConflict && resp.Header.Get("X-TranscoderD-Error") == "event-conflict" {
+			return ErrNotificationConflict
 		}
 		timer := time.NewTimer(5 * time.Second)
 		select {
@@ -247,13 +251,17 @@ func (s *ServerClient) PublishPingEventContext(ctx context.Context, runtime ...*
 }
 
 func (s *ServerClient) PublishTaskEvent(taskEvent *model.TaskEventType) error {
+	return s.PublishTaskEventContext(context.Background(), taskEvent)
+}
+
+func (s *ServerClient) PublishTaskEventContext(ctx context.Context, taskEvent *model.TaskEventType) error {
 	taskEvent.WorkerName = s.workerName
 	event, err := envelopEvent(model.NotificationEvent, taskEvent)
 	if err != nil {
 		return err
 	}
 
-	return s.publishEvent(event)
+	return s.publishEventContext(ctx, event)
 }
 
 func (s *ServerClient) PublishTaskProgressEvent(taskProgress *model.TaskProgressType) error {

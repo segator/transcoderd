@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Tray monitoring and settings
-The tray application SHALL present an HTML-based dashboard showing service connection and admission status, current job phases and progress, locally queued and downloaded jobs, and the server's queue when the server supports it. It SHALL let the user configure server URL, token, worker name, encoder, concurrent encodes and admission windows. The token SHALL be masked and SHALL NOT be returned to the tray after it has been saved. The dashboard SHALL show the installed application version, prominently identify each job's CPU/GPU profile and encoder when known, and provide combinable activity filters for encoding, downloading, uploading, and preparation work.
+The tray SHALL show connection and admission status, job phases and progress, queued and downloaded local jobs, and the server queue when available. It SHALL let users configure server URL, token, worker name, encoder, concurrent encodes and admission windows. Tokens SHALL be masked and never returned after saving. It SHALL show the installed version, prominently identify known CPU/GPU profiles and encoders, and provide combinable filters for encoding, downloading, uploading and preparation.
 
 #### Scenario: Display application version
 - **WHEN** the tray dashboard is connected to the service

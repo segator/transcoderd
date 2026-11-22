@@ -20,6 +20,8 @@ None.
 ### Modified Capabilities
 
 - `events-and-progress`: Define reliable event delivery, replay, rejection and recovery.
+- `media-transfer`: Fence transfers by assignment and retry ambiguous network interruptions.
+- `maintenance-and-recovery`: Persist pending notifications and reconcile them after a worker restart.
 
 ## Impact
 

@@ -19,6 +19,8 @@ type Context struct {
 	EventId          int                  `json:"event_id"`
 	WorkingDir       string               `json:"working_dir"`
 	LastEvent        *ContextEvent        `json:"last_event"`
+	PendingEvent     *model.TaskEventType `json:"pending_event,omitempty"`
+	RejectedReason   string               `json:"rejected_reason,omitempty"`
 	Source           *VideoData           `json:"source"`
 	Target           *VideoData           `json:"target"`
 	TargetMediaProbe *model.MediaProbe    `json:"target_media_probe,omitempty"`
@@ -75,21 +77,61 @@ func (j *Context) UpdateEvent(notificationType model.NotificationType, status mo
 	j.LastEvent = JobCtxEvent
 }
 
+// MarkRejected preserves the workspace for inspection without replaying a
+// notification the server has definitively rejected.
+func (e *Context) MarkRejected(reason string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	old := e.RejectedReason
+	e.RejectedReason = reason
+	if err := e.persistJobContextLocked(); err != nil {
+		e.RejectedReason = old
+		return err
+	}
+	return nil
+}
+
 func (e *Context) PersistJobContext() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.persistJobContextLocked()
+}
+
+func (e *Context) persistJobContextLocked() error {
+	if e.WorkingDir == "" {
+		return fmt.Errorf("persist job context: working directory is empty")
+	}
 	b, err := json.MarshalIndent(e, "", "\t")
 	if err != nil {
 		return err
 	}
-	eventFile, err := os.OpenFile(filepath.Join(e.WorkingDir, fmt.Sprintf("%s.json", e.JobId)), os.O_TRUNC|os.O_CREATE|os.O_RDWR, os.ModePerm)
+	return writeAtomicContextFile(e.WorkingDir, fmt.Sprintf("%s.json", e.JobId), b)
+}
+
+func writeAtomicContextFile(dir, name string, b []byte) error {
+	// Write the complete snapshot before replacing the previous one. A crash or
+	// short write must not destroy the only recoverable copy of an accepted job.
+	eventFile, err := os.CreateTemp(dir, ".job-context-*")
 	if err != nil {
 		return err
 	}
-	defer eventFile.Close()
-	_, err = eventFile.Write(b)
-	if err != nil {
-		return err
+	tempPath := eventFile.Name()
+	defer os.Remove(tempPath)
+	if _, err = eventFile.Write(b); err != nil {
+		_ = eventFile.Close()
+		return fmt.Errorf("write job context: %w", err)
 	}
-	return eventFile.Sync()
+	if err = eventFile.Sync(); err != nil {
+		_ = eventFile.Close()
+		return fmt.Errorf("sync job context: %w", err)
+	}
+	if err = eventFile.Close(); err != nil {
+		return fmt.Errorf("close job context: %w", err)
+	}
+	if err = replaceContextFile(tempPath, filepath.Join(dir, name)); err != nil {
+		return fmt.Errorf("replace job context: %w", err)
+	}
+	return nil
 }
 
 func ReadContextFromDiskByPath(path string) (*Context, error) {

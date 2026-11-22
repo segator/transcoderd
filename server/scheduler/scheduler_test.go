@@ -123,7 +123,11 @@ func TestCompletedJobFinalizesBeforeDeleteOnComplete(t *testing.T) {
 				t.Fatal(err)
 			}
 			scheduler := &RuntimeScheduler{config: &Config{SourcePath: root, DeleteSourceOnComplete: deleteSource}, repo: repo}
-			event := model.TaskEventType{JobId: id, EventID: 0, NotificationType: model.JobNotification, Status: model.CompletedNotificationStatus}
+			assigned := &model.TaskEventType{Event: model.Event{WorkerName: "worker"}, JobId: id, EventID: 0, NotificationType: model.JobNotification, Status: model.AssignedNotificationStatus}
+			if err := repo.AddNewTaskEvent(context.Background(), assigned); err != nil {
+				t.Fatal(err)
+			}
+			event := model.TaskEventType{Event: model.Event{WorkerName: "worker"}, JobId: id, EventID: 1, NotificationType: model.JobNotification, Status: model.CompletedNotificationStatus}
 			payload, err := json.Marshal(event)
 			if err != nil {
 				t.Fatal(err)
@@ -207,7 +211,11 @@ func TestCompletedJobMigratesLegacyStagingAcrossFilesystems(t *testing.T) {
 		t.Fatal(err)
 	}
 	scheduler := &RuntimeScheduler{config: &Config{SourcePath: root}, repo: repo}
-	event := model.TaskEventType{JobId: id, EventID: 0, NotificationType: model.JobNotification, Status: model.CompletedNotificationStatus}
+	assigned := &model.TaskEventType{Event: model.Event{WorkerName: "worker"}, JobId: id, EventID: 0, NotificationType: model.JobNotification, Status: model.AssignedNotificationStatus}
+	if err := repo.AddNewTaskEvent(context.Background(), assigned); err != nil {
+		t.Fatal(err)
+	}
+	event := model.TaskEventType{Event: model.Event{WorkerName: "worker"}, JobId: id, EventID: 1, NotificationType: model.JobNotification, Status: model.CompletedNotificationStatus}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		t.Fatal(err)

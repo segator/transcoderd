@@ -148,6 +148,16 @@ func (s *Server) handleWorkerEvent(writer http.ResponseWriter, request *http.Req
 	}
 
 	err = s.scheduler.HandleWorkerEvent(s.ctx, envelopEvent)
+	if errors.Is(err, scheduler.ErrAssignmentExpired) {
+		writer.Header().Set("X-TranscoderD-Error", "assignment-expired")
+		http.Error(writer, "assignment expired", http.StatusConflict)
+		return
+	}
+	if errors.Is(err, scheduler.ErrNotificationConflict) {
+		writer.Header().Set("X-TranscoderD-Error", "event-conflict")
+		http.Error(writer, "notification conflict", http.StatusConflict)
+		return
+	}
 	if webError(writer, err, 500) {
 		return
 	}
@@ -240,8 +250,21 @@ func (s *Server) upload(writer http.ResponseWriter, request *http.Request) {
 	if uuid == "" {
 		webError(writer, fmt.Errorf("UUID get parameter not found"), 404)
 	}
-	uploadStream, err := s.scheduler.GetUploadJobWriter(request.Context(), uuid, workerName)
+	var assignmentID *int
+	if raw := request.Header.Get("X-TranscoderD-Assignment"); raw != "" {
+		id, err := strconv.Atoi(raw)
+		if err != nil || id < 0 {
+			http.Error(writer, "invalid assignment", http.StatusBadRequest)
+			return
+		}
+		assignmentID = &id
+	}
+	uploadStream, err := s.scheduler.GetUploadJobWriter(request.Context(), uuid, workerName, assignmentID)
 	switch {
+	case errors.Is(err, scheduler.ErrAssignmentExpired):
+		writer.Header().Set("X-TranscoderD-Error", "assignment-expired")
+		http.Error(writer, "assignment expired", http.StatusConflict)
+		return
 	case errors.Is(err, scheduler.ErrorStreamNotAllowed):
 		webError(writer, err, 403)
 		return
@@ -325,6 +348,11 @@ loop:
 		return
 	}
 	if err = uploadStream.Commit(); err != nil {
+		if errors.Is(err, scheduler.ErrAssignmentExpired) {
+			writer.Header().Set("X-TranscoderD-Error", "assignment-expired")
+			http.Error(writer, "assignment expired", http.StatusConflict)
+			return
+		}
 		webError(writer, fmt.Errorf("could not publish uploaded output: %w", err), 500)
 		return
 	}
@@ -342,8 +370,21 @@ func (s *Server) download(writer http.ResponseWriter, request *http.Request) {
 	if uuid == "" {
 		webError(writer, fmt.Errorf("UUID get parameter not found"), 404)
 	}
-	downloadStream, err := s.scheduler.GetDownloadJobWriter(request.Context(), uuid, workerName)
+	var assignmentID *int
+	if raw := request.Header.Get("X-TranscoderD-Assignment"); raw != "" {
+		id, err := strconv.Atoi(raw)
+		if err != nil || id < 0 {
+			http.Error(writer, "invalid assignment", http.StatusBadRequest)
+			return
+		}
+		assignmentID = &id
+	}
+	downloadStream, err := s.scheduler.GetDownloadJobWriter(request.Context(), uuid, workerName, assignmentID)
 	switch {
+	case errors.Is(err, scheduler.ErrAssignmentExpired):
+		writer.Header().Set("X-TranscoderD-Error", "assignment-expired")
+		http.Error(writer, "assignment expired", http.StatusConflict)
+		return
 	case errors.Is(err, scheduler.ErrorStreamNotAllowed):
 		webError(writer, err, 403)
 		return

@@ -111,12 +111,14 @@ type Event struct {
 }
 type TaskEventType struct {
 	Event
-	JobId            uuid.UUID          `json:"Id"`
-	EventID          int                `json:"eventID"`
-	NotificationType NotificationType   `json:"notificationType"`
-	Status           NotificationStatus `json:"status"`
-	Message          string             `json:"message"`
-	TargetProbe      *MediaProbe        `json:"target_probe,omitempty"`
+	JobId             uuid.UUID          `json:"Id"`
+	EventID           int                `json:"eventID"`
+	AssignmentEventID *int               `json:"assignmentEventID,omitempty"`
+	DeliveryDigest    string             `json:"-"`
+	NotificationType  NotificationType   `json:"notificationType"`
+	Status            NotificationStatus `json:"status"`
+	Message           string             `json:"message"`
+	TargetProbe       *MediaProbe        `json:"target_probe,omitempty"`
 }
 
 type PingEventType struct {

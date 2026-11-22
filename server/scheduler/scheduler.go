@@ -30,8 +30,8 @@ var (
 type Scheduler interface {
 	Run(wg *sync.WaitGroup, ctx context.Context)
 	ScheduleJobRequests(ctx context.Context, jobRequest *model.JobRequest) (*ScheduleJobRequestResult, error)
-	GetUploadJobWriter(ctx context.Context, uuid string, workerName string) (*UploadJobStream, error)
-	GetDownloadJobWriter(ctx context.Context, uuid string, workerName string) (*DownloadJobStream, error)
+	GetUploadJobWriter(ctx context.Context, uuid string, workerName string, assignmentID *int) (*UploadJobStream, error)
+	GetDownloadJobWriter(ctx context.Context, uuid string, workerName string, assignmentID *int) (*DownloadJobStream, error)
 	GetChecksum(ctx context.Context, uuid string) (string, error)
 	RequestJob(ctx context.Context, workerName string) (*model.RequestJobResponse, error)
 	GetWorkerMaxActiveJobs(ctx context.Context, workerName string) (*int, error)
@@ -64,7 +64,6 @@ type RuntimeScheduler struct {
 	pathChecksumMap map[string]string
 	jobRequestMu    sync.Mutex
 	jobIntakeMu     sync.Mutex
-	handleEventMu   sync.Mutex
 	sourceReadGuard sourceReadGuard
 }
 
@@ -105,8 +104,6 @@ func (r *RuntimeScheduler) RequestJob(ctx context.Context, workerName string) (*
 }
 
 func (r *RuntimeScheduler) HandleWorkerEvent(ctx context.Context, envelopedEvent *model.EnvelopEvent) error {
-	r.handleEventMu.Lock()
-	defer r.handleEventMu.Unlock()
 	if err := r.processEvent(ctx, envelopedEvent); err != nil {
 		return err
 	}
@@ -198,37 +195,33 @@ func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.Envelo
 		if err = json.Unmarshal(event.EventData, &taskEvent); err != nil {
 			return err
 		}
-		if taskEvent.IsCompleted() {
-			if err = r.completeJob(ctx, &taskEvent); err != nil {
+		err = r.repo.WithTransaction(ctx, func(ctx context.Context, tx repository.Repository) error {
+			if err := tx.LockJob(ctx, taskEvent.JobId.String()); err != nil {
+				if errors.Is(err, repository.ErrElementNotFound) {
+					return ErrAssignmentExpired
+				}
 				return err
 			}
-		}
-		alreadyRecorded := false
-		if taskEvent.IsCompleted() {
-			video, getErr := r.repo.GetJob(ctx, taskEvent.JobId.String())
-			if getErr != nil {
-				return getErr
+			video, err := tx.GetJob(ctx, taskEvent.JobId.String())
+			if err != nil {
+				return err
 			}
-			for _, storedEvent := range video.Events {
-				if storedEvent.EventID == taskEvent.EventID && storedEvent.IsCompleted() {
-					alreadyRecorded = true
-					break
+			replay, err := validateLegacyNotification(video, &taskEvent)
+			if err != nil || replay {
+				return err
+			}
+			if taskEvent.IsCompleted() {
+				if err := r.completeJob(ctx, tx, &taskEvent); err != nil {
+					return err
 				}
 			}
+			return tx.AddNewTaskEvent(ctx, &taskEvent)
+		})
+		if err != nil {
+			return err
 		}
-		if !alreadyRecorded {
-			if err = r.repo.AddNewTaskEvent(ctx, &taskEvent); err != nil {
-				return err
-			}
-		}
-		if taskEvent.IsCompleted() && r.config.DeleteSourceOnComplete {
-			video, getErr := r.repo.GetJob(ctx, taskEvent.JobId.String())
-			if getErr != nil {
-				return getErr
-			}
-			if removeErr := os.Remove(filepath.Join(r.config.SourcePath, video.SourcePath)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-				return fmt.Errorf("remove source after successful output finalization: %w", removeErr)
-			}
+		if taskEvent.IsCompleted() {
+			return r.cleanupLegacyCompletion(ctx, taskEvent.JobId.String(), taskEvent.AssignmentEventID)
 		}
 	case model.ProgressEvent:
 		taskProgress := model.TaskProgressType{}
@@ -251,8 +244,8 @@ func (r *RuntimeScheduler) processEvent(ctx context.Context, event *model.Envelo
 	return nil
 }
 
-func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.TaskEventType) error {
-	video, err := r.repo.GetJob(ctx, jobEvent.JobId.String())
+func (r *RuntimeScheduler) completeJob(ctx context.Context, tx repository.Repository, jobEvent *model.TaskEventType) error {
+	video, err := tx.GetJob(ctx, jobEvent.JobId.String())
 	if err != nil {
 		return err
 	}
@@ -260,7 +253,7 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 		return fmt.Errorf("job %s has a non-local source or target path", jobEvent.JobId)
 	}
 	sourcePath := filepath.Join(r.config.SourcePath, video.SourcePath)
-	stagingPath, err := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
+	stagingPath, err := uploadAssignmentStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String(), jobEvent.AssignmentEventID)
 	if err != nil {
 		return err
 	}
@@ -273,7 +266,9 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 	})
 	probePath := stagingPath
 	if _, err := os.Stat(stagingPath); errors.Is(err, os.ErrNotExist) {
-		if _, legacyErr := os.Stat(legacyStagingPath); legacyErr == nil {
+		if jobEvent.AssignmentEventID != nil {
+			return fmt.Errorf("assigned upload staging file is missing: %w", err)
+		} else if _, legacyErr := os.Stat(legacyStagingPath); legacyErr == nil {
 			if err := copyUploadToDestinationFilesystem(legacyStagingPath, stagingPath); err != nil {
 				l.Warnf("could not migrate legacy upload staging file to destination filesystem: %v", err)
 				return err
@@ -331,7 +326,7 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 	video.TargetSize = targetStat.Size()
 	video.TargetProbe = mediaProbe
 
-	err = r.repo.UpdateJob(ctx, video)
+	err = tx.UpdateJob(ctx, video)
 	if err != nil {
 		if !samePath(finalPath, probePath) {
 			_ = os.Remove(target)
@@ -339,23 +334,38 @@ func (r *RuntimeScheduler) completeJob(ctx context.Context, jobEvent *model.Task
 		l.Warnf("target job can not be updated because %v", err)
 		return err
 	}
-	for _, stagingFile := range []struct {
-		path string
-		name string
-	}{
-		{path: stagingPath, name: "uploaded"},
-		{path: legacyStagingPath, name: "legacy upload"},
-	} {
-		if samePath(stagingFile.path, finalPath) {
-			continue
-		}
-		if removeErr := removeUploadStagingFile(stagingFile.path); removeErr != nil {
-			l.Warnf("final output saved but %s staging cleanup failed: %v", stagingFile.name, removeErr)
-		}
-	}
-
 	l.Infof("Job completed")
 
+	return nil
+}
+
+func (r *RuntimeScheduler) cleanupLegacyCompletion(ctx context.Context, id string, assignmentID *int) error {
+	video, err := r.repo.GetJob(ctx, id)
+	if err != nil {
+		return err
+	}
+	staging, err := uploadAssignmentStagingPath(r.config.SourcePath, video.SourcePath, id, assignmentID)
+	if err != nil {
+		return err
+	}
+	legacy := filepath.Join(uploadStagingDirectory(r.config.SourcePath), uploadStagingName(id))
+	final := filepath.Join(r.config.SourcePath, video.TargetPath)
+	paths := []string{staging}
+	if assignmentID == nil {
+		paths = append(paths, legacy)
+	}
+	for _, path := range paths {
+		if !samePath(path, final) {
+			if err := removeUploadStagingFile(path); err != nil {
+				log.WithError(err).Warn("Final output saved but upload staging cleanup failed")
+			}
+		}
+	}
+	if r.config.DeleteSourceOnComplete {
+		if err := os.Remove(filepath.Join(r.config.SourcePath, video.SourcePath)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove source after successful output finalization: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -487,12 +497,24 @@ func (r *RuntimeScheduler) scheduleJobRequestLocked(ctx context.Context, jobRequ
 	l := log.WithFields(log.Fields{
 		"source_path": jobRequest.SourcePath,
 	})
+	var staleUploads []string
 	err = r.repo.WithTransaction(ctx, func(ctx context.Context, tx repository.Repository) error {
 		job, err = tx.GetJobByPath(ctx, jobRequest.SourcePath)
 		if err != nil {
 			return err
 		}
 
+		// Assignment changes use the same row lock as notification and upload
+		// publication, so a timed-out worker cannot publish after reassignment.
+		if job != nil {
+			if err := tx.LockJob(ctx, job.Id.String()); err != nil {
+				return err
+			}
+			job, err = tx.GetJob(ctx, job.Id.String())
+			if err != nil {
+				return err
+			}
+		}
 		var eventsToAdd []*model.TaskEventType
 		if job == nil {
 			job, err = r.newJob(ctx, tx, jobRequest)
@@ -506,6 +528,29 @@ func (r *RuntimeScheduler) scheduleJobRequestLocked(ctx context.Context, jobRequ
 			if err != nil {
 				return err
 			}
+			if jobRequest.ForceAssigned {
+				var assigned *model.TaskEventType
+				for _, event := range job.Events {
+					if event.NotificationType == model.JobNotification && event.Status == model.AssignedNotificationStatus &&
+						(assigned == nil || event.EventID > assigned.EventID) {
+						assigned = event
+					}
+				}
+				var id *int
+				if assigned != nil {
+					id = &assigned.EventID
+				}
+				stage, err := uploadAssignmentStagingPath(r.config.SourcePath, job.SourcePath, job.Id.String(), id)
+				if err != nil {
+					return err
+				}
+				if id != nil {
+					// Legacy shared staging paths cannot safely be removed after
+					// commit: an older worker may already be writing a new run.
+					staleUploads = []string{stage}
+				}
+			}
+
 			if jobRequest.SourceProbe != nil {
 				job.SourceSize, job.SourceProbe = jobRequest.SourceSize, jobRequest.SourceProbe
 				job.TargetSize, job.TargetProbe = 0, nil
@@ -525,6 +570,13 @@ func (r *RuntimeScheduler) scheduleJobRequestLocked(ctx context.Context, jobRequ
 
 		return nil
 	})
+	if err == nil {
+		for _, path := range staleUploads {
+			if cleanupErr := removeUploadStagingFile(path); cleanupErr != nil {
+				log.WithError(cleanupErr).WithField("path", path).Warn("Could not remove stale staged upload")
+			}
+		}
+	}
 	return job, err
 }
 
@@ -607,6 +659,9 @@ func (r *RuntimeScheduler) isValidStremeableJob(ctx context.Context, uuid string
 		return nil, err
 	}
 	te := video.Events.GetLatestPerNotificationType(model.JobNotification)
+	if te == nil {
+		return nil, fmt.Errorf("%w: job has no assignment", ErrorStreamNotAllowed)
+	}
 	if te.Status != model.StartedNotificationStatus {
 		return nil, fmt.Errorf("%w: job is in status %s", ErrorStreamNotAllowed, te.Status)
 	}
@@ -615,10 +670,25 @@ func (r *RuntimeScheduler) isValidStremeableJob(ctx context.Context, uuid string
 	}
 	return video, nil
 }
-func (r *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string, workerName string) (*DownloadJobStream, error) {
+func (r *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string, workerName string, assignmentID *int) (*DownloadJobStream, error) {
 	video, err := r.isValidStremeableJob(ctx, uuid, workerName)
 	if err != nil {
+		if assignmentID != nil && errors.Is(err, ErrorStreamNotAllowed) {
+			return nil, ErrAssignmentExpired
+		}
 		return nil, err
+	}
+	if assignmentID != nil {
+		var assigned *model.TaskEventType
+		for _, event := range video.Events {
+			if event.NotificationType == model.JobNotification && event.Status == model.AssignedNotificationStatus &&
+				(assigned == nil || event.EventID > assigned.EventID) {
+				assigned = event
+			}
+		}
+		if assigned == nil || assigned.EventID != *assignmentID {
+			return nil, ErrAssignmentExpired
+		}
 	}
 	if !filepath.IsLocal(video.SourcePath) {
 		return nil, fmt.Errorf("job %s has a non-local source path", video.Id)
@@ -673,14 +743,28 @@ func (r *RuntimeScheduler) GetDownloadJobWriter(ctx context.Context, uuid string
 
 }
 
-func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string, workerName string) (*UploadJobStream, error) {
+func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string, workerName string, assignmentID *int) (*UploadJobStream, error) {
 	parsedJobID, err := uuid.Parse(jobID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid job ID %q: %w", jobID, err)
 	}
 	video, err := r.isValidStremeableJob(ctx, parsedJobID.String(), workerName)
 	if err != nil {
+		if assignmentID != nil && errors.Is(err, ErrorStreamNotAllowed) {
+			return nil, ErrAssignmentExpired
+		}
 		return nil, err
+	}
+	started := video.Events.GetLatestPerNotificationType(model.JobNotification)
+	var assigned *model.TaskEventType
+	for _, event := range video.Events {
+		if event.NotificationType == model.JobNotification && event.Status == model.AssignedNotificationStatus &&
+			(assigned == nil || event.EventID > assigned.EventID) {
+			assigned = event
+		}
+	}
+	if assignmentID != nil && (assigned == nil || *assignmentID != assigned.EventID) {
+		return nil, ErrAssignmentExpired
 	}
 	if !filepath.IsLocal(video.SourcePath) {
 		return nil, fmt.Errorf("job %s has a non-local source path", video.Id)
@@ -689,7 +773,7 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string,
 		return nil, fmt.Errorf("job %s has a non-local target path", video.Id)
 	}
 
-	temporalPath, err := uploadStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String())
+	temporalPath, err := uploadAssignmentStagingPath(r.config.SourcePath, video.SourcePath, video.Id.String(), assignmentID)
 	if err != nil {
 		return nil, err
 	}
@@ -725,6 +809,23 @@ func (r *RuntimeScheduler) GetUploadJobWriter(ctx context.Context, jobID string,
 		root:        root,
 		attemptName: attemptName,
 		stagingName: stagingName,
+		commitGuard: func(commit func() error) error {
+			return r.repo.WithTransaction(ctx, func(ctx context.Context, tx repository.Repository) error {
+				if err := tx.LockJob(ctx, jobID); err != nil {
+					return err
+				}
+				current, err := tx.GetJob(ctx, jobID)
+				if err != nil {
+					return err
+				}
+				latest := current.Events.GetLatestPerNotificationType(model.JobNotification)
+				if latest == nil || latest.Status != model.StartedNotificationStatus ||
+					latest.WorkerName != workerName || latest.EventID != started.EventID {
+					return ErrAssignmentExpired
+				}
+				return commit()
+			})
+		},
 	}, nil
 }
 

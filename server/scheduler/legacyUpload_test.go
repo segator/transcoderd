@@ -39,7 +39,11 @@ func TestUploadCannotCommitAfterReassignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Clean()
+	defer func() {
+		if err := stream.Clean(); err != nil {
+			t.Errorf("clean upload: %v", err)
+		}
+	}()
 	if _, err := stream.Write([]byte("old result")); err != nil {
 		t.Fatal(err)
 	}

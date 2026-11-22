@@ -37,7 +37,6 @@ type JobExecutor struct {
 	workerConfig    *config.Config
 	tempPath        string
 	wg              sync.WaitGroup
-	mu              sync.RWMutex
 	admissionMu     sync.Mutex
 	settingsMu      sync.Mutex
 	progress        progressRegistry
@@ -326,7 +325,8 @@ func (e *JobExecutor) resumeJobs(ctx context.Context) error {
 			}
 			notificationType := jobContext.LastEvent.NotificationType
 			status := jobContext.LastEvent.Status
-			if notificationType == model.JobNotification {
+			switch {
+			case notificationType == model.JobNotification:
 				switch status {
 				case model.AssignedNotificationStatus, model.StartedNotificationStatus:
 					notificationType = model.DownloadNotification
@@ -338,7 +338,7 @@ func (e *JobExecutor) resumeJobs(ctx context.Context) error {
 				default:
 					return fmt.Errorf("job %s has unsupported terminal state %s", jobContext.JobId, status)
 				}
-			} else if status == model.FailedNotificationStatus {
+			case status == model.FailedNotificationStatus:
 				if err := e.publishTaskEvent(jobContext, model.JobNotification, model.FailedNotificationStatus,
 					fmt.Sprintf("%s:%s", notificationType, jobContext.LastEvent.Message)); err != nil {
 					return err
@@ -347,7 +347,7 @@ func (e *JobExecutor) resumeJobs(ctx context.Context) error {
 					return err
 				}
 				return filepath.SkipDir
-			} else if status == model.CompletedNotificationStatus {
+			case status == model.CompletedNotificationStatus:
 				switch notificationType {
 				case model.DownloadNotification:
 					if jobContext.Source.FFProbeData.HaveExtractableSubtitle() {

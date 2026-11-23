@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Probe source and output media
-The worker SHALL probe a fully downloaded source before encoding and SHALL probe the encoded file before verification. It SHALL use the first video stream reported for the source and determine its duration from the video stream timeline when needed for verification.
+The worker SHALL probe a fully downloaded source before encoding and SHALL probe the encoded file before verification. It SHALL use the first video stream reported for the source and determine its duration from the video stream timeline when needed for verification. If the reported frame-rate ratio has a zero denominator, it SHALL use the existing 24 fps fallback for progress calculations without terminating the worker.
 
 #### Scenario: Valid downloaded source
 - **WHEN** a source download passes its size and SHA-256 checks
@@ -12,6 +12,10 @@ The worker SHALL probe a fully downloaded source before encoding and SHALL probe
 #### Scenario: Encoded file created
 - **WHEN** the encoder exits successfully
 - **THEN** the worker probes the output and calculates its SHA-256 checksum before verification and upload
+
+#### Scenario: Zero frame-rate denominator
+- **WHEN** FFprobe reports an average frame-rate ratio with a zero denominator
+- **THEN** normalization uses 24 fps for progress calculations and the worker continues
 
 ### Requirement: Duration verification
 Before upload, the worker SHALL compare source and output video durations against `worker.verifyDeltaTime`, whose registered default SHALL be 60 seconds. When container durations differ by more than the configured threshold, the worker SHALL determine the first video stream's packet timeline before deciding whether to reject the output.

@@ -563,6 +563,8 @@ func TestFFProbeFrameRate(t *testing.T) {
 		{"Invalid format - too many parts", "30/1/1", 0, true},
 		{"Invalid numerator", "abc/1", 0, true},
 		{"Invalid denominator", "30/abc", 0, true},
+		{"Zero denominator", "30/0", 0, true},
+		{"Zero numerator and denominator", "0/0", 0, true},
 		{"Empty string", "", 0, true},
 	}
 
@@ -584,6 +586,25 @@ func TestFFProbeFrameRate(t *testing.T) {
 
 			if got != tt.want {
 				t.Errorf("ffProbeFrameRate() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeFFProbeDataZeroFrameRateDenominator(t *testing.T) {
+	for _, rate := range []string{"0/0", "30000/0"} {
+		t.Run(rate, func(t *testing.T) {
+			raw := `{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","avg_frame_rate":"` + rate + `"}],"format":{"duration":"600.0"}}`
+			var probeData ffprobe.ProbeData
+			if err := json.Unmarshal([]byte(raw), &probeData); err != nil {
+				t.Fatal(err)
+			}
+			result, err := NormalizeFFProbeData(&probeData)
+			if err != nil {
+				t.Fatalf("NormalizeFFProbeData() error = %v", err)
+			}
+			if result.Video == nil || result.Video.FrameRate != 24 {
+				t.Fatalf("NormalizeFFProbeData() video = %+v, want 24 fps fallback", result.Video)
 			}
 		})
 	}

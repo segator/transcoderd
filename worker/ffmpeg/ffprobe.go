@@ -291,6 +291,9 @@ func ffProbeFrameRate(ffprobeFrameRate string) (frameRate int, err error) {
 	if err != nil {
 		return 0, err
 	}
+	if rate == 0 {
+		return 0, errors.New("frame rate denominator is zero")
+	}
 	return frameRatio / rate, nil
 }
 

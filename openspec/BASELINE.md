@@ -19,6 +19,10 @@ The specs state observable behavior and the configuration values that affect it.
 | `self-update` | `update/update.go`, `update/managed/`, `cmd/windows-service/updates_windows.go`, `server/web/web.go`, `worker/worker/coordinator.go` |
 | `operations-dashboard` | `frontend/`, `server/web/dashboard*`, `server/repository/dashboard.go`, `model/dashboard.go`, `worker/worker/coordinator.go` |
 
+## Resolved frame-rate parsing regression
+
+The worker previously panicked when FFprobe reported a frame-rate ratio with a zero denominator, violating the source-probing contract and interrupting unrelated jobs. The `handle-zero-frame-rate` change routes that input through the existing 24 fps fallback; regression tests cover parsing and normalization.
+
 ## Known implementation gaps
 
 These observations are not normative requirements. They need separate fixes or explicit product decisions, each with a regression test:

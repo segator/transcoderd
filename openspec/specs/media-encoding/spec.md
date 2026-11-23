@@ -7,7 +7,7 @@ Define the observable video and audio output produced by a worker, the configura
 ## Requirements
 
 ### Requirement: Probe source and output media
-The worker SHALL probe a fully downloaded source before encoding and SHALL probe the encoded file before verification. It SHALL use the first video stream reported for the source and the container duration for duration comparison.
+The worker SHALL probe a fully downloaded source before encoding and SHALL probe the encoded file before verification. It SHALL use the first video stream reported for the source and the container duration for duration comparison. If the reported frame-rate ratio has a zero denominator, it SHALL use the existing 24 fps fallback for progress calculations without terminating the worker.
 
 #### Scenario: Valid downloaded source
 - **WHEN** a source download passes its size and SHA-256 checks
@@ -16,6 +16,10 @@ The worker SHALL probe a fully downloaded source before encoding and SHALL probe
 #### Scenario: Encoded file created
 - **WHEN** the encoder exits successfully
 - **THEN** the worker probes the output and calculates its SHA-256 checksum before verification and upload
+
+#### Scenario: Zero frame-rate denominator
+- **WHEN** FFprobe reports an average frame-rate ratio with a zero denominator
+- **THEN** normalization uses 24 fps for progress calculations and the worker continues
 
 ### Requirement: Video encoder settings
 The worker SHALL map the selected source video stream and select an encoder-specific video profile from `worker.ffmpegConfig.videoCodec`. The registered default SHALL be `av1_nvenc`, with preset `p7`, UHQ tuning, VBR CQ `38`, full-resolution multipass, four B-frames with middle references, disabled split encoding, and QP range `0..100`. `libsvtav1` SHALL use preset `4` and CRF `26` by default. Explicit `libx265` SHALL retain preset `medium`, CRF `21`, and profile `main10` by default.

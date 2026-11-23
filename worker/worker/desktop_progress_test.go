@@ -45,14 +45,14 @@ func TestLocalProgressSnapshotLifecycle(t *testing.T) {
 
 func TestPipelineSnapshotDistinguishesPrefetchedJobs(t *testing.T) {
 	id := uuid.New()
-	ctx := &job.Context{JobId: id, Source: &job.VideoData{OriginalName: "film.mkv", FilePath: "downloaded.mkv"}}
+	ctx := &job.Context{JobId: id, Source: &job.VideoData{OriginalName: "film.mkv", FilePath: "downloaded.mkv", Size: 123456}}
 	e := &JobExecutor{}
 	e.jobs.codec = &config.FFMPEGConfig{VideoCodec: config.AV1SVT}
 	ex := step.NewFFMPEGStepExecutor(&config.FFMPEGConfig{})
 	e.trackPipeline(map[model.NotificationType]*step.Executor{model.FFMPEGSNotification: ex})
 	ex.AddJob(ctx)
 	got := e.jobs.snapshot()
-	if len(got) != 1 || got[0].State != "queued" || !got[0].Downloaded || got[0].Name != "film.mkv" || got[0].Codec != config.AV1SVT || got[0].Profile != "cpu" {
+	if len(got) != 1 || got[0].State != "queued" || !got[0].Downloaded || got[0].Name != "film.mkv" || got[0].Codec != config.AV1SVT || got[0].Profile != "cpu" || got[0].SourceSize != 123456 {
 		t.Fatalf("queued snapshot = %+v", got)
 	}
 	ex.OnJob(ctx)

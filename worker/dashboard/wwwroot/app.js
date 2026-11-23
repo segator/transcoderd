@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 document.body.classList.toggle('browser-host', !window.chrome?.webview);
 const pending = new Map();
 const jobPausePending = new Set();
-let sequence = 0, current = null, dirty = false, shownSetup = false, lastJobs = {cpu:0,gpu:2}, polling = false, selectedFilters = new Set(), lastBrowserLimit = 1, dashboardPromptAllowed = true;
+let sequence = 0, current = null, dirty = false, shownSetup = false, lastJobs = {cpu:0,gpu:2}, polling = false, selectedFilter = 'all', lastBrowserLimit = 1, dashboardPromptAllowed = true;
 let limitDirty=false, limitSaving=false, lastBrowserPair=null;
 let configurationLocked = true, pendingUpdate = null;
 try { pendingUpdate = JSON.parse(localStorage.getItem('transcoderd.pending-update') || 'null'); } catch {}
@@ -93,12 +93,13 @@ function formatDuration(seconds) {
   return `${remainder}s`;
 }
 function formatFrames(value) { return Number(value || 0).toLocaleString('en-US'); }
-function jobProgressText(progress) {
+function jobProgressText(progress, sourceSize) {
   const details = [];
   if ((progress.phase === 'Download' || progress.phase === 'Upload') && progress.total > 0) {
     details.push(`${fileSize(progress.value)} of ${fileSize(progress.total)}`);
     if (progress.phase === 'Download' && progress.bytesPerSecond > 0) details.push(`${fileSize(progress.bytesPerSecond)}/s`);
   } else if (progress.phase === 'FFMPEG') {
+    if (sourceSize > 0) details.push(`Source ${fileSize(sourceSize)}`);
     if (progress.frames > 0) details.push(`${formatFrames(progress.frames)} frames`);
     if (progress.framesPerSecond > 0) details.push(`${progress.framesPerSecond.toFixed(1)} fps`);
     if (progress.encoderSpeed) details.push(progress.encoderSpeed);
@@ -160,8 +161,8 @@ function render(status) {
   $('pause-description').textContent = 'Stop after current holds the queue. Pause encodes suspends active work in RAM. Individual pauses remain independent.';
   $('stat-ready').textContent = worker ? jobs.filter(j => j.downloaded && j.state === 'queued' && j.phase === 'FFMPEG').length : '—';
   $('stat-downloading').textContent = worker ? jobs.filter(j => j.phase === 'Download' && j.state === 'running').length : '—';
-  const visibleJobs = TranscoderDashboard.filterJobs(jobs, selectedFilters);
-  $('local-count').textContent = selectedFilters.size ? `${visibleJobs.length}/${jobs.length}` : jobs.length;
+  const visibleJobs = TranscoderDashboard.filterJobs(jobs, selectedFilter);
+  $('local-count').textContent = selectedFilter !== 'all' ? `${visibleJobs.length}/${jobs.length}` : jobs.length;
   const focusedJob = document.activeElement?.dataset?.jobPause;
   const generalRAMHold = ramPause;
   $('job-list').innerHTML = visibleJobs.length ? visibleJobs.map(j => {
@@ -169,7 +170,8 @@ function render(status) {
     const [label, badge] = jobLabel(j); const name = j.name || p?.name || `Job ${j.jobId.slice(0,8)}`;
     const heldByWorker = Boolean(j.pausedByWorker || generalRAMHold);
     const pct = p ? Math.min(100, Math.max(0, Number(p.percent) || 0)) : 0;
-    let details = j.state === 'paused' ? `${j.individuallyPaused ? (heldByWorker ? 'Paused individually and by worker' : 'Paused individually') : heldByWorker ? 'Paused by worker profile' : 'Encoding suspended'} · progress preserved · RAM/VRAM retained` : p ? jobProgressText(p) : '';
+    let details = j.state === 'paused' ? `${j.individuallyPaused ? (heldByWorker ? 'Paused individually and by worker' : 'Paused individually') : heldByWorker ? 'Paused by worker profile' : 'Encoding suspended'} · progress preserved · RAM/VRAM retained` : p ? jobProgressText(p, j.sourceSize) : '';
+    if (j.phase === 'FFMPEG' && j.state !== 'queued' && j.sourceSize > 0 && (!p || j.state === 'paused')) details = `${details || phaseDescription(j.phase)} · Source ${fileSize(j.sourceSize)}`;
     if (!details && j.state === 'queued') details = j.downloaded && j.phase === 'FFMPEG' ? (ramPause && isPaused ? 'Waiting for Resume queue and Resume encodes' : ramPause ? 'Waiting for Resume encodes · downloaded' : isPaused && worker.paused !== false ? 'Waiting for Resume queue · downloaded' : 'Downloaded and ready to encode') : !j.downloaded && j.phase === 'Download' ? 'Waiting to download' : phaseDescription(j.phase);
     if (!details) details = phaseDescription(j.phase);
     const jobAction = j.canPause && j.phase === 'FFMPEG' ? `<button type="button" class="job-toggle" data-job-pause="${escapeHTML(j.jobId)}" aria-label="${j.individuallyPaused || heldByWorker ? 'Resume' : 'Pause'} encoding ${escapeHTML(name)}" title="${heldByWorker ? 'Resume or enable this worker profile first. Individual pauses are preserved by general Resume.' : j.individuallyPaused ? 'Resume only this encode.' : 'Pause only this encode in RAM; other encodes continue. RAM and VRAM remain allocated.'}" ${configurationLocked || status.pending || heldByWorker || jobPausePending.has(j.jobId) ? 'disabled' : ''}>${jobPausePending.has(j.jobId) ? 'Working…' : j.individuallyPaused || heldByWorker ? '▶ Resume' : 'Ⅱ Pause'}</button>` : '';
@@ -177,9 +179,8 @@ function render(status) {
   }).join('') : jobs.length ? empty('No matching activity', 'Choose another filter or select all activity.') : empty(status.configured ? 'All quiet here' : 'Set up your worker', status.configured ? 'New jobs will appear here automatically.' : 'Configure the connection to get started.');
   if (focusedJob) { const button = [...$('job-list').querySelectorAll('[data-job-pause]')].find(button => button.dataset.jobPause === focusedJob); if (button && !button.disabled) button.focus({preventScroll:true}); }
   const queue = status.queue;
-  $('stat-queue').textContent = queue ? queue.total : '—'; $('queue-count').textContent = queue ? queue.total : '—';
+  $('stat-queue').textContent = queue ? queue.total : '—';
   $('stat-queue-caption').textContent = queue ? 'Awaiting assignment' : 'Unavailable';
-  $('server-queue').innerHTML = queue ? (queue.jobs?.length ? queue.jobs.map((j, i) => `<div class="queue-item"><span class="queue-num">${String(i+1).padStart(2,'0')}</span><div class="queue-info"><div class="queue-name" title="${escapeHTML(j.name)}">${escapeHTML(j.name)}</div><div class="queue-meta">${escapeHTML(fileSize(j.size) ? `Awaiting assignment · ${fileSize(j.size)}` : 'Awaiting assignment')}</div></div><span class="badge ready">Queued</span></div>`).join('') : empty('Queue empty','There are no jobs waiting to be assigned.',true)) : empty('Queue unavailable',status.queueError === 'unsupported' ? 'Update the server to view its queue.' : 'The queue will appear when the server is available.',true);
   const notice = !status.configured ? 'Configure the connection to start your worker.' : status.pending ? 'Changes are pending and will be applied when current jobs finish.' : status.message || (ramPause ? `Encoding is paused in RAM; RAM and VRAM remain allocated. ${isPaused ? 'The queue is also stopped.' : 'The queue will reopen when encoding resumes.'} Worker exit or PC restart loses live encoder state.` : isPaused ? 'The queue is stopped. Running encodes and uploads can finish; queued encodes wait for Resume queue.' : worker?.suspendedEncodes > 0 ? `${worker.suspendedEncodes} encoding(s) paused individually in RAM. Other work can continue.` : worker?.withinSchedule === false ? 'Outside the work schedule. New assignments resume during the next window.' : '');
   $('notice').classList.toggle('hidden', !notice); $('notice-text').textContent = notice; $('notice-start').classList.add('hidden'); $('notice-settings').classList.remove('hidden');
   $('shutdown-pending').hidden = !status.shutdownPending;
@@ -271,11 +272,12 @@ $('toggle-encodes').addEventListener('click',async () => {
  catch(error) { toast(error.message); }
 });
 document.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => {
-  const filter = button.dataset.filter;
-  if (filter === 'all') selectedFilters.clear();
-  else if (selectedFilters.has(filter)) selectedFilters.delete(filter);
-  else selectedFilters.add(filter);
-  document.querySelectorAll('[data-filter]').forEach(chip => chip.classList.toggle('active', chip.dataset.filter === 'all' ? selectedFilters.size === 0 : selectedFilters.has(chip.dataset.filter)));
+  selectedFilter = button.dataset.filter;
+  document.querySelectorAll('[data-filter]').forEach(chip => {
+    const active = chip.dataset.filter === selectedFilter;
+    chip.classList.toggle('active', active);
+    chip.setAttribute('aria-pressed', String(active));
+  });
   if (current) render(current);
 }));
 $('show-token').addEventListener('click', () => { if (!configurationLocked) $('token').type = $('token').type === 'password' ? 'text' : 'password'; });

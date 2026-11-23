@@ -55,6 +55,7 @@ type JobState struct {
 	Phase              string `json:"phase"`
 	State              string `json:"state"`
 	Downloaded         bool   `json:"downloaded"`
+	SourceSize         int64  `json:"sourceSize,omitempty"`
 }
 
 type TaskProgress struct {

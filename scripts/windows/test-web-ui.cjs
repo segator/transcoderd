@@ -9,8 +9,9 @@ function element(id) {
   if (!elements.has(id)) elements.set(id, {id, textContent:'', innerHTML:'', value:'', disabled:false, dataset:{},style:{},handlers:{},classList:{add(){}, remove(){}, toggle(){}}, addEventListener(name,callback){this.handlers[name]=callback;}});
   return elements.get(id);
 }
-const filterButtons = ['all','encoding','downloading','uploading','preparation'].map(filter => ({
+const filterButtons = ['all','encoding','prefetch','downloading','uploading','preparation'].map(filter => ({
   dataset:{filter}, classList:{add(){}, remove(){}, toggle(){}},
+  setAttribute(name, value) { this[name] = value; },
   addEventListener(_name, callback) { this.callback = callback; },
   click() { this.callback?.(); }
 }));
@@ -27,7 +28,7 @@ vm.runInContext(fs.readFileSync(`${assetRoot}/app.js`, 'utf8'), context);
 const originalQueueClick=element('toggle-pause').handlers.click,originalRAMClick=element('toggle-encodes').handlers.click;
 
 context.render({version:'2.8.2-test',configured:true,worker:{maxActiveJobs:0,maxEncodes:1,activeEncodes:1,jobs:[
-  {jobId:'1',name:'<img src=x onerror=alert(1)>',phase:'FFMPEG',state:'running',downloaded:true,profile:'gpu',codec:'av1_nvenc'},
+  {jobId:'1',name:'<img src=x onerror=alert(1)>',phase:'FFMPEG',state:'running',downloaded:true,sourceSize:2*1024**3,profile:'gpu',codec:'av1_nvenc'},
   {jobId:'2',name:'film.mkv',phase:'Download',state:'running'},
   {jobId:'3',name:'encoded.mkv',phase:'Upload',state:'running'}
 ],progress:[
@@ -40,7 +41,9 @@ assert.match(element('connection').innerHTML, /Queue stopped/);
 assert.match(element('notice-text').textContent, /queued encodes wait/);
 assert.equal(element('stat-encoding').textContent, 1);
 assert.ok(!element('job-list').innerHTML.includes('<img'), 'job titles must be escaped');
-assert.ok(!element('server-queue').innerHTML.includes('<script>'), 'server titles must be escaped');
+assert.equal(element('stat-queue').textContent, 1, 'server queue count remains visible');
+assert.doesNotMatch(fs.readFileSync(`${assetRoot}/index.html`, 'utf8'), /id="server-queue"/, 'server queue list is removed');
+assert.match(element('job-list').innerHTML, /Source 2\.0 GB/, 'encode shows source size');
 assert.match(element('job-list').innerHTML, /25%/);
 assert.match(element('app-version').textContent, /2\.8\.2-test/);
 assert.match(element('job-list').innerHTML, /GPU · NVENC · AV1/);
@@ -56,18 +59,27 @@ assert.match(element('connection').innerHTML,/Finishing accepted work/);
 assert.equal(element('toggle-pause').disabled,true,'maintenance drain cannot be bypassed with Resume');
 context.render({configured:true,worker:{maxActiveJobs:5,paused:false,maxEncodes:5,activeEncodes:7,jobs:[],progress:[]}});
 assert.equal(element('stat-encoding').textContent,7,'encodes above a lowered target must not be hidden');
-context.render({configured:true,worker:{maxActiveJobs:2,jobs:[{jobId:'1',name:'encoded.mkv',phase:'FFMPEG',state:'running'},{jobId:'2',name:'film.mkv',phase:'Download',state:'running'}],progress:[]}});
+context.render({configured:true,worker:{maxActiveJobs:2,jobs:[{jobId:'1',name:'encoded.mkv',phase:'FFMPEG',state:'running'},{jobId:'2',name:'film.mkv',phase:'Download',state:'running'},{jobId:'3',name:'prefetched.mkv',phase:'FFMPEG',state:'queued'}],progress:[]}});
 filterButtons[1].click();
-assert.ok(!element('job-list').innerHTML.includes('film.mkv'), 'encoding filter should hide downloads');
+assert.match(element('job-list').innerHTML, /encoded.mkv/);
+assert.doesNotMatch(element('job-list').innerHTML, /film.mkv|prefetched.mkv/, 'encoding excludes downloads and prefetched jobs');
 filterButtons[2].click();
-assert.ok(element('job-list').innerHTML.includes('film.mkv'), 'multiple activity filters should combine');
+assert.match(element('job-list').innerHTML, /prefetched.mkv/);
+assert.doesNotMatch(element('job-list').innerHTML, /encoded.mkv|film.mkv/, 'prefetch excludes other categories');
+assert.equal(filterButtons[1]['aria-pressed'], 'false');
+assert.equal(filterButtons[2]['aria-pressed'], 'true');
+filterButtons[3].click();
+assert.match(element('job-list').innerHTML, /film.mkv/);
+assert.doesNotMatch(element('job-list').innerHTML, /encoded.mkv|prefetched.mkv/, 'filters are exclusive');
 filterButtons[0].click();
-assert.ok(element('job-list').innerHTML.includes('film.mkv'), 'all activity should clear the filters');
+assert.match(element('job-list').innerHTML, /encoded.mkv/);
+assert.match(element('job-list').innerHTML, /prefetched.mkv/);
+assert.match(element('job-list').innerHTML, /film.mkv/);
 
 context.render({configured:true,worker:{maxActiveJobs:2,maxEncodes:2,activeEncodes:0,jobs:[{jobId:'3',name:'ready.mkv',phase:'FFMPEG',state:'queued',downloaded:true}],progress:[]},queueError:'unsupported'});
 assert.match(element('toggle-pause').textContent, /Stop after current/);
 assert.equal(element('stat-ready').textContent, 1);
-assert.match(element('server-queue').innerHTML, /Update the server/);
+assert.equal(element('stat-queue').textContent, '—', 'unsupported server queue has no count');
 context.render({configured:true,worker:{maxActiveJobs:2,maxEncodes:2,activeEncodes:0,withinSchedule:false,jobs:[],progress:[]}});
 assert.match(element('connection').innerHTML, /Outside schedule/);
 assert.match(element('notice-text').textContent, /Outside the work schedule/);

@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.17.0](https://github.com/segator/transcoderd/compare/v2.16.0...v2.17.0) (2026-11-23)
+
+
+### 🎉 Features
+
+* focus worker dashboard on local activity ([#241](https://github.com/segator/transcoderd/issues/241)) ([e1c4d79](https://github.com/segator/transcoderd/commit/e1c4d7904c2a1d9d764bb8580a525e89a51e1a76))
+
+
+### 🐛 Bug Fixes
+
+* preserve work during event delivery failures ([#237](https://github.com/segator/transcoderd/issues/237)) ([dc49bf7](https://github.com/segator/transcoderd/commit/dc49bf7e1cf511b94b8435789d1e45883c9410a0))
+* recover stalled FFmpeg encodes ([#240](https://github.com/segator/transcoderd/issues/240)) ([b83ec6d](https://github.com/segator/transcoderd/commit/b83ec6da4b22ef9f500dcaf8c4cc641320f41303))
+* **worker:** handle zero frame rate denominator ([#239](https://github.com/segator/transcoderd/issues/239)) ([56538e6](https://github.com/segator/transcoderd/commit/56538e60c743f8259e6a0e05d9d7de385dc088a8))
+
 ## [2.16.0](https://github.com/segator/transcoderd/compare/v2.15.1...v2.16.0) (2026-11-19)
 
 

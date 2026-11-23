@@ -481,6 +481,11 @@ func TestVerifyFailureMessage(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "stalled encoder retries",
+			message: "FFmpeg made no video progress for 15 minutes on two attempts",
+			want:    true,
+		},
+		{
 			name:    "i/o timeout retries",
 			message: "i/o timeout connecting to server",
 			want:    true,

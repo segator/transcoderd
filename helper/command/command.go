@@ -27,6 +27,7 @@ type Command struct {
 	buffSize        int
 	pauseController *PauseController
 	pauseKey        string
+	onStarted       func()
 }
 
 func NewAllowedCodesOption(codes ...int) Option {
@@ -91,6 +92,12 @@ func (c *Command) SetPauseController(controller *PauseController, key ...string)
 	return c
 }
 
+// SetOnStarted runs after the process has started and joined its process group.
+func (c *Command) SetOnStarted(callback func()) *Command {
+	c.onStarted = callback
+	return c
+}
+
 func (c *Command) Run(opt ...Option) (exitCode int, err error) {
 	return c.RunWithContext(context.Background(), opt...)
 }
@@ -148,6 +155,9 @@ func (c *Command) RunWithContext(ctx context.Context, opt ...Option) (exitCode i
 			_ = cmd.Wait()
 			return -1, err
 		}
+	}
+	if c.onStarted != nil {
+		c.onStarted()
 	}
 	if ctx.Err() != nil {
 		_ = cmd.Cancel()

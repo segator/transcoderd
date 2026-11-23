@@ -996,6 +996,7 @@ func verifyFailureMessage(message string) bool {
 	// A stream listing, an unsupported-codec warning or FFmpeg's generic
 	// encoder-parameter hint does not establish a recoverable cause.
 	for _, transient := range []string{
+		"ffmpeg made no video progress for 15 minutes on two attempts",
 		"disk quota exceeded", "no space left on device",
 		"download code 500", "dowload code 500", "checksum error on download source",
 		"received signal 15", "no such host", "server misbehaving", "i/o timeout",

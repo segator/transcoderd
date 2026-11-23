@@ -102,6 +102,8 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 	ffmpegGenerator.setSubtFilters(jobContext.Source.FFProbeData)
 	ffmpegErrLog := ""
 	var started atomic.Bool
+	var progressFrame atomic.Int64
+	var progressTime atomic.Int64
 
 	checkPercentageFFMPEG := func(buffer []byte, exit bool) {
 		ffmpegErrLog += string(buffer)
@@ -115,6 +117,12 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 		s := cfg.Section("")
 		if frame, frameErr := s.Key("frame").Int64(); frameErr == nil && frame > 0 {
 			started.Store(true)
+		}
+		if frame, err := s.Key("frame").Int64(); err == nil {
+			storeMaximum(&progressFrame, frame)
+		}
+		if outTime, err := s.Key("out_time_ms").Int64(); err == nil {
+			storeMaximum(&progressTime, outTime)
 		}
 		progress := s.Key("progress").String()
 		if progress == "continue" {
@@ -147,10 +155,45 @@ func (f *FFMPEGStepExecutor) ffmpeg(ctx context.Context, logger console.LeveledL
 	targetPath := filepath.Join(jobContext.WorkingDir, encodedFilePath)
 
 	run := func() (int, error) {
-		args := ffmpegGenerator.buildArguments(uint8(profile.Threads), profile.ExtraArgs, targetPath)
-		cmd := command.NewCommand(helper.GetFFmpegPath(), args...).SetPauseController(f.pauseController, jobContext.JobId.String())
-		logger.Cmdf("FFMPEG Command: %s", cmd.GetFullCommand())
-		return cmd.SetWorkDir(jobContext.WorkingDir).SetStdoutFunc(stdoutFFMPEG).SetStderrFunc(checkPercentageFFMPEG).RunWithContext(ctx)
+		for attempt := 0; ; attempt++ {
+			progressFrame.Store(0)
+			progressTime.Store(0)
+			attemptCtx, cancel := context.WithCancel(ctx)
+			startedCh := make(chan struct{})
+			done := make(chan struct{})
+			watchDone := make(chan bool, 1)
+			go func() {
+				watchDone <- watchEncodeProgress(attemptCtx, startedCh, done, 15*time.Minute,
+					func() (int64, int64, bool) {
+						paused := false
+						if f.pauseController != nil {
+							paused = f.pauseController.PauseStates()[jobContext.JobId.String()].Paused
+						}
+						return progressFrame.Load(), progressTime.Load(), paused
+					}, cancel)
+			}()
+			args := ffmpegGenerator.buildArguments(uint8(profile.Threads), profile.ExtraArgs, targetPath)
+			cmd := command.NewCommand(helper.GetFFmpegPath(), args...).SetPauseController(f.pauseController, jobContext.JobId.String())
+			logger.Cmdf("FFMPEG Command: %s", cmd.GetFullCommand())
+			exitCode, err := cmd.SetWorkDir(jobContext.WorkingDir).SetOnStarted(func() { close(startedCh) }).SetStdoutFunc(stdoutFFMPEG).SetStderrFunc(checkPercentageFFMPEG).RunWithContext(attemptCtx)
+			close(done)
+			stalled := <-watchDone
+			cancel()
+			if !stalled || ctx.Err() != nil {
+				return exitCode, err
+			}
+			if attempt >= 1 {
+				ffmpegErrLog = ""
+				return -1, fmt.Errorf("FFmpeg made no video progress for 15 minutes on two attempts")
+			}
+			logger.Warnf("FFmpeg made no video progress for 15 minutes; restarting this encode")
+			ffmpegErrLog = ""
+			started.Store(false)
+			select {
+			case ffmpegProgressChan <- ffmpegProgress{}:
+			default:
+			}
+		}
 	}
 	exitCode, err := run()
 	hardwareErrLog := ""

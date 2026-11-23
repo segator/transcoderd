@@ -38,6 +38,7 @@ func (r *jobRegistry) set(jobContext *job.Context, phase model.NotificationType,
 	item := control.JobState{JobID: jobContext.JobId.String(), Phase: string(phase), State: state, Codec: codec, Profile: encoderProfile(codec)}
 	if jobContext.Source != nil {
 		item.Name = jobContext.Source.OriginalName
+		item.SourceSize = jobContext.Source.Size
 		item.Downloaded = jobContext.Source.FilePath != ""
 	}
 	r.mu.Lock()
